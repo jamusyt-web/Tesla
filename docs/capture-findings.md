@@ -33,3 +33,13 @@ VCLEFT master's poll). To inject we must control that response:
 Both need the transmit side (NPN driver) reconnected. TODO: capture one clean
 full `0x26` frame + confirm checksum type (enhanced vs classic) before building
 the responder.
+
+## CONFIRMED full frame (checksum-verified)
+
+```
+0x26  PID=0xA6  ENHANCED  7 data bytes:  5E 00 10 08 5D 9A 00   checksum=EA
+```
+
+- Enhanced checksum recomputed independently → 0xEA. Match confirmed.
+- Idle byte1 = 0x00. Volume up = byte1 0x40, down = byte1 0xC0 (byte2 0x10->0x0F on down).
+- Bytes 4-5 (5D 9A) = rolling counter.

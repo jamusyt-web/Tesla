@@ -23,7 +23,7 @@
 #define TICKS_BYTE_INDEX  1            // CONFIRMED: byte 1 = scroll (0x40 up, 0xC0 down, 0x00 idle)
 #define TICKS_BIT_SHIFT   0            // bit position within that byte
 #define TICKS_BIT_WIDTH   6            // signed field width
-#define RESPONSE_NBYTES   8            // response data length (excl. checksum)
+#define RESPONSE_NBYTES   7            // CONFIRMED: 7 data bytes + enhanced checksum
 
 // Checksum type: enhanced (LIN 2.x, includes PID) or classic (LIN 1.x).
 #define LIN_CHECKSUM_ENHANCED 1        // 1 = enhanced, 0 = classic — TODO verify
@@ -31,8 +31,8 @@
 // If your captured response has other non-zero bytes (mux index, buttons, etc.),
 // set them here so VCLEFT sees a valid frame. Index 0..RESPONSE_NBYTES-1.
 // Example: the DBC mux selector VCLEFT_switchStatusIndex == 1 lives in byte 0.
-static const unsigned char RESPONSE_TEMPLATE[8] = {
-  0x01, 0, 0, 0, 0, 0, 0, 0        // TODO: set from capture (byte0=mux=1?)
+static const unsigned char RESPONSE_TEMPLATE[7] = {
+  0x5E, 0x00, 0x10, 0x08, 0x5D, 0x9A, 0x00  // CONFIRMED idle 0x26 frame; byte1=0x40 up / 0xC0 down
 };
 
 // ---- Timing --------------------------------------------------------------
