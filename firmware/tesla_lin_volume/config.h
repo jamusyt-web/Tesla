@@ -15,12 +15,12 @@
 
 // The 6-bit LIN frame ID (0x00..0x3F) of the scroll/switch response frame.
 // This is the ID *without* the two parity bits. Read it from your capture.
-#define SCROLL_FRAME_ID   0x00         // TODO: set from capture
+#define SCROLL_FRAME_ID   0x26           // CONFIRMED: steering-wheel switch frame
 
 // Where the left-scroll tick value lives in the response and how it's packed.
 // Defaults mirror the community DBC (bit offset 16 => byte 2, 6-bit signed),
 // but VERIFY against your capture before trusting them.
-#define TICKS_BYTE_INDEX  2            // TODO: verify (bit16 => byte 2)
+#define TICKS_BYTE_INDEX  1            // CONFIRMED: byte 1 = scroll (0x40 up, 0xC0 down, 0x00 idle)
 #define TICKS_BIT_SHIFT   0            // bit position within that byte
 #define TICKS_BIT_WIDTH   6            // signed field width
 #define RESPONSE_NBYTES   8            // response data length (excl. checksum)
