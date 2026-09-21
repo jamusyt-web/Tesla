@@ -29,6 +29,7 @@ void setup(){
   cfg.stop_bits=UART_STOP_BITS_1; cfg.flow_ctrl=UART_HW_FLOWCTRL_DISABLE; cfg.source_clk=UART_SCLK_APB;
   uart_driver_install(PORT,2048,0,40,&uartQ,0); uart_param_config(PORT,&cfg);
   uart_set_pin(PORT,LIN_TX_PIN,LIN_RX_PIN,UART_PIN_NO_CHANGE,UART_PIN_NO_CHANGE);
+  uart_set_line_inverse(PORT,UART_SIGNAL_TXD_INV);  // keep transistor OFF while listening
   Serial.println("CATALOG: each PID listed once.");
 }
 void loop(){
