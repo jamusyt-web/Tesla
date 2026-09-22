@@ -1,0 +1,231 @@
+# Tesla Wheel-Control Injector — Product Design
+
+**Status:** design locked (2026-09) · supersedes the LIN-at-the-wheel relay for the
+product goal. The LIN relay still works on a single Model 3 and is kept in the repo
+as a reference build, but it is **not** the product architecture.
+
+---
+
+## 1. The decision (TL;DR)
+
+Build the device as a **CAN-bus injector that plugs into the car's diagnostic /
+CAN connector** — not a LIN tap at the steering wheel.
+
+- **One electronics core for every model:** ESP32 (built-in CAN/TWAI controller) +
+  a CAN transceiver.
+- **What changes per model is *not* the chip** — it is (a) a **wiring adapter** for
+  that car's connector, and (b) a **firmware profile** (the scroll message's CAN ID
+  and bit layout). One genuine hardware fork exists: the newest **DoIP/Ethernet-only**
+  ports (see §9).
+- **Volume test goal** (up one notch / 10 s, down one notch / 10 s) is achieved by
+  transmitting the steering-wheel **scroll-tick** message on the **Vehicle CAN bus**
+  and letting the car's own logic change the volume.
+
+This is exactly how every modern commercial equivalent works (see §8).
+
+---
+
+## 2. Why CAN, not LIN — the reasoning
+
+We proved on the bench that we can read the wheel's LIN bus and even impersonate the
+module, but VCLEFT would not *act* on an emulated scroll, and a LIN relay requires
+cutting a wire **next to a live airbag** and a two-transceiver MITM. More importantly,
+LIN-at-the-wheel **cannot become a product that fits all Teslas**:
+
+| Problem with LIN-at-the-wheel | Consequence |
+|---|---|
+| Airbag-adjacent teardown on every car | Dangerous, slow, model-specific |
+| Capacitive buttons (Highland Model 3, refreshed S/X) | No mechanical scroll module to tap the same way |
+| Yoke / steer-by-wire (S/X Plaid, Cybertruck) | Wheel electronics are entirely different |
+| Per-model LIN framing & connector | A new relay design for every car |
+
+The key insight: **no matter how the physical switch works** — mechanical scroll,
+capacitive pad, yoke, or steer-by-wire — the body controller always **re-broadcasts
+the result on the Vehicle CAN bus** as a switch-status message. Injecting *there* is:
+
+- **Model-agnostic** (only the message ID/layout changes → a firmware table),
+- **Airbag-free and solder-free** (plug into an existing connector),
+- **Lower-risk than the nag-killers** (we send a *benign* scroll frame, never steering
+  torque — the torque hack `0x370` is what caused the reported emergency-braking events),
+- and it **lets the car build the final action itself**, so we never fight the
+  infotainment directly.
+
+---
+
+## 3. The target signal
+
+| Item | Value |
+|---|---|
+| Bus | **Vehicle CAN**, 500 kbit/s |
+| Message (Model 3/Y) | `0x3C2` `VCLEFT_switchStatus`, multiplexed |
+| Mux gate | `VCLEFT_switchStatusIndex == 1` (scroll data present) |
+| Left scroll (volume) | `VCLEFT_swcLeftScrollTicks` — bit 16, 6-bit **signed** delta |
+| Right scroll | `VCLEFT_swcRightScrollTicks` — bit 24, 6-bit signed delta |
+| Meaning | `+1` = up one notch, `-1` = down one notch, `0` = no movement |
+| Integrity fields | **None** — the `*_switchStatus` messages carry **no counter/CRC** |
+
+The absence of a rolling counter or checksum (confirmed against the symmetric
+`0x3C3 VCRIGHT_switchStatus` in the community DBC, which has no `Counter`/`Checksum`/
+`CRC` signals) means an injected frame does **not** have to satisfy an integrity
+check — a major feasibility win.
+
+---
+
+## 4. Access points (where to plug in), by model
+
+Vehicle CAN is reachable **without cutting anything**. Exact pins vary by build, so
+**always oscilloscope- or meter-verify before powering the transmitter.**
+
+| Model / year | Connector | Vehicle-CAN pins | 12 V / GND | Notes |
+|---|---|---|---|---|
+| Model 3 2017–2018 | white/black diag connector, driver footwell | via adapter (early "no OBD" cars) | from harness | Use a known Model 3 diagnostic pigtail |
+| Model 3 2019 (pre-facelift) | **X052** | pins 44/45 (CAN) | 20/22 | Different connector than later cars |
+| Model 3 2019+ / Model Y | 26-pin diag connector (driver footwell) | **18 / 19** (CAN-H / CAN-L) | present | Most common, cheap adapters exist |
+| Model 3/Y (2021–2023) | **X179** (passenger kick panel) | Bus 2 on 9/10; Chassis on 18/19 | pin 1 = +12 V, pin 20 = GND | Multi-bus + power in one plug |
+| Model 3/Y post-Apr-2024 (26-pin) | X179 26-pin | **only 18/19 works**; 9/10 & 12/13 are **DoIP/Ethernet** | 15 = +12 V, 26 = GND | **Verify — do not assume old layout** |
+| Model S/X 2012–2020 | Tesla diagnostic connector | per wk057 deciphering | present | Older CAN map |
+| Model S/X refresh (yoke) | diag connector | profile TBD | present | Capacitive + scroll; message set differs |
+| Cybertruck | diag connector | profile TBD | present | Steer-by-wire; message set differs |
+| 2025+ "Standard" 3/Y & DoIP-only | Ethernet/DoIP | **not CAN** | — | **Needs the DoIP hardware variant (§9)** |
+
+Preferred point for Model 3/Y: the **driver-footwell diagnostic connector, Vehicle
+CAN on pins 18/19** (this is where scan tools and comma.ai harnesses attach), or
+**X179** if 12 V from the same plug is convenient.
+
+---
+
+## 5. Hardware architecture (one core, small adapters)
+
+```
+   Tesla CAN (H/L) ── [CAN transceiver] ── ESP32 TWAI (RX/TX) ── firmware
+        │                 SN65HVD230                 │
+   12 V ┴─ [12→5 V buck] ─────────────────────────── 5 V in
+```
+
+**Bill of materials (core, ~$20):**
+
+| Part | Example | Why |
+|---|---|---|
+| ESP32 dev board | ESP32-WROOM DevKit (already owned) | Built-in **TWAI** CAN controller — no MCP2515 needed |
+| CAN transceiver | **SN65HVD230** breakout (3.3 V) | Direct ESP32-logic-level; TJA1051 (5 V) also fine w/ level care |
+| 12→5 V buck | any 2 A automotive buck | Powers ESP32 from the car's 12 V |
+| Wiring adapter | model-specific diag/X179 pigtail | The only per-model *hardware* piece |
+
+**Termination:** the vehicle CAN is already terminated (120 Ω at each end). This is a
+**stub tap**, so **remove/disable the 120 Ω resistor** many SN65HVD230 boards ship with,
+or the bus is over-terminated.
+
+Alternative single-box boards with the transceiver already integrated: **LILYGO
+T-CAN485**, **Waveshare ESP32-S3-CAN**, **M5Stack ATOM + ATOMIC CAN** — any of these
+replaces the ESP32+SN65HVD230 pair.
+
+---
+
+## 6. Firmware: one binary, per-model profiles
+
+The firmware is model-independent; a **profile table** holds what differs:
+
+```c
+typedef struct {
+  const char* name;        // "Model3_2019_2023"
+  uint32_t    scroll_id;   // 0x3C2
+  uint8_t     mux_byte, mux_shift, mux_value;   // switchStatusIndex == 1
+  uint8_t     left_start_bit, left_len;         // 16, 6  (signed)
+  bool        signed_field;
+  uint16_t    tx_period_ms; // how the car expects the frame cadence
+} scroll_profile_t;
+```
+
+Boot flow:
+
+1. **Listen only** for N seconds. Confirm we see the profile's `scroll_id` at ~50 Hz.
+2. Auto-select / confirm the profile (or let the user pick).
+3. Run the 10 s state machine: emit one frame with `ticks=+1`, ten seconds later one
+   with `ticks=-1`, repeat. Every other frame carries `ticks=0`.
+
+Per-model profiles ship as a table; adding a car = adding a row after a short capture,
+never new hardware.
+
+---
+
+## 7. Injection method, contention, and safety
+
+**Method.** Scroll ticks are *deltas*, so moving the volume one notch = getting the
+receiver to see **one** `0x3C2` frame with `swcLeftScrollTicks = +1`. VCLEFT is already
+transmitting `0x3C2` continuously with `ticks = 0`.
+
+**Contention (the one real hazard).** Two nodes transmitting the same CAN ID can collide
+in the arbitration/data phase and produce error frames. Mitigations, in order:
+
+1. **Rely on standard CAN behavior first.** A controller only starts sending on an idle
+   bus and auto-retries on error; a single benign frame slipped in is what every
+   commercial module already does successfully.
+2. **Phase the injection** — transmit just after we *see* VCLEFT's `0x3C2`, into the
+   gap before its next one, to minimize same-ID overlap.
+3. **Never target safety IDs.** We only ever transmit the scroll `switchStatus` ID.
+   We do **not** touch `0x370` EPAS torque or any steering/brake message — that is the
+   line that caused the reported AEB events in the torque-based nag-killers.
+
+**Safety guardrails baked into firmware:**
+
+- **Listen-first**; refuse to transmit until the expected scroll ID is observed.
+- **Allow-list of exactly one TX ID**; everything else is read-only.
+- **Park-only test mode** for first bring-up; no transmission above 0 mph until proven.
+- Reading the bus is always passive and safe.
+
+---
+
+## 8. Commercial precedent (evidence this works)
+
+- **Modern nag modules (TSL6, tlyard/evooor/teslaunch/AFA):** newest versions install
+  at the **OBD/diagnostic connector**, not the wheel, and "trigger the volume every
+  5–10 s, simulating hand rolling of the wheel" — i.e. CAN scroll injection, plug-in,
+  no teardown. Advertised for Model 3/Y/S/X and Cybertruck.
+- **Enhauto S3XY Buttons + Commander:** a commercial **CAN device** that injects control
+  commands across **Model S/3/X/Y**; the vendor updates firmware when Tesla changes IDs.
+  This is the exact "one CAN core + per-model firmware profiles" architecture, shipping
+  at scale. (Notably **not** compatible with the 2025+ cost-reduced "Standard" 3/Y — a
+  real example that some variants need a separate profile/interface.)
+- **Open-source `hypery11/flipper-tesla-fsd`:** ESP32/Flipper CAN nag-killer; documents
+  X179/OBD pinouts, 500 kbit/s, and an experimental `0x3C2` scroll-press feature — the
+  same signal we target.
+
+---
+
+## 9. Risks & open questions (per model)
+
+- **DoIP/Ethernet ports (2024+ Juniper, some post-Apr-2024, 2025+ Standard):** these are
+  **not CAN**. A CAN adapter will not talk to them. This is the **one true hardware
+  variant**: a DoIP/Ethernet interface (or tapping Vehicle CAN at a different physical
+  point that still exists on those cars). Flagged, not yet designed.
+- **S/X refresh & Cybertruck message IDs:** the scroll `switchStatus` equivalent ID/layout
+  is not yet captured; needs a short sniff per platform to fill the profile table.
+- **Firmware-version drift:** Tesla occasionally renumbers/moves signals; the listen-first
+  step detects a missing profile instead of transmitting blind.
+- **Contention faults:** must validate on-car that phased injection produces zero
+  persistent bus errors before calling any profile "flawless."
+
+---
+
+## 10. Roadmap
+
+1. **Order** an SN65HVD230 CAN transceiver + a Model 3 diagnostic/X179 pigtail.
+2. **Bench:** ESP32 TWAI + transceiver; loopback self-test at 500 kbit/s.
+3. **Car (Model 3, listen-only):** confirm `0x3C2` at ~50 Hz on Vehicle CAN (pins 18/19).
+4. **Car (inject, parked):** send one `+1` scroll frame; confirm volume moves one notch;
+   then run the 10 s up/down loop.
+5. **Generalize:** capture the scroll profile on Y / S / X / Cybertruck; fill the profile
+   table. Design the DoIP variant for Ethernet-only cars.
+
+---
+
+## 11. Sources
+
+- Community DBC: <https://github.com/joshwardell/model3dbc/blob/master/Model3CAN.dbc>
+- Open-source CAN nag-killer + pinouts: <https://github.com/hypery11/flipper-tesla-fsd>
+- Tesla diagnostic port pinouts (Vehicle CAN 18/19): Tesla Owners Online "Diagnostic Port
+  and Data Access" thread; TMC "OBD II Connector PinOUT List".
+- X179 service reference: <https://service.tesla.com/docs/Model3/ElectricalReference/prog-233/connector/x179/>
+- Enhauto S3XY Buttons/Commander: <https://www.enhauto.com/pages/buttons>
+- Commercial nag modules (install location & behavior): tlyard / evooor / teslaunch / AFA-Motors listings.
+- Model S CAN deciphering (wk057): <https://skie.net/uploads/TeslaCAN/>
