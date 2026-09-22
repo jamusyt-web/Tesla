@@ -8,47 +8,63 @@ as a reference build, but it is **not** the product architecture.
 
 ## 1. The decision (TL;DR)
 
-Build the device as a **CAN-bus injector that plugs into the car's diagnostic /
-CAN connector** — not a LIN tap at the steering wheel.
+Two architectures are viable. **The deciding factor is the connector**, and a field
+observation settles it: **the steering-wheel controls harness/connector is common across
+Tesla models, while the diagnostic/OBD connectors are not.** That makes a universal
+*wheel-side* product possible — the one thing the CAN route can't offer.
 
-- **One electronics core for every model:** ESP32 (built-in CAN/TWAI controller) +
-  a CAN transceiver.
-- **What changes per model is *not* the chip** — it is (a) a **wiring adapter** for
-  that car's connector, and (b) a **firmware profile** (the scroll message's CAN ID
-  and bit layout). One genuine hardware fork exists: the newest **DoIP/Ethernet-only**
-  ports (see §9).
-- **Volume test goal** (up one notch / 10 s, down one notch / 10 s) is achieved by
-  transmitting the steering-wheel **scroll-tick** message on the **Vehicle CAN bus**
-  and letting the car's own logic change the volume.
+**Primary architecture — universal steering-wheel passthrough (inline LIN relay):**
 
-This is exactly how every modern commercial equivalent works (see §8).
+- The device plugs **inline at the steering-wheel controls connector**: clockspring side
+  ↔ [ESP32] ↔ real switch module. It keeps the real module and **overwrites only the
+  scroll byte** as each LIN frame passes (the relay already under construction here).
+- **One connector SKU for every car**, because the wheel harness is shared — the
+  mass-production unlock. LIN is confirmed the universal steering-wheel-control protocol.
+- Reliable: the car's own body controller builds the final CAN frame, so there is no CAN
+  contention and we never sit on a safety bus.
+
+**Alternative — CAN injector at the diagnostic plug** (kept in §7–§9): far easier to
+install (no wheel teardown) but needs a *family* of connector adapters and uses
+contention-based injection on a shared bus. This is the "don't want to open the wheel"
+option, not the mass-market one.
+
+**Common to both:** one ESP32-class core + one firmware binary with a **per-model profile
+table** (which byte/ID carries the scroll). Adding a car = a profile row, not new silicon.
+The one genuine hardware fork remains the newest **DoIP/Ethernet-only** cars (§9).
 
 ---
 
-## 2. Why CAN, not LIN — the reasoning
+## 2. Why the wheel passthrough is the product
 
-We proved on the bench that we can read the wheel's LIN bus and even impersonate the
-module, but VCLEFT would not *act* on an emulated scroll, and a LIN relay requires
-cutting a wire **next to a live airbag** and a two-transceiver MITM. More importantly,
-LIN-at-the-wheel **cannot become a product that fits all Teslas**:
+An earlier draft of this doc favored CAN, for two reasons that are now resolved:
 
-| Problem with LIN-at-the-wheel | Consequence |
-|---|---|
-| Airbag-adjacent teardown on every car | Dangerous, slow, model-specific |
-| Capacitive buttons (Highland Model 3, refreshed S/X) | No mechanical scroll module to tap the same way |
-| Yoke / steer-by-wire (S/X Plaid, Cybertruck) | Wheel electronics are entirely different |
-| Per-model LIN framing & connector | A new relay design for every car |
+1. **"A wheel tap can't be mass-produced (a new connector per car)."** Wrong — the
+   steering-wheel controls harness/connector is **shared across the lineup** (field-
+   observed; corroborated by common SCCM parts in the Model 3 and Y service manuals,
+   steering-wheel hardware listed fitting 3/Y/S/X/Cybertruck, and a **private LIN bus to
+   the body controller on every model**). One passthrough harness fits all → **one SKU**.
+2. **"Emulating the module didn't move the volume."** Right — which is why the method is
+   the **relay, not emulation**: keep the real module in the loop and flip only the scroll
+   byte in transit, so every "living" byte the module produces stays genuine and the body
+   controller acts on it.
 
-The key insight: **no matter how the physical switch works** — mechanical scroll,
-capacitive pad, yoke, or steer-by-wire — the body controller always **re-broadcasts
-the result on the Vehicle CAN bus** as a switch-status message. Injecting *there* is:
+Why this beats the CAN route *as a product*:
 
-- **Model-agnostic** (only the message ID/layout changes → a firmware table),
-- **Airbag-free and solder-free** (plug into an existing connector),
-- **Lower-risk than the nag-killers** (we send a *benign* scroll frame, never steering
-  torque — the torque hack `0x370` is what caused the reported emergency-braking events),
-- and it **lets the car build the final action itself**, so we never fight the
-  infotainment directly.
+| | Wheel passthrough (LIN relay) | CAN at diagnostic plug |
+|---|---|---|
+| Connector SKUs | **1 (universal wheel harness)** | a family, per model/year |
+| Injection | **clean** — car builds the frame | contention on a shared bus |
+| Safety-bus exposure | none (isolated switch LIN) | sits on Vehicle/Party CAN |
+| Install | at the wheel (airbag care, disassembly) | plug-in, easy |
+| Reliability for "flawless" | **high** | good but finicky |
+
+**Honest downsides of the wheel route:** installation means opening the wheel shroud near
+the airbag (handle only the controls connector; leave the airbag squib alone, 12 V
+disconnected), and a true no-cut passthrough needs the **Tesla steering-wheel controls
+connector as a mating pair** (source the housing + terminals; prototype with a
+cut-and-splice relay first). Capacitive / steer-by-wire wheels (Highland, S/X refresh,
+Cybertruck) share the connector but their LIN scroll layout must be captured per platform
+→ the profile table.
 
 ---
 
@@ -121,10 +137,16 @@ replaces the ESP32+SN65HVD230 pair.
 
 ### 5.1 Connectorization & mass production
 
-"Works on every Tesla" is **one board + one firmware + a small family of connector
-harnesses** — never a single universal cable. Every commercial equivalent (Enhauto
-Commander, S3XY, the nag modules) ships per-fitment harnesses; that is the norm, not a
-compromise.
+**Primary (wheel passthrough): one universal harness.** Because the steering-wheel
+controls connector is shared across models, the mass-market product uses a **single
+passthrough SKU** — the Tesla steering-wheel controls connector as a mating pair, with the
+ESP32 inline. That is the whole reason to prefer the wheel route.
+
+**Alternative (CAN at the plug): a small family of harnesses.** If a unit is built for the
+diagnostic-plug route instead, "works on every Tesla" becomes **one board + one firmware +
+a small family of connector harnesses** — never a single universal cable. Every commercial
+CAN equivalent (Enhauto Commander, S3XY, the nag modules) ships per-fitment harnesses; that
+is the norm for that route, not a compromise.
 
 There is no cheap consumer "CAN cable" because the product doesn't use one — it uses the
 **bare mating connector**, which is a standard, bulk automotive part:
@@ -247,13 +269,21 @@ in the arbitration/data phase and produce error frames. Mitigations, in order:
 
 ## 10. Roadmap
 
-1. **Order** an SN65HVD230 CAN transceiver + a Model 3 diagnostic/X179 pigtail.
-2. **Bench:** ESP32 TWAI + transceiver; loopback self-test at 500 kbit/s.
-3. **Car (Model 3, listen-only):** confirm `0x3C2` at ~50 Hz on Vehicle CAN (pins 18/19).
-4. **Car (inject, parked):** send one `+1` scroll frame; confirm volume moves one notch;
-   then run the 10 s up/down loop.
-5. **Generalize:** capture the scroll profile on Y / S / X / Cybertruck; fill the profile
-   table. Design the DoIP variant for Ethernet-only cars.
+**Primary — wheel passthrough (LIN relay):**
+
+1. **Finish PHY-B** (second discrete LIN transceiver) and pass the bench self-test.
+2. **Bench relay:** ESP32 between two LIN transceivers; forward the module's frame and
+   overwrite only the scroll byte; verify checksum + the 10 s up/down state machine.
+3. **Car, cut-and-splice prototype:** insert inline at the wheel LIN wire; confirm the real
+   buttons still work AND the injected scroll moves the volume.
+4. **Identify the Tesla steering-wheel controls connector** (mating pair) and build the
+   **no-cut universal passthrough harness** — the single mass-market SKU.
+5. **Generalize:** capture the LIN scroll frame layout on Y / S / X / Cybertruck → profile
+   rows. One harness, one board, per-model firmware profiles.
+
+**Alternative — CAN at the diagnostic plug** (for no-teardown installs): SN65HVD230 +
+per-model adapter; listen-first for the scroll ID; parked inject test; validate zero
+persistent bus errors. Design the DoIP variant for Ethernet-only cars.
 
 ---
 
