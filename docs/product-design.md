@@ -119,6 +119,44 @@ Alternative single-box boards with the transceiver already integrated: **LILYGO
 T-CAN485**, **Waveshare ESP32-S3-CAN**, **M5Stack ATOM + ATOMIC CAN** — any of these
 replaces the ESP32+SN65HVD230 pair.
 
+### 5.1 Connectorization & mass production
+
+"Works on every Tesla" is **one board + one firmware + a small family of connector
+harnesses** — never a single universal cable. Every commercial equivalent (Enhauto
+Commander, S3XY, the nag modules) ships per-fitment harnesses; that is the norm, not a
+compromise.
+
+There is no cheap consumer "CAN cable" because the product doesn't use one — it uses the
+**bare mating connector**, which is a standard, bulk automotive part:
+
+- **X179** (accessory/diagnostic connector, Model 3/Y/S/X): **Sumitomo 6098-5620**,
+  Tesla P/N **1042620-02-A**. Housings + terminals sell in volume; aftermarket 3-CAN
+  commanders already wire to X179's CAN pairs and 12 V.
+- Footwell diagnostic connectors (26-pin, early Model 3, legacy S/X) are likewise
+  standard housings sourced the same way.
+
+**Per-unit BOM at volume (~$15–25):** ESP32-class module, transceiver (~$1), buck,
+enclosure, and **one molded T-harness**. Consumer LAN001/CAN001 kits are skipped.
+
+**Harness SKU family (covers the whole fleet):**
+
+| SKU | Fitment | Connector |
+|---|---|---|
+| H1 | Model 3 2017–2018 | early footwell diag |
+| H2 | Model 3 2019+ / Model Y | 26-pin footwell **or** X179 (Sumitomo 6098-5620) |
+| H3 | Model S/X 2012–2020 | legacy diagnostic |
+| H4 | Model S/X refresh 2021+ | diagnostic |
+| H5 | Cybertruck | diagnostic |
+| H6 | DoIP/Ethernet-only (2024+ Juniper, 2025 "Standard") | **needs the Ethernet board variant, not CAN** |
+
+The electronics and firmware are identical across H1–H5; only the pigtail changes. H6 is
+the single genuine hardware fork.
+
+**Prototype vs product:** the design covers all models, but the *first physical unit*
+must still be proven on **one** real car (its connector + its scroll profile). That first
+target doesn't limit the product — it's just the first row of the profile table and the
+first harness SKU.
+
 ---
 
 ## 6. Firmware: one binary, per-model profiles
