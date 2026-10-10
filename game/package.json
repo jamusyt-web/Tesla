@@ -9,7 +9,7 @@
     "dev:server": "node --watch --no-warnings server/index.js",
     "dev:client": "vite",
     "build": "vite build",
-    "start": "NODE_ENV=production node --no-warnings server/index.js",
+    "start": "node --no-warnings server/index.js",
     "bots": "node --no-warnings scripts/bots.js",
     "test": "node --no-warnings --test server/tests/*.test.js"
   },
