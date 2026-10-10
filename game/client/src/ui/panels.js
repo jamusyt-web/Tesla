@@ -1,0 +1,746 @@
+import { h, clear, fmt } from '../util/dom.js';
+import { sfx } from '../util/sfx.js';
+import { portrait } from './portrait.js';
+import { ITEMS, RARITY, CATEGORIES } from '../../../shared/items.js';
+import { RECIPES } from '../../../shared/recipes.js';
+import { SKILLS, SKILL_IDS, levelProgress, levelFromXp } from '../../../shared/skills.js';
+
+const NPC_RATE = 0.6;
+const TAX = 0.04;
+const SHOP_SLOTS = 8;
+
+const itemSlot = (id, qty, { sel = false, eq = false, on } = {}) =>
+  h('div.slot' + (sel ? '.sel' : ''), { 'data-r': ITEMS[id]?.rarity, title: ITEMS[id]?.name, on: on ? { click: on } : null }, ITEMS[id]?.icon || '❔', qty != null ? h('span.q', fmt(qty)) : null, eq ? h('span.eq', 'E') : null);
+
+const qtyInput = (value, max) => {
+  const inp = h('input', { type: 'number', min: 1, max, value, inputMode: 'numeric' });
+  return inp;
+};
+
+function itemDesc(it) {
+  const bits = [];
+  if (it.tool) bits.push(`Tier ${it.tier} ${it.tool === 'axe' ? 'axe' : it.tool === 'pick' ? 'pickaxe' : 'rod'} · Power ${it.power}${it.speed ? ` · ${(1000 / it.speed).toFixed(1)} swings/s` : ''}`);
+  if (it.atk) bits.push(`+${it.atk} ATK`);
+  if (it.def) bits.push(`+${it.def} DEF`);
+  if (it.hp) bits.push(`+${it.hp} HP`);
+  if (it.heal) bits.push(`Heals ${it.heal} HP in battle`);
+  return bits.join(' · ');
+}
+
+export class Panels {
+  constructor(hud) {
+    this.hud = hud;
+    this.cur = null;
+  }
+  get sock() {
+    return this.hud.sock;
+  }
+  get me() {
+    return this.hud.me;
+  }
+
+  open(name, args = {}) {
+    this.close();
+    const body = h('div.panel-body');
+    const titleEl = h('h3');
+    const panel = h('div.panel' + (['profile', 'result'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, h('button.close', { on: { click: () => this.close() } }, '✕')), body);
+    const scrim = h('div.scrim', { on: { pointerdown: (e) => e.target === scrim && this.close() } }, panel);
+    this.hud.el.append(scrim);
+    this.cur = { name, scrim, body, titleEl, args, refresh: null, onClose: null };
+    const fn = this['p_' + name];
+    if (fn) fn.call(this, this.cur, args);
+    sfx.pop();
+  }
+
+  close() {
+    if (!this.cur) return;
+    this.cur.onClose?.();
+    this.cur.scrim.remove();
+    this.cur = null;
+  }
+
+  refresh(name) {
+    if (!this.cur || (name && this.cur.name !== name)) return;
+    // Don't yank an input out from under someone who is typing a price.
+    const a = document.activeElement;
+    if (a && a.tagName === 'INPUT' && this.cur.scrim.contains(a)) return;
+    this.cur.refresh?.();
+  }
+
+  title(c, t) {
+    c.titleEl.textContent = t;
+  }
+
+  // ── Bag & Hero ─────────────────────────────────────────────────────
+  p_bag(c, args) {
+    this.title(c, '🎒 Bag');
+    let tab = args.tab || 'items';
+    let cat = 'all';
+    let sel = null;
+    const render = () => {
+      clear(c.body);
+      c.body.append(
+        h('div.tabs', ...[['items', '🎒 Items'], ['hero', '🧑 Hero']].map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render()) } }, l))),
+      );
+      if (tab === 'hero') return this.#heroTab(c.body);
+      const inv = Object.entries(this.me.inv).filter(([id, n]) => n > 0 && ITEMS[id] && (cat === 'all' || ITEMS[id].cat === cat));
+      c.body.append(
+        h('div.filters', ...[['all', 'All'], ...Object.entries(CATEGORIES)].map(([k, l]) => h('button.chip' + (cat === k ? '.on' : ''), { on: { click: () => ((cat = k), render()) } }, l))),
+      );
+      if (!inv.length) {
+        c.body.append(h('div.empty', h('div.big', '🍃'), 'Nothing here yet. Go chop, mine, pick and fish!'));
+        return;
+      }
+      const equipped = new Set(Object.values(this.me.equip));
+      c.body.append(h('div.grid', ...inv.map(([id, n]) => itemSlot(id, n, { sel: sel === id, eq: equipped.has(id), on: () => ((sel = id), render()) }))));
+      if (sel && this.me.inv[sel] > 0) c.body.append(this.#itemDetail(sel, equipped.has(sel)));
+    };
+    c.refresh = render;
+    render();
+  }
+
+  #itemDetail(id, isEq) {
+    const it = ITEMS[id];
+    const have = this.me.inv[id];
+    const npc = Math.max(1, Math.floor(it.value * NPC_RATE));
+    const sellable = isEq ? have - 1 : have;
+    const q = qtyInput(Math.max(1, sellable), Math.max(1, sellable));
+    const box = h(
+      'div.detail',
+      h('div.row', h('div', { style: { fontSize: '40px' } }, it.icon), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '18px' } }, it.name), h('div', { style: { color: RARITY[it.rarity].color, fontWeight: 600, fontSize: '13px' } }, RARITY[it.rarity].label + ' · ' + CATEGORIES[it.cat]), h('div.muted', itemDesc(it)))),
+      h('div.kv', h('span', 'You own'), h('b', fmt(have))),
+      h('div.kv', h('span', 'Base value'), h('b.gold', `${it.value} 🪙`)),
+      h('div.kv', h('span', 'Merchant pays'), h('b.gold', `${npc} 🪙 each`)),
+      h(
+        'div.row',
+        { style: { marginTop: '10px', flexWrap: 'wrap' } },
+        (it.cat === 'tool' || it.slot) && !isEq ? h('button.btn.green.small', { on: { click: () => this.#rpc('equip', { item: id }, `Equipped ${it.name}!`) } }, 'Equip') : null,
+        isEq ? h('span.chip.on', 'Equipped') : null,
+        sellable > 0 ? h('div.qty', q) : null,
+        sellable > 0 ? h('button.btn.small', { on: { click: () => this.#npcSell(id, +q.value) } }, 'Sell to merchant') : null,
+        h('button.btn.blue.small', { on: { click: () => this.open('market', { item: id }) } }, '⚖️ Market'),
+      ),
+    );
+    return box;
+  }
+
+  async #npcSell(item, qty) {
+    try {
+      const r = await this.sock.rpc('npcSell', { item, qty });
+      sfx.coin();
+      this.hud.toast(`Sold for ${r.gold} 🪙`, 'gold');
+    } catch (e) {
+      this.hud.toast(e.message, 'err');
+    }
+  }
+
+  async #rpc(m, a, okText) {
+    try {
+      const r = await this.sock.rpc(m, a);
+      if (okText) this.hud.toast(okText, 'good');
+      return r;
+    } catch (e) {
+      this.hud.toast(e.message, 'err');
+      throw e;
+    }
+  }
+
+  #heroTab(body) {
+    const me = this.me;
+    const st = me.stats || { atk: 0, def: 0, hp: 0 };
+    body.append(
+      h(
+        'div.row',
+        { style: { alignItems: 'flex-start', flexWrap: 'wrap' } },
+        h('img', { src: portrait(this.hud.myAvatar, { full: true }), style: { width: '130px', height: '162px', background: 'linear-gradient(#bfe8ff,#fdeccf)', borderRadius: '18px' } }),
+        h(
+          'div',
+          { style: { flex: 1, minWidth: '200px' } },
+          h('div', { style: { fontWeight: 700, fontSize: '22px' } }, this.hud.myName),
+          h('div.muted', `Hero level ${me.level}`),
+          h('div.statgrid', { style: { margin: '10px 0' } }, h('div.stat', h('b', st.atk), h('span', '⚔️ Attack')), h('div.stat', h('b', st.def), h('span', '🛡️ Defense')), h('div.stat', h('b', st.hp), h('span', '❤️ Health'))),
+          h('button.btn.purple.small', { on: { click: () => (this.close(), this.hud.onCustomize?.()) } }, '🎨 Customize look'),
+        ),
+      ),
+      h('div.section-title', 'Equipment'),
+      h(
+        'div.grid',
+        ...['weapon', 'armor', 'trinket', 'axe', 'pick', 'rod'].map((slot) => {
+          const id = me.equip[slot];
+          return h('div', { style: { textAlign: 'center' } }, id ? itemSlot(id, null) : h('div.slot', { style: { opacity: 0.4 } }, '—'), h('div.muted', slot === 'pick' ? 'pickaxe' : slot));
+        }),
+      ),
+      h('div.section-title', 'Skills'),
+      ...SKILL_IDS.map((k) => {
+        const p = levelProgress(me.skills[k] || 0);
+        return h('div.skillrow', h('span', SKILLS[k].icon), h('div', h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '14px' } }, h('span', SKILLS[k].name), h('span.muted', `${fmt(p.into)}/${fmt(p.need)}`)), h('div.bar', h('i', { style: { width: `${p.pct * 100}%` } }))), h('b', `Lv ${p.level}`));
+      }),
+    );
+  }
+
+  // ── Workshop ───────────────────────────────────────────────────────
+  p_craft(c) {
+    this.title(c, '🔨 Workshop');
+    let tab = 'material';
+    const groups = { material: 'Refining', consumable: 'Supplies', tool: 'Tools', gear: 'Gear' };
+    const render = () => {
+      clear(c.body);
+      const lvl = levelFromXp(this.me.skills.crafting || 0);
+      c.body.append(
+        h('div.muted', { style: { marginBottom: '8px' } }, `🔨 Crafting level ${lvl}. Crafted goods sell for much more than raw resources!`),
+        h('div.tabs', ...Object.entries(groups).map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render()) } }, l))),
+      );
+      for (const r of RECIPES.filter((x) => ITEMS[x.out].cat === tab)) {
+        const out = ITEMS[r.out];
+        const locked = lvl < r.lvl;
+        const max = Math.min(50, ...Object.entries(r.in).map(([id, n]) => Math.floor((this.me.inv[id] || 0) / n)));
+        const craft = async (times) => {
+          try {
+            const res = await this.sock.rpc('craft', { recipe: r.id, times });
+            sfx.loot();
+            this.hud.toast(`${out.icon} Crafted ${res.qty}× ${out.name}!`, 'good');
+            this.hud.onXp(res.xp);
+          } catch (e) {
+            this.hud.toast(e.message, 'err');
+          }
+        };
+        c.body.append(
+          h(
+            'div.rowcard' + (locked ? '.locked' : ''),
+            h('div.ic', out.icon),
+            h(
+              'div.grow',
+              h('div.t', out.name, h('span.muted', `  · worth ${out.value} 🪙`)),
+              h('div', ...Object.entries(r.in).map(([id, n]) => h('span.need' + ((this.me.inv[id] || 0) < n ? '.short' : ''), `${ITEMS[id].icon} ${this.me.inv[id] || 0}/${n}`))),
+              out.cat === 'tool' || out.cat === 'gear' ? h('div.s', itemDesc(out)) : null,
+              locked ? h('div.s', `🔒 Requires Crafting ${r.lvl}`) : null,
+            ),
+            h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
+              h('button.btn.green.small', { disabled: locked || max < 1, on: { click: () => craft(1) } }, 'Craft'),
+              max > 1 && !locked ? h('button.btn.plain.small', { on: { click: () => craft(max) } }, `×${max}`) : null,
+            ),
+          ),
+        );
+      }
+    };
+    c.refresh = render;
+    render();
+  }
+
+  // ── Grand Market ───────────────────────────────────────────────────
+  p_market(c, args) {
+    this.title(c, '⚖️ Grand Market');
+    const st = { tab: 'browse', cat: 'all', q: '', item: args.item || null, side: 'buy', summary: {}, book: null };
+    const load = async () => {
+      try {
+        st.summary = await this.sock.rpc('market.summary');
+      } catch {}
+      render();
+    };
+    const render = () => {
+      clear(c.body);
+      if (st.item) return this.#marketItem(c, st, render);
+      c.body.append(
+        h('div.tabs', ...[['browse', '🔎 Browse'], ['mine', '📋 My Orders']].map(([k, l]) => h('button' + (st.tab === k ? '.on' : ''), { on: { click: () => ((st.tab = k), render()) } }, l))),
+      );
+      if (st.tab === 'mine') return this.#myOrders(c.body, render);
+      const search = h('input.search', { placeholder: 'Search items…', value: st.q });
+      search.addEventListener('input', () => {
+        st.q = search.value;
+        list();
+      });
+      const listEl = h('div');
+      const list = () => {
+        clear(listEl);
+        const ids = Object.keys(ITEMS).filter((id) => (st.cat === 'all' || ITEMS[id].cat === st.cat) && ITEMS[id].name.toLowerCase().includes(st.q.toLowerCase()));
+        ids.sort((a, b) => (st.summary[b]?.vol || 0) + (st.summary[b] ? 1 : 0) - ((st.summary[a]?.vol || 0) + (st.summary[a] ? 1 : 0)) || ITEMS[a].value - ITEMS[b].value);
+        for (const id of ids) {
+          const s = st.summary[id] || {};
+          const it = ITEMS[id];
+          listEl.append(
+            h(
+              'div.rowcard',
+              { style: { cursor: 'pointer' }, on: { click: () => ((st.item = id), render()) } },
+              h('div.ic', it.icon),
+              h('div.grow', h('div.t', it.name), h('div.s', s.last ? `Last ${s.last} 🪙 · ${fmt(s.vol)} traded today` : `No trades yet · base ${it.value} 🪙`), this.me.inv[id] ? h('div.s', `You have ${fmt(this.me.inv[id])}`) : null),
+              h('div', { style: { textAlign: 'right', fontSize: '13px', fontWeight: 600 } }, h('div', { style: { color: '#b8382f' } }, s.ask ? `Sell ${s.ask} 🪙 (${fmt(s.supply)})` : 'No sellers'), h('div', { style: { color: '#3a8f3d' } }, s.bid ? `Buy ${s.bid} 🪙 (${fmt(s.demand)})` : 'No buyers')),
+            ),
+          );
+        }
+      };
+      c.body.append(search, h('div.filters', ...[['all', 'All'], ...Object.entries(CATEGORIES)].map(([k, l]) => h('button.chip' + (st.cat === k ? '.on' : ''), { on: { click: () => ((st.cat = k), render()) } }, l))), listEl);
+      list();
+    };
+    c.refresh = () => {
+      if (st.item && st.refreshItem) st.refreshItem();
+    };
+    render();
+    load();
+  }
+
+  async #myOrders(body, back) {
+    const wrap = h('div', h('div.empty', 'Loading…'));
+    body.append(wrap);
+    let orders = [];
+    try {
+      orders = await this.sock.rpc('market.mine');
+    } catch (e) {
+      return this.hud.toast(e.message, 'err');
+    }
+    clear(wrap);
+    if (!orders.length) return wrap.append(h('div.empty', h('div.big', '📋'), 'No orders yet. Place buy or sell orders from any item page.'));
+    for (const o of orders) {
+      const it = ITEMS[o.item];
+      wrap.append(
+        h(
+          'div.rowcard',
+          h('div.ic', it?.icon),
+          h('div.grow', h('div.t', `${o.side === 'buy' ? '🟢 Buying' : '🔴 Selling'} ${it?.name}`), h('div.s', `${o.price} 🪙 each · ${o.filled}/${o.qty} filled · ${o.status}`)),
+          o.status === 'open'
+            ? h('button.btn.red.small', {
+                on: {
+                  click: async () => {
+                    try {
+                      await this.sock.rpc('market.cancel', { id: o.id });
+                      this.hud.toast('Order cancelled — escrow returned.', 'good');
+                      back();
+                    } catch (e) {
+                      this.hud.toast(e.message, 'err');
+                    }
+                  },
+                },
+              }, 'Cancel')
+            : null,
+        ),
+      );
+    }
+  }
+
+  #marketItem(c, st, back) {
+    const id = st.item;
+    const it = ITEMS[id];
+    const body = c.body;
+    body.append(h('button.btn.plain.small', { style: { marginBottom: '10px' }, on: { click: () => ((st.item = null), back()) } }, '← All items'));
+    const head = h('div.row', h('div', { style: { fontSize: '44px' } }, it.icon), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '20px' } }, it.name), h('div.muted', `Base value ${it.value} 🪙 · Merchant pays ${Math.floor(it.value * NPC_RATE)} 🪙`)));
+    const stats = h('div.muted', { style: { margin: '6px 0' } }, 'Loading…');
+    const chart = h('canvas.chart', { width: 600, height: 160 });
+    const bookEl = h('div.book');
+    const trade = h('div.detail');
+    body.append(head, stats, chart, h('div.section-title', 'Order book'), bookEl, trade);
+
+    const drawBook = (b) => {
+      stats.textContent = b.vol24 ? `24h: ${fmt(b.vol24)} traded · avg ${b.avg24} 🪙` : 'No trades in the last 24h — set the price!';
+      clear(bookEl);
+      const tbl = (rows, cls, title) =>
+        h('table.' + cls, h('tr', h('th', title), h('th', 'Qty')), ...(rows.length ? rows.slice(0, 7).map((r) => h('tr', h('td', `${r.price} 🪙`), h('td', fmt(r.qty)))) : [h('tr', h('td.muted', '—'), h('td'))]));
+      bookEl.append(h('div', tbl(b.asks, 'ask', 'Sell orders')), h('div', tbl(b.bids, 'bid', 'Buy orders')));
+      // Price history chart
+      const x = chart.getContext('2d');
+      const W = chart.width;
+      const H = chart.height;
+      x.clearRect(0, 0, W, H);
+      const pts = b.history;
+      if (pts.length < 2) {
+        x.fillStyle = '#b39a7c';
+        x.font = '600 22px Fredoka, sans-serif';
+        x.textAlign = 'center';
+        x.fillText(pts.length ? `Last trade: ${pts[0].price} 🪙` : 'No price history yet', W / 2, H / 2 + 8);
+        return;
+      }
+      const ps = pts.map((p) => p.price);
+      const lo = Math.min(...ps, it.value) * 0.9;
+      const hi = Math.max(...ps, it.value) * 1.1;
+      const Y = (v) => H - 14 - ((v - lo) / (hi - lo)) * (H - 28);
+      x.strokeStyle = '#e2c89e';
+      x.setLineDash([6, 6]);
+      x.beginPath();
+      x.moveTo(0, Y(it.value));
+      x.lineTo(W, Y(it.value));
+      x.stroke();
+      x.setLineDash([]);
+      x.strokeStyle = '#f7b928';
+      x.lineWidth = 4;
+      x.beginPath();
+      pts.forEach((p, i) => {
+        const px = 10 + (i / (pts.length - 1)) * (W - 20);
+        i ? x.lineTo(px, Y(p.price)) : x.moveTo(px, Y(p.price));
+      });
+      x.stroke();
+      x.fillStyle = '#8a6a55';
+      x.font = '600 18px Fredoka, sans-serif';
+      x.fillText(`${Math.round(hi)} 🪙`, 8, 20);
+      x.fillText(`${Math.round(lo)} 🪙`, 8, H - 4);
+    };
+
+    const drawTrade = (b) => {
+      clear(trade);
+      const side = st.side;
+      const have = this.me.inv[id] || 0;
+      const bestAsk = b.asks[0]?.price;
+      const bestBid = b.bids[0]?.price;
+      const defPrice = side === 'buy' ? bestBid ? bestBid + 1 : Math.max(1, Math.round(it.value * 0.9)) : bestAsk ? Math.max(1, bestAsk - 1) : Math.round(it.value * 1.1);
+      const price = qtyInput(st.price ?? defPrice, 10_000_000);
+      const qty = qtyInput(st.qty ?? (side === 'sell' ? Math.max(1, have) : 1), 9999);
+      const summary = h('div.muted', { style: { margin: '8px 0' } });
+      const upd = () => {
+        st.price = +price.value;
+        st.qty = +qty.value;
+        const p = Math.max(0, Math.floor(+price.value || 0));
+        const q = Math.max(0, Math.floor(+qty.value || 0));
+        summary.textContent = side === 'buy' ? `Reserves ${fmt(p * q)} 🪙 (you have ${fmt(this.me.gold)}). Fills instantly against sellers at or below your price.` : `You receive ${fmt(Math.floor(p * q * (1 - TAX)))} 🪙 after 4% market tax. You have ${fmt(have)}.`;
+      };
+      price.addEventListener('input', upd);
+      qty.addEventListener('input', upd);
+      upd();
+      // Instant: walk the book to find the price that fills qty.
+      const instant = () => {
+        const q = Math.floor(+qty.value);
+        const levels = side === 'buy' ? b.asks : b.bids;
+        let left = q;
+        let worst = null;
+        let total = 0;
+        for (const l of levels) {
+          const n = Math.min(left, l.qty);
+          total += n * l.price;
+          worst = l.price;
+          left -= n;
+          if (!left) break;
+        }
+        return { worst, total, filled: q - left };
+      };
+      const ins = instant();
+      const place = async (ioc) => {
+        const q = Math.floor(+qty.value);
+        const p = ioc ? ins.worst : Math.floor(+price.value);
+        if (!q || !p) return this.hud.toast('Enter a price and quantity.', 'err');
+        try {
+          const r = await this.sock.rpc('market.place', { side, item: id, price: p, qty: q, ioc });
+          if (r.filledQty) {
+            sfx.coin();
+            this.hud.toast(`${side === 'buy' ? 'Bought' : 'Sold'} ${r.filledQty}× ${it.name}!`, 'gold');
+          }
+          if (r.order) this.hud.toast(`📋 ${side === 'buy' ? 'Buy' : 'Sell'} order placed for ${r.order.qty - r.order.filled}.`, 'good');
+          st.price = st.qty = undefined;
+          refreshItem();
+        } catch (e) {
+          this.hud.toast(e.message, 'err');
+        }
+      };
+      trade.append(
+        h('div.tabs', ...[['buy', '🟢 Buy'], ['sell', '🔴 Sell']].map(([k, l]) => h('button' + (side === k ? '.on' : ''), { on: { click: () => ((st.side = k), (st.price = st.qty = undefined), drawTrade(b)) } }, l))),
+        h('div.row', { style: { flexWrap: 'wrap' } }, h('label.qty', 'Qty ', qty), h('label.qty', 'Price ', price, ' 🪙')),
+        summary,
+        h(
+          'div.row',
+          { style: { flexWrap: 'wrap' } },
+          h('button.btn' + (side === 'buy' ? '.green' : '.red'), { on: { click: () => place(false) } }, side === 'buy' ? 'Place buy order' : 'Place sell order'),
+          ins.filled
+            ? h('button.btn.blue', { on: { click: () => place(true) } }, side === 'buy' ? `Buy ${ins.filled} now · ${fmt(ins.total)} 🪙` : `Sell ${ins.filled} now · ${fmt(Math.floor(ins.total * (1 - TAX)))} 🪙`)
+            : h('span.muted', side === 'buy' ? 'Nobody is selling right now.' : 'Nobody is buying right now.'),
+        ),
+      );
+    };
+
+    const refreshItem = async () => {
+      try {
+        const b = await this.sock.rpc('market.book', { item: id });
+        st.book = b;
+        if (this.cur?.name !== 'market' || st.item !== id) return;
+        drawBook(b);
+        drawTrade(b);
+      } catch (e) {
+        this.hud.toast(e.message, 'err');
+      }
+    };
+    st.refreshItem = refreshItem;
+    refreshItem();
+  }
+
+  // ── Your Shop ──────────────────────────────────────────────────────
+  p_shop(c) {
+    this.title(c, `🏪 ${this.hud.myName}'s Shop`);
+    this.sock.rpc('shop.live', { on: true }).catch(() => {});
+    this.customers = new Map();
+    c.onClose = () => {
+      this.sock.rpc('shop.live', { on: false }).catch(() => {});
+      this.customers = null;
+      this.custEl = null;
+    };
+    let slots = [];
+    let editing = null;
+    const custEl = h('div.customers');
+    this.custEl = custEl;
+    const shelvesEl = h('div.shelves');
+    const editEl = h('div');
+    c.body.append(
+      h('div.muted', { style: { marginBottom: '8px' } }, 'Stock your shelves. Customers visit while you’re here (serve them yourself for the best deals!), and shoppers keep buying slowly while you’re away. Other players can buy from you too.'),
+      h('div.section-title', 'Customers'),
+      custEl,
+      h('div.section-title', 'Shelves'),
+      shelvesEl,
+      editEl,
+    );
+    this.#renderCustomers();
+    const load = async () => {
+      try {
+        slots = (await this.sock.rpc('shop.get')).slots;
+      } catch {}
+      draw();
+    };
+    const draw = () => {
+      clear(shelvesEl);
+      for (let i = 0; i < SHOP_SLOTS; i++) {
+        const s = slots.find((x) => x.slot === i);
+        shelvesEl.append(
+          s
+            ? h('div.shelf', { on: { click: () => ((editing = i), drawEdit()) } }, h('div.ic', ITEMS[s.item].icon), h('div.nm', ITEMS[s.item].name), h('div.pr', `${s.price} 🪙`), h('div.muted', `×${s.qty}`))
+            : h('div.shelf.empty', { on: { click: () => ((editing = i), drawEdit()) } }, '＋ Stock'),
+        );
+      }
+      drawEdit();
+    };
+    const drawEdit = () => {
+      clear(editEl);
+      if (editing == null) return;
+      const s = slots.find((x) => x.slot === editing);
+      const box = h('div.detail');
+      editEl.append(box);
+      if (s) {
+        const it = ITEMS[s.item];
+        const price = qtyInput(s.price, 1e6);
+        const add = qtyInput(Math.max(1, this.me.inv[s.item] || 1), 9999);
+        box.append(
+          h('div.row', h('div', { style: { fontSize: '36px' } }, it.icon), h('div', h('b', it.name), h('div.muted', `${s.qty} on shelf · base value ${it.value} 🪙`))),
+          h('div.row', { style: { marginTop: '8px', flexWrap: 'wrap' } }, h('label.qty', 'Price ', price), h('button.btn.small', { on: { click: () => this.#rpc('shop.price', { slot: s.slot, price: +price.value }, 'Price updated').then((r) => ((slots = r.slots), draw())) } }, 'Set price')),
+          this.me.inv[s.item] ? h('div.row', { style: { marginTop: '8px' } }, h('label.qty', 'Add ', add), h('button.btn.green.small', { on: { click: () => this.#rpc('shop.stock', { slot: s.slot, item: s.item, qty: +add.value, price: +price.value }, 'Restocked!').then((r) => ((slots = r.slots), draw())) } }, 'Restock')) : null,
+          h('button.btn.red.small', { style: { marginTop: '8px' }, on: { click: () => this.#rpc('shop.unstock', { slot: s.slot }, 'Back in your bag.').then((r) => ((slots = r.slots), (editing = null), draw())) } }, 'Take back'),
+        );
+      } else {
+        const inv = Object.entries(this.me.inv).filter(([id, n]) => n > 0 && ITEMS[id] && !(Object.values(this.me.equip).includes(id) && n <= 1));
+        if (!inv.length) return box.append(h('div.empty', 'Your bag is empty — gather or craft something to sell!'));
+        let pick = null;
+        const form = h('div');
+        box.append(h('b', `Shelf ${editing + 1}: choose an item`), h('div.grid', { style: { marginTop: '8px' } }, ...inv.map(([id, n]) => itemSlot(id, n, { on: () => ((pick = id), drawForm()) }))), form);
+        const drawForm = () => {
+          clear(form);
+          if (!pick) return;
+          const it = ITEMS[pick];
+          const max = this.me.inv[pick] - (Object.values(this.me.equip).includes(pick) ? 1 : 0);
+          const qty = qtyInput(max, max);
+          const price = qtyInput(it.value, 1e6);
+          form.append(
+            h('div.row', { style: { marginTop: '10px', flexWrap: 'wrap' } }, h('b', `${it.icon} ${it.name}`), h('label.qty', 'Qty ', qty), h('label.qty', 'Price ', price)),
+            h('div.row', { style: { marginTop: '6px', flexWrap: 'wrap' } }, h('span.muted', 'Quick price:'), ...[[1, 'Fair'], [1.25, '+25%'], [1.5, '+50%']].map(([m, l]) => h('button.chip', { on: { click: () => (price.value = Math.round(it.value * m)) } }, `${l} (${Math.round(it.value * m)})`))),
+            h('button.btn.green', { style: { marginTop: '10px' }, on: { click: () => this.#rpc('shop.stock', { slot: editing, item: pick, qty: +qty.value, price: +price.value }, `${it.name} is on the shelf!`).then((r) => ((slots = r.slots), (editing = null), sfx.coin(), draw())) } }, 'Put on shelf'),
+          );
+        };
+      }
+    };
+    c.refresh = () => drawEdit();
+    load();
+    this.reloadShop = load;
+  }
+
+  customerArrived(cu) {
+    if (!this.customers) return;
+    this.customers.set(cu.id, { ...cu, arrived: performance.now() });
+    sfx.bell();
+    this.#renderCustomers();
+  }
+  customerLeft(id) {
+    if (!this.customers) return;
+    this.customers.delete(id);
+    this.#renderCustomers();
+  }
+
+  #renderCustomers() {
+    const el = this.custEl;
+    if (!el) return;
+    clear(el);
+    if (!this.customers.size) {
+      el.append(h('div.muted', { style: { padding: '6px' } }, '…waiting for customers. (Stock a shelf to attract shoppers!)'));
+      return;
+    }
+    for (const cu of this.customers.values()) {
+      const it = ITEMS[cu.item];
+      const fill = h('i', { style: { width: '100%' } });
+      const left = cu.leaveIn - (performance.now() - cu.arrived);
+      fill.animate([{ width: `${(100 * left) / cu.leaveIn}%` }, { width: '0%' }], { duration: Math.max(0, left), fill: 'forwards' });
+      const deal = cu.offer >= cu.listed ? `wants ${it.icon} ${it.name} for ${cu.offer} 🪙` : `offers ${cu.offer} 🪙 for ${it.icon} ${it.name} (you list ${cu.listed})`;
+      const serve = async (action) => {
+        try {
+          const r = await this.sock.rpc('shop.serve', { id: cu.id, action });
+          if (r.sale) {
+            sfx.coin();
+            this.hud.toast(`💰 Sold ${it.name} to ${cu.name} for ${r.sale.gold} 🪙`, 'gold');
+            this.customers.delete(cu.id);
+            this.reloadShop?.();
+          } else if (r.haggle === 'up') {
+            sfx.level();
+            cu.offer = r.offer;
+            cu.haggled = true;
+            this.hud.toast(`😄 ${cu.name}: "Fine, ${r.offer} 🪙 it is!"`, 'good');
+          } else if (r.haggle === 'left') {
+            this.hud.toast(`😤 ${cu.name} stormed off!`, 'err');
+            this.customers.delete(cu.id);
+          } else this.customers.delete(cu.id);
+          this.#renderCustomers();
+        } catch (e) {
+          this.hud.toast(e.message, 'err');
+          this.customers.delete(cu.id);
+          this.#renderCustomers();
+        }
+      };
+      el.append(
+        h(
+          'div.customer',
+          h('div.face', cu.face),
+          h('div.grow', { style: { flex: 1, minWidth: 0 } }, h('b', cu.name), h('div', { style: { fontSize: '14px' } }, deal), h('div.patience', fill)),
+          h('div.acts', h('button.btn.green.small', { on: { click: () => serve('sell') } }, 'Sell'), !cu.haggled ? h('button.btn.purple.small', { on: { click: () => serve('haggle') } }, 'Haggle') : null, h('button.btn.plain.small', { on: { click: () => serve('decline') } }, '✕')),
+        ),
+      );
+    }
+  }
+
+  // ── Visiting another player's shop ─────────────────────────────────
+  p_visit(c, { id, name }) {
+    this.title(c, `🏪 ${name}'s Shop`);
+    const wrap = h('div');
+    c.body.append(wrap);
+    const draw = (slots) => {
+      clear(wrap);
+      if (!slots.length) return wrap.append(h('div.empty', h('div.big', '🕸️'), 'The shelves are empty right now.'));
+      for (const s of slots) {
+        const it = ITEMS[s.item];
+        const q = qtyInput(1, s.qty);
+        wrap.append(
+          h(
+            'div.rowcard',
+            h('div.ic', it.icon),
+            h('div.grow', h('div.t', it.name), h('div.s', `${s.qty} in stock · ${s.price} 🪙 each (base ${it.value})`)),
+            h('div.qty', q),
+            h('button.btn.green.small', {
+              on: {
+                click: async () => {
+                  try {
+                    const r = await this.sock.rpc('shop.buy', { owner: id, slot: s.slot, qty: +q.value });
+                    sfx.coin();
+                    this.hud.toast(`Bought ${r.sale.qty}× ${it.name} for ${r.sale.gold} 🪙`, 'gold');
+                    draw(r.slots);
+                  } catch (e) {
+                    this.hud.toast(e.message, 'err');
+                  }
+                },
+              },
+            }, 'Buy'),
+          ),
+        );
+      }
+    };
+    this.sock.rpc('shop.get', { owner: id }).then((r) => draw(r.slots)).catch((e) => this.hud.toast(e.message, 'err'));
+  }
+
+  // ── Town Hall ──────────────────────────────────────────────────────
+  p_townhall(c, args) {
+    this.title(c, '🏛️ Town Hall');
+    let tab = args.tab || 'online';
+    let info = null;
+    let shops = null;
+    const tabs = [['online', '🟢 Online'], ['shops', '🏪 Shops'], ['leaders', '🏆 Leaders'], ['channels', '🌐 Channels'], ['invites', '🎟️ Invites']];
+    const render = () => {
+      clear(c.body);
+      c.body.append(h('div.tabs', { style: { flexWrap: 'wrap' } }, ...tabs.map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render()) } }, l))));
+      if (!info) return c.body.append(h('div.empty', 'Loading…'));
+      if (tab === 'online') {
+        c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, `${info.online.length} of ${info.heroes} heroes online`));
+        for (const p of info.online)
+          c.body.append(h('div.rowcard', h('div.ic', '🧑'), h('div.grow', h('div.t', p.name, p.id === this.hud.myId ? ' (you)' : ''), h('div.s', `Level ${p.level} · Channel ${p.channel}`)), p.id !== this.hud.myId ? h('button.btn.small', { on: { click: () => this.open('profile', { id: p.id }) } }, 'View') : null));
+      } else if (tab === 'shops') {
+        if (!shops) {
+          this.sock.rpc('shop.directory').then((s) => ((shops = s), render()));
+          return c.body.append(h('div.empty', 'Loading…'));
+        }
+        if (!shops.length) return c.body.append(h('div.empty', h('div.big', '🏪'), 'No shops are stocked yet. Be the first!'));
+        for (const s of shops)
+          c.body.append(h('div.rowcard', h('img', { src: portrait(s.avatar), style: { width: '48px', height: '48px', borderRadius: '12px', background: '#bfe8ff' } }), h('div.grow', h('div.t', `${s.name}'s Shop`), h('div.s', `${s.slots} shelves · ${fmt(s.items)} items`)), s.id !== this.hud.myId ? h('button.btn.green.small', { on: { click: () => this.open('visit', { id: s.id, name: s.name }) } }, 'Visit') : h('span.muted', 'yours')));
+      } else if (tab === 'leaders') {
+        c.body.append(h('div.section-title', '💰 Richest'), ...info.rich.map((r, i) => h('div.kv', h('span', `${['🥇', '🥈', '🥉'][i] || i + 1 + '.'} ${r.name}`), h('b.gold', `${fmt(r.gold)} 🪙`))));
+        c.body.append(h('div.section-title', '⭐ Most experienced'), ...info.levels.map((r, i) => h('div.kv', h('span', `${['🥇', '🥈', '🥉'][i] || i + 1 + '.'} ${r.name}`), h('b', `${fmt(r.total)} XP`))));
+      } else if (tab === 'channels') {
+        c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, 'Each channel is a live copy of town. New players join the busiest channel with room, so friends end up together.'));
+        for (const ch of info.channels)
+          c.body.append(h('div.rowcard', h('div.ic', '🌐'), h('div.grow', h('div.t', `Channel ${ch.id}`, ch.id === this.hud.channel ? ' (you are here)' : ''), h('div.s', `${ch.players}/${ch.cap} heroes`)), ch.id !== this.hud.channel ? h('button.btn.small', { on: { click: () => this.#rpc('channel.switch', { id: ch.id }).then(() => this.close()) } }, 'Join') : null));
+      } else if (tab === 'invites') {
+        c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, 'Hearthvale is invite-only. Each hero can invite up to 5 friends.'));
+        for (const inv of info.invites)
+          c.body.append(h('div.rowcard', h('div.ic', '🎟️'), h('div.grow', h('div.t', { style: { fontFamily: 'monospace', fontSize: '18px', userSelect: 'all' } }, inv.code), h('div.s', inv.used_by ? `Used by ${inv.used_name || 'a friend'}` : 'Unused')), !inv.used_by ? h('button.btn.small', { on: { click: () => this.#copy(`Join me in Hearthvale! ${location.origin} — invite code: ${inv.code}`) } }, 'Copy') : null));
+        if (info.invites.length < 5)
+          c.body.append(h('button.btn.green', { on: { click: () => this.#rpc('invite.create', {}, 'Invite created!').then(load) } }, '＋ Create invite'));
+      }
+    };
+    const load = async () => {
+      try {
+        info = await this.sock.rpc('town.info');
+      } catch (e) {
+        this.hud.toast(e.message, 'err');
+      }
+      render();
+    };
+    render();
+    load();
+  }
+
+  async #copy(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      this.hud.toast('Copied! Send it to a friend.', 'good');
+    } catch {
+      prompt('Copy this:', text);
+    }
+  }
+
+  // ── Player profile ─────────────────────────────────────────────────
+  p_profile(c, { id }) {
+    this.title(c, 'Hero');
+    c.body.append(h('div.empty', 'Loading…'));
+    this.sock
+      .rpc('profile', { id })
+      .then((p) => {
+        clear(c.body);
+        this.title(c, p.name);
+        c.body.append(
+          h('div', { style: { textAlign: 'center' } }, h('img', { src: portrait(p.avatar, { full: true }), style: { width: '140px', height: '175px', background: 'linear-gradient(#bfe8ff,#fdeccf)', borderRadius: '18px' } })),
+          h('div', { style: { textAlign: 'center', margin: '6px 0 10px' } }, h('b', `Level ${p.level}`), h('div.muted', p.online ? `🟢 Online · Channel ${p.channel}` : '⚪ Offline')),
+          ...SKILL_IDS.map((k) => h('div.kv', h('span', `${SKILLS[k].icon} ${SKILLS[k].name}`), h('b', `Lv ${levelFromXp(p.skills[k] || 0)}`))),
+          h(
+            'div.row',
+            { style: { marginTop: '12px', flexWrap: 'wrap', justifyContent: 'center' } },
+            h('button.btn.small', { on: { click: () => (this.hud.game?.sendEmote('wave'), this.close()) } }, '👋 Wave'),
+            p.shop ? h('button.btn.green.small', { on: { click: () => this.open('visit', { id: p.id, name: p.name }) } }, '🏪 Visit shop') : null,
+            p.online && p.channel !== this.hud.channel ? h('button.btn.blue.small', { on: { click: () => this.#rpc('channel.switch', { id: p.channel }).then(() => this.close()) } }, '🌐 Join their channel') : null,
+          ),
+        );
+      })
+      .catch((e) => this.hud.toast(e.message, 'err'));
+  }
+
+  // ── Battle results ─────────────────────────────────────────────────
+  p_result(c, r) {
+    this.title(c, r.victory ? '🏆 Victory!' : '💫 Defeated');
+    if (r.victory) {
+      c.body.append(
+        h('div.result', h('div.big', 'VICTORY!'), h('div', { style: { fontWeight: 700, fontSize: '20px' } }, `+${r.gold} 🪙   +${r.xp?.amount || 0} ⚔️ XP`)),
+        h('div.loot-row', ...Object.entries(r.loot || {}).map(([id, n], i) => {
+          const s = itemSlot(id, n);
+          s.style.animationDelay = i * 0.12 + 's';
+          return s;
+        })),
+        h('button.btn.green.block.big', { on: { click: () => this.close() } }, 'Continue'),
+      );
+    } else {
+      c.body.append(h('div.result.lose', h('div.big', 'Defeated…'), h('p', 'You limp back, a little bruised. Rest a moment, craft potions or better gear, and bring friends — anyone can join your fight!')), h('button.btn.block.big', { on: { click: () => this.close() } }, 'OK'));
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "hearthvale",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cozy multiplayer economy adventure game — authoritative Node game server + three.js client",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "dev:server": "node --watch --no-warnings server/index.js",
+    "dev:client": "vite",
+    "build": "vite build",
+    "start": "NODE_ENV=production node --no-warnings server/index.js",
+    "bots": "node --no-warnings scripts/bots.js",
+    "test": "node --no-warnings --test server/tests/*.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "three": "^0.169.0",
+    "vite": "^5.4.10"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
