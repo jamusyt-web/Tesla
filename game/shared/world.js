@@ -187,8 +187,11 @@ export class NavGrid {
     this.block = new Uint8Array(N * N);
     for (let j = 0; j < N; j++)
       for (let i = 0; i < N; i++) {
+        // A cell is open only if its centre and the area around it are
+        // walkable, so paths never squeeze through gaps narrower than a hero.
         const [x, z] = this.center(i, j);
-        this.block[j * N + i] = isWalkable(x, z, col) ? 0 : 1;
+        const ok = isWalkable(x, z, col) && isWalkable(x - 0.2, z - 0.2, col) && isWalkable(x + 0.2, z - 0.2, col) && isWalkable(x - 0.2, z + 0.2, col) && isWalkable(x + 0.2, z + 0.2, col);
+        this.block[j * N + i] = ok ? 0 : 1;
       }
   }
   center(i, j) {
@@ -238,7 +241,9 @@ export class NavGrid {
       [si, sj] = this.cell(s[0], s[1]);
     }
     let [gi, gj] = this.cell(goal[0], goal[1]);
+    let retargeted = false;
     if (!this.open(gi, gj)) {
+      retargeted = true;
       // The goal point is walkable but its grid cell's centre isn't (e.g. the
       // edge of the narrow dock): aim A* at the nearest open cell instead.
       const g = this.nearestOpen(goal[0], goal[1]);
@@ -282,7 +287,16 @@ export class NavGrid {
     const cells = [];
     for (let c = target; c !== -1 && c !== start; c = from[c]) cells.push(this.center(c % N, (c / N) | 0));
     cells.reverse();
-    cells[cells.length - 1] = goal;
+    if (!retargeted) {
+      if (cells.length) cells[cells.length - 1] = goal;
+      else cells.push(goal);
+    } else {
+      // Only step off the grid onto the exact goal if that last hop is clear
+      // (never cut a corner over water or through a wall to get there).
+      const [lx, lz] = cells.length ? cells[cells.length - 1] : this.center(gi, gj);
+      if (!cells.length) cells.push([lx, lz]);
+      if (this.clear(lx, lz, goal[0], goal[1])) cells.push(goal);
+    }
     // String-pull: skip waypoints we have line of sight past.
     const out = [];
     let ax = sx;
@@ -373,38 +387,33 @@ export function stepPath(e, dt, speed = MOVE_SPEED) {
   return !!e.path;
 }
 
-// Where to stand to work a node: nearest walkable point on a ring around it.
-export function approachPoint(node, fromX, fromZ, col) {
+// Where to stand to work a node: the nearest walkable point on a ring around
+// it. Pass `nav` to only accept points you can actually walk to from (fromX, fromZ).
+export function approachPoint(node, fromX, fromZ, col, nav = null) {
   const t = NODE_TYPES[node.type];
-  const ring = t.kind === 'fish' ? null : (t.r * node.s || 0) + 1.2;
+  const cands = [];
   if (t.kind === 'fish') {
     // Stand on the dock end or the shore facing the spot.
-    const cands = [];
     for (let a = 0; a < 32; a++) {
       const ang = (a / 32) * Math.PI * 2;
       for (const d of [2, 3.5, 5, 6.5]) {
         const x = node.x + Math.cos(ang) * d;
         const z = node.z + Math.sin(ang) * d;
-        if (isWalkable(x, z, col)) cands.push([x, z, d]);
+        if (isWalkable(x, z, col)) cands.push({ x, z, k: d + 0.02 * Math.hypot(x - fromX, z - fromZ) });
       }
     }
-    cands.sort((a, b) => a[2] - b[2] + 0.02 * (Math.hypot(a[0] - fromX, a[1] - fromZ) - Math.hypot(b[0] - fromX, b[1] - fromZ)));
-    return cands[0] ? [cands[0][0], cands[0][1]] : null;
-  }
-  let best = null;
-  let bestD = Infinity;
-  for (let a = 0; a < 16; a++) {
-    const ang = (a / 16) * Math.PI * 2;
-    const x = node.x + Math.cos(ang) * ring;
-    const z = node.z + Math.sin(ang) * ring;
-    if (!isWalkable(x, z, col)) continue;
-    const d = Math.hypot(x - fromX, z - fromZ);
-    if (d < bestD) {
-      bestD = d;
-      best = [x, z];
+  } else {
+    const ring = (t.r * node.s || 0) + 1.2;
+    for (let a = 0; a < 16; a++) {
+      const ang = (a / 16) * Math.PI * 2;
+      const x = node.x + Math.cos(ang) * ring;
+      const z = node.z + Math.sin(ang) * ring;
+      if (isWalkable(x, z, col)) cands.push({ x, z, k: Math.hypot(x - fromX, z - fromZ) });
     }
   }
-  return best;
+  cands.sort((a, b) => a.k - b.k);
+  for (const c of cands) if (!nav || nav.findPath(fromX, fromZ, c.x, c.z)) return [c.x, c.z];
+  return null;
 }
 
 // Building door location (where you walk to enter).

@@ -37,10 +37,12 @@ function createHero() {
 }
 
 async function enterGame() {
-  const loading = h('div.loading', h('div', h('span.spin', '🌲'), 'Entering Hearthvale…'));
+  const bar = h('i', { style: { width: '0%' } });
+  const loading = h('div.loading', h('div', h('span.spin', '🌲'), 'Entering Hearthvale…', h('div.loadbar', bar)));
   app.append(loading);
-  // three.js + the world are big; load them only once we're in.
-  const [{ GameClient }, { Hud }] = await Promise.all([import('./game.js'), import('./ui/hud.js')]);
+  // three.js, the world and its 3D models are big; load them only once we're in.
+  const [{ GameClient }, { Hud }, { loadAssets }] = await Promise.all([import('./game.js'), import('./ui/hud.js'), import('./scene/assets.js')]);
+  await loadAssets((p) => (bar.style.width = `${Math.round(p * 100)}%`));
   const sock = new Socket();
   const hud = new Hud(app, sock);
   const game = new GameClient(app, sock, hud);

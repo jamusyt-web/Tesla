@@ -13,7 +13,7 @@ import { openDb } from '../server/db.js';
 import { Heroes } from '../server/heroes.js';
 import { Auth } from '../server/auth.js';
 import { randomAvatar } from '../shared/avatar.js';
-import { generateNodes, generateScenery, buildColliders, approachPoint, NODE_TYPES, BUILDINGS, doorPoint } from '../shared/world.js';
+import { generateNodes, generateScenery, buildColliders, approachPoint, NODE_TYPES, BUILDINGS, doorPoint, NavGrid } from '../shared/world.js';
 
 const COUNT = Number(process.argv[2] || 6);
 const URL_ = process.argv[3] || 'http://localhost:8787';
@@ -25,6 +25,7 @@ const heroes = new Heroes(db);
 const auth = new Auth(db);
 const nodes = generateNodes();
 const col = buildColliders(nodes, generateScenery());
+const nav = new NavGrid(col);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 
@@ -70,7 +71,7 @@ async function runBot(i) {
       const t = pick(types);
       const cands = nodes.filter((n) => n.type === t).sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z));
       const n = pick(cands.slice(0, 4));
-      const ap = approachPoint(n, me.x, me.z, col);
+      const ap = approachPoint(n, me.x, me.z, col, nav);
       if (ap) {
         await walk(ap[0], ap[1]);
         const nt = NODE_TYPES[n.type];

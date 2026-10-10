@@ -354,6 +354,10 @@ export class GameClient {
     const s = this.sock;
     this.off = [
       s.on('welcome', (m) => this.onWelcome(m)),
+      s.on('_close', () => {
+        this.endFishing();
+        this.stopGather();
+      }),
       s.on('join', (m) => {
         this.addPlayer(m.p);
         this.hud.setOnline(this.players.size);
@@ -418,7 +422,8 @@ export class GameClient {
     }
     this.battle = null;
     this.gather = null;
-    this.fishing = null;
+    this.endFishing();
+    this.hud.hideRhythm();
     this.addPlayer(m.you, true);
     for (const p of m.players) this.addPlayer(p);
     for (const mob of m.mobs) this.addMob(mob);
@@ -579,6 +584,8 @@ export class GameClient {
   }
 
   walkTo(x, z, marker = false, onArrive = null) {
+    if (this.hud.fight) return false; // mid reel-fight: stay put
+    if (this.fishing) this.endFishing(); // the server cancels too when it gets the move
     const L = this.me.local;
     const path = STATIC.nav.findPath(L.x, L.z, x, z);
     if (!path) return false;
@@ -608,7 +615,7 @@ export class GameClient {
     const range = t.kind === 'fish' ? FISH_RANGE - 0.5 : INTERACT_RANGE + t.r * node.s;
     const arrive = () => this.startNodeAction(id);
     if (Math.hypot(L.x - node.x, L.z - node.z) <= range && STATIC.nav.clear(L.x, L.z, node.x + (L.x - node.x) * 0.5, node.z + (L.z - node.z) * 0.5)) return arrive();
-    const ap = approachPoint(node, L.x, L.z, STATIC.col);
+    const ap = approachPoint(node, L.x, L.z, STATIC.col, STATIC.nav);
     if (!ap || !this.walkTo(ap[0], ap[1], false, arrive)) this.hud.toast("Can't reach that.");
     this.hud.ring?.(view);
   }
@@ -733,6 +740,7 @@ export class GameClient {
 
   // ── Fishing ──────────────────────────────────────────────────────────
   cast(id) {
+    if (this.fishing) this.endFishing(); // recasting: clear the old bobber first
     const node = STATIC.nodes.get(id);
     this.me.av.hold('rod');
     this.me.av.play('cast');
@@ -776,38 +784,42 @@ export class GameClient {
     this.hud.fishState('bite');
   }
 
-  // Tap while waiting/biting: try to hook. A good hook starts the reel fight.
+  // Tap while waiting/biting: try to hook. A good hook starts the reel fight;
+  // a bad one comes back as a fishResult. Always a request, so we hear back.
   reel() {
     const f = this.fishing;
     if (!f || f.state === 'fight' || f.state === 'hooking') return;
     this.me.av.play('reel');
-    if (f.state !== 'bite') {
-      this.sock.send({ t: 'reel' }); // too early — server answers with fishResult
-      return;
-    }
+    const was = f.state;
     f.state = 'hooking';
     this.hud.fishState(null);
     this.sock
       .req('reel')
       .then((r) => {
-        if (!r?.fight || this.fishing !== f) return;
+        if (this.fishing !== f) return;
+        if (!r?.fight) {
+          if (f.state === 'hooking') f.state = was; // server will send the fishResult
+          return;
+        }
         f.state = 'fight';
         f.splashT = 0;
         sfx.splash();
-        this.hud.startFight(f.bite, (toggles, end) => this.sock.send({ t: 'land', toggles, end }));
+        this.hud.startFight(r.bite || f.bite, (toggles, end) => this.sock.send({ t: 'land', toggles, end }));
       })
-      .catch(() => {});
+      .catch(() => this.fishing === f && this.endFishing());
   }
 
   endFishing() {
     const f = this.fishing;
+    this.hud.fishState(null);
+    this.hud.endFight();
     if (!f) return;
     this.scene.remove(f.bob, f.line);
     this.fishing = null;
     this.hud.fishState(null);
     this.hud.endFight();
     setTimeout(() => {
-      if (!this.fishing) {
+      if (!this.fishing && this.me) {
         this.me.av.setState('idle');
         this.me.av.hold(null);
       }
@@ -827,7 +839,7 @@ export class GameClient {
       if (big) this.hud.levelUp(`${it.name}!`, `${m.kg} kg — what a catch!`);
       this.hud.onXp(m.xp);
       this.me.av.play('cheer');
-    } else {
+    } else if (!m.cancelled) {
       this.hud.toast(m.reason);
     }
   }
@@ -1181,7 +1193,7 @@ export class GameClient {
     if (now - this.lastKeyMove < 140) return;
     this.lastKeyMove = now;
     this.stopGather();
-    if (this.fishing) this.reel();
+    if (this.hud.fight) return;
     const y = this.cam.yaw;
     const dx = fx * Math.cos(y) + fz * Math.sin(y);
     const dz = -fx * Math.sin(y) + fz * Math.cos(y);

@@ -13,7 +13,7 @@ const DIST = path.join(ROOT, 'dist');
 // index.js so tests can spin up a real server on a random port.
 export function createServer(db) {
   const game = new Game(db);
-  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
+  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.jpg': 'image/jpeg', '.webp': 'image/webp' };
 
   function readBody(req) {
     return new Promise((resolve, reject) => {
@@ -82,7 +82,11 @@ export function createServer(db) {
     let p = path.normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
     let file = path.join(DIST, p);
     if (!file.startsWith(DIST)) return json(res, 403, { error: 'no' });
-    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html');
+    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      // Missing files with an extension (models, images…) are real 404s; anything else is the app.
+      if (path.extname(p)) return json(res, 404, { error: 'Not found' });
+      file = path.join(DIST, 'index.html');
+    }
     if (!fs.existsSync(file)) {
       res.writeHead(200, { 'content-type': 'text/plain' });
       return res.end('Client not built. Run `npm run build` (or use `npm run dev`).');
@@ -90,7 +94,7 @@ export function createServer(db) {
     const ext = path.extname(file);
     res.writeHead(200, {
       'content-type': MIME[ext] || 'application/octet-stream',
-      'cache-control': file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache',
+      'cache-control': file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : file.includes(`${path.sep}models${path.sep}`) ? 'public, max-age=86400' : 'no-cache',
     });
     fs.createReadStream(file).pipe(res);
   }

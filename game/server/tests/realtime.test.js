@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { openDb } from '../db.js';
 import { createServer } from '../app.js';
-import { generateNodes, NODE_TYPES, approachPoint, generateScenery, buildColliders } from '../../shared/world.js';
+import { generateNodes, NODE_TYPES, approachPoint, generateScenery, buildColliders, NavGrid } from '../../shared/world.js';
 
 let srv;
 let game;
@@ -102,7 +102,7 @@ test('gathering is validated by the server and shared between players', async ()
   // Walk both to the tree.
   const col = buildColliders(generateNodes(), generateScenery());
   for (const p of [a, b]) {
-    const ap = approachPoint(oak, p.welcome.you.x, p.welcome.you.z, col);
+    const ap = approachPoint(oak, p.welcome.you.x, p.welcome.you.z, col, new NavGrid(col));
     p.ws.send(JSON.stringify({ t: 'move', x: ap[0], z: ap[1] }));
   }
   await new Promise((r) => setTimeout(r, 11000));
@@ -151,7 +151,7 @@ test('fishing: hook, fight, and the server replays the fight to confirm the catc
   try {
   const col = buildColliders(generateNodes(), generateScenery());
   const spot = generateNodes().find((n) => n.type === 'fish_spot' && !isDeepSpot(n));
-  const ap = approachPoint(spot, a.welcome.you.x, a.welcome.you.z, col);
+  const ap = approachPoint(spot, a.welcome.you.x, a.welcome.you.z, col, new NavGrid(col));
   a.ws.send(JSON.stringify({ t: 'move', x: ap[0], z: ap[1] }));
   await new Promise((r) => setTimeout(r, 9000));
 

@@ -262,8 +262,8 @@ class Battle {
     if (this.fighters.size >= 4) fail('This battle is full (4 heroes).');
     const st = c.stats();
     this.fighters.set(c.hero.id, { c, hp: Math.max(1, Math.min(c.ent.hp, st.hp)), max: st.hp, atk: st.atk, def: st.def, charge: 0, choice: null, alive: true });
+    c.cancelFishing();
     c.battle = this;
-    c.ent.fishing = null;
     c.ent.act = 'battle';
     // Line up facing the monster in a little arc.
     const n = this.fighters.size - 1;
@@ -417,6 +417,15 @@ class Battle {
 // One connected player.
 // ─────────────────────────────────────────────────────────────────────────
 class Client {
+  // Stop fishing for any reason other than a finished catch, and tell the
+  // client so its bobber/fight UI never gets left behind.
+  cancelFishing(reason = 'You reeled your line in.') {
+    if (!this.ent.fishing) return;
+    this.ent.fishing = null;
+    if (this.ent.act === 'fish') this.ent.act = 'idle';
+    this.send({ t: 'fishResult', ok: false, cancelled: true, reason });
+  }
+
   constructor(game, ws, hero) {
     this.game = game;
     this.ws = ws;
@@ -724,14 +733,19 @@ export class Game {
     if (now > f.biteAt + f.window + 450) return lost('Too slow — it got away!');
     f.state = 'fight';
     f.fightAt = now;
-    return { ok: true, fight: true };
+    const { d, behavior, seed } = f.fish;
+    return { ok: true, fight: true, bite: { fish: { d, behavior, seed }, gear: f.gear, rating: fightRating(d, f.gear) } };
   }
 
   // The client reports the ticks at which the reel button toggled; the
   // server replays the exact same deterministic fight to decide the outcome.
   land(c, toggles, endTick, now) {
     const f = c.ent.fishing;
-    if (!f || f.state !== 'fight') return { ok: false };
+    if (!f || f.state !== 'fight') {
+      // Always answer, so the client can never be left showing a dead fight.
+      c.send({ t: 'fishResult', ok: false, cancelled: true, reason: 'The line went slack.' });
+      return { ok: false };
+    }
     c.ent.fishing = null;
     c.ent.act = 'idle';
     const end = Math.floor(Number(endTick));
@@ -832,7 +846,7 @@ const HANDLERS = {
     const z = num(m.z);
     if (Math.hypot(x, z) > WORLD_RADIUS + 10) return;
     const path = STATIC.nav.findPath(c.ent.x, c.ent.z, x, z);
-    c.ent.fishing = null;
+    c.cancelFishing();
     if (path) {
       c.ent.path = path;
       c.ent.act = 'walk';
