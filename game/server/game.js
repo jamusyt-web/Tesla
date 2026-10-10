@@ -1,3 +1,4 @@
+import { PROPS } from '../shared/props.js';
 import { ITEMS, isItem } from '../shared/items.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
 import { levelFromXp, doubleChance } from '../shared/skills.js';
@@ -24,7 +25,7 @@ const CHAT_MAX = 140;
 const STATIC = (() => {
   const nodes = generateNodes();
   const scenery = generateScenery();
-  const col = buildColliders(nodes, scenery);
+  const col = buildColliders(nodes, scenery, PROPS);
   return { nodes, col, nav: new NavGrid(col) };
 })();
 

@@ -1,8 +1,10 @@
+import { PROPS } from '../../shared/props.js';
 import * as THREE from 'three';
 import { Avatar } from './scene/avatar.js';
 import { Mob } from './scene/mobs.js';
 import { buildTown } from './scene/town.js';
 import { Particles, Rings } from './scene/fx.js';
+import { Townsfolk } from './scene/townsfolk.js';
 import { h } from './util/dom.js';
 import { sfx } from './util/sfx.js';
 import { ITEMS } from '../../shared/items.js';
@@ -23,7 +25,7 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 // Shared static world data (same deterministic generation as the server).
 const STATIC = (() => {
   const nodes = generateNodes();
-  const col = buildColliders(nodes, generateScenery());
+  const col = buildColliders(nodes, generateScenery(), PROPS);
   return { nodes: new Map(nodes.map((n) => [n.id, n])), col, nav: new NavGrid(col) };
 })();
 
@@ -86,6 +88,7 @@ export class GameClient {
     this.renderer = renderer;
     this.el = h('div#game');
     this.el.append(renderer.domElement);
+    this.el.append(h('div.vignette'));
     this.labelLayer = h('div.labels');
     this.el.append(this.labelLayer);
     root.append(this.el);
@@ -120,6 +123,7 @@ export class GameClient {
     renderer.shadowMap.autoUpdate = false;
     this.rings = new Rings(scene);
     this.town = buildTown(scene, this.fx, { low });
+    this.folk = new Townsfolk(scene, STATIC.nav, { low });
     this.nodeLabels = new Map();
     this.#makeStaticLabels();
     this.#makeMarker();
@@ -533,12 +537,13 @@ export class GameClient {
   pick(x, y) {
     const v = new THREE.Vector2((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1);
     this.raycaster.setFromCamera(v, this.camera);
-    const objs = [...this.town.pickables, ...[...this.players.values()].filter((p) => !p.isMe).map((p) => p.av.root), ...[...this.mobs.values()].filter((m) => m.mob.root.visible).map((m) => m.mob.root)];
+    const objs = [...this.town.pickables, ...this.folk.objects, ...[...this.players.values()].filter((p) => !p.isMe).map((p) => p.av.root), ...[...this.mobs.values()].filter((m) => m.mob.root.visible).map((m) => m.mob.root)];
     const hits = this.raycaster.intersectObjects(objs, true);
     let ground = null;
     for (const hit of hits) {
       const u = hit.object.userData;
       if (u.mob) return { kind: 'mob', id: u.mob, point: hit.point };
+      if (u.npc) return { kind: 'npc', npc: u.npc, point: hit.point };
       if (u.player) return { kind: 'player', id: u.player, point: hit.point };
       if (u.node) return { kind: 'node', id: u.node, point: hit.point };
       if (u.building) return { kind: 'building', id: u.building, point: hit.point };
@@ -571,6 +576,13 @@ export class GameClient {
     if (hit.kind === 'node') return this.goNode(hit.id);
     if (hit.kind === 'mob') return this.goMob(hit.id);
     if (hit.kind === 'player') return this.hud.openProfile(hit.id);
+    if (hit.kind === 'npc') {
+      const info = hit.npc.info;
+      const line = info.lines[Math.floor(Math.random() * info.lines.length)];
+      this.floatText(hit.npc.obj.position.clone().setY(info.kind === 'pet' ? 1.4 : 2.6), info.name ? `${info.name}: “${line}”` : line, 'loot');
+      sfx.chat();
+      return;
+    }
     if (hit.kind === 'building') {
       const b = BUILDINGS.find((bb) => bb.id === hit.id);
       if (b && !b.deco) return this.goBuilding(b.id);
@@ -1140,6 +1152,7 @@ export class GameClient {
       mv.mob.update(dt, moving);
     }
     this.town.update(dt, this.t, this.camera);
+    this.folk.update(dt);
     this.fx.update(dt);
     this.fx.puff.update(dt);
     this.rings.update(dt);

@@ -41,13 +41,13 @@ async function enterGame() {
   const loading = h('div.loading', h('div', h('span.spin', '🌲'), 'Entering Hearthvale…', h('div.loadbar', bar)));
   app.append(loading);
   // three.js, the world and its 3D models are big; load them only once we're in.
-  const [{ GameClient }, { Hud }, { loadAssets }] = await Promise.all([import('./game.js'), import('./ui/hud.js'), import('./scene/assets.js')]);
+  const [{ GameClient }, { Hud }, { loadAssets }, { itemIcon }] = await Promise.all([import('./game.js'), import('./ui/hud.js'), import('./scene/assets.js'), import('./ui/portrait.js')]);
   await loadAssets((p) => (bar.style.width = `${Math.round(p * 100)}%`));
   const sock = new Socket();
   const hud = new Hud(app, sock);
   const game = new GameClient(app, sock, hud);
   hud.attach(game);
-  window.__hv = { game, hud, sock }; // handy for debugging & automated play-tests
+  window.__hv = { game, hud, sock, itemIcon }; // handy for debugging & automated play-tests
   app.insertBefore(game.el, hud.el);
   let banner = null;
   sock.on('welcome', () => {

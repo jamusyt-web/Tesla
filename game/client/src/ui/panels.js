@@ -1,6 +1,6 @@
 import { h, clear, fmt } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
-import { portrait } from './portrait.js';
+import { portrait, itemIcon } from './portrait.js';
 import { ITEMS, RARITY, CATEGORIES } from '../../../shared/items.js';
 import { RECIPES } from '../../../shared/recipes.js';
 import { SKILLS, SKILL_IDS, levelProgress, levelFromXp } from '../../../shared/skills.js';
@@ -9,8 +9,14 @@ const NPC_RATE = 0.6;
 const TAX = 0.04;
 const SHOP_SLOTS = 8;
 
+// 3D-rendered icon when the item has a model, emoji otherwise.
+export const iconEl = (id, size = null) => {
+  const src = itemIcon(id);
+  return src ? h('img.icon3d', { src, alt: ITEMS[id]?.name || id, style: size ? { width: size, height: size } : null }) : ITEMS[id]?.icon || '❔';
+};
+
 const itemSlot = (id, qty, { sel = false, eq = false, on } = {}) =>
-  h('div.slot' + (sel ? '.sel' : ''), { 'data-r': ITEMS[id]?.rarity, title: ITEMS[id]?.name, on: on ? { click: on } : null }, ITEMS[id]?.icon || '❔', qty != null ? h('span.q', fmt(qty)) : null, eq ? h('span.eq', 'E') : null);
+  h('div.slot' + (sel ? '.sel' : ''), { 'data-r': ITEMS[id]?.rarity, title: ITEMS[id]?.name, on: on ? { click: on } : null }, iconEl(id), qty != null ? h('span.q', fmt(qty)) : null, eq ? h('span.eq', 'E') : null);
 
 const qtyInput = (value, max) => {
   const inp = h('input', { type: 'number', min: 1, max, value, inputMode: 'numeric' });
@@ -107,7 +113,7 @@ export class Panels {
     const q = qtyInput(Math.max(1, sellable), Math.max(1, sellable));
     const box = h(
       'div.detail',
-      h('div.row', h('div', { style: { fontSize: '40px' } }, it.icon), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '18px' } }, it.name), h('div', { style: { color: RARITY[it.rarity].color, fontWeight: 600, fontSize: '13px' } }, RARITY[it.rarity].label + ' · ' + CATEGORIES[it.cat]), h('div.muted', itemDesc(it)))),
+      h('div.row', h('div', { style: { fontSize: '40px' } }, iconEl(id, '56px')), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '18px' } }, it.name), h('div', { style: { color: RARITY[it.rarity].color, fontWeight: 600, fontSize: '13px' } }, RARITY[it.rarity].label + ' · ' + CATEGORIES[it.cat]), h('div.muted', itemDesc(it)))),
       h('div.kv', h('span', 'You own'), h('b', fmt(have))),
       h('div.kv', h('span', 'Base value'), h('b.gold', `${it.value} 🪙`)),
       h('div.kv', h('span', 'Merchant pays'), h('b.gold', `${npc} 🪙 each`)),
@@ -207,7 +213,7 @@ export class Panels {
         c.body.append(
           h(
             'div.rowcard' + (locked ? '.locked' : ''),
-            h('div.ic', out.icon),
+            h('div.ic', iconEl(r.out, '44px')),
             h(
               'div.grow',
               h('div.t', out.name, h('span.muted', `  · worth ${out.value} 🪙`)),
@@ -263,7 +269,7 @@ export class Panels {
             h(
               'div.rowcard',
               { style: { cursor: 'pointer' }, on: { click: () => ((st.item = id), render()) } },
-              h('div.ic', it.icon),
+              h('div.ic', iconEl(id, '44px')),
               h('div.grow', h('div.t', it.name), h('div.s', s.last ? `Last ${s.last} 🪙 · ${fmt(s.vol)} traded today` : `No trades yet · base ${it.value} 🪙`), this.me.inv[id] ? h('div.s', `You have ${fmt(this.me.inv[id])}`) : null),
               h('div', { style: { textAlign: 'right', fontSize: '13px', fontWeight: 600 } }, h('div', { style: { color: '#b8382f' } }, s.ask ? `Sell ${s.ask} 🪙 (${fmt(s.supply)})` : 'No sellers'), h('div', { style: { color: '#3a8f3d' } }, s.bid ? `Buy ${s.bid} 🪙 (${fmt(s.demand)})` : 'No buyers')),
             ),
@@ -323,7 +329,7 @@ export class Panels {
     const it = ITEMS[id];
     const body = c.body;
     body.append(h('button.btn.plain.small', { style: { marginBottom: '10px' }, on: { click: () => ((st.item = null), back()) } }, '← All items'));
-    const head = h('div.row', h('div', { style: { fontSize: '44px' } }, it.icon), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '20px' } }, it.name), h('div.muted', `Base value ${it.value} 🪙 · Merchant pays ${Math.floor(it.value * NPC_RATE)} 🪙`)));
+    const head = h('div.row', h('div', { style: { fontSize: '44px' } }, iconEl(id, '60px')), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '20px' } }, it.name), h('div.muted', `Base value ${it.value} 🪙 · Merchant pays ${Math.floor(it.value * NPC_RATE)} 🪙`)));
     const stats = h('div.muted', { style: { margin: '6px 0' } }, 'Loading…');
     const chart = h('canvas.chart', { width: 600, height: 160 });
     const bookEl = h('div.book');
@@ -495,7 +501,7 @@ export class Panels {
         const s = slots.find((x) => x.slot === i);
         shelvesEl.append(
           s
-            ? h('div.shelf', { on: { click: () => ((editing = i), drawEdit()) } }, h('div.ic', ITEMS[s.item].icon), h('div.nm', ITEMS[s.item].name), h('div.pr', `${s.price} 🪙`), h('div.muted', `×${s.qty}`))
+            ? h('div.shelf', { on: { click: () => ((editing = i), drawEdit()) } }, h('div.ic', iconEl(s.item, '48px')), h('div.nm', ITEMS[s.item].name), h('div.pr', `${s.price} 🪙`), h('div.muted', `×${s.qty}`))
             : h('div.shelf.empty', { on: { click: () => ((editing = i), drawEdit()) } }, '＋ Stock'),
         );
       }

@@ -1,3 +1,4 @@
+import { PROPS } from '../shared/props.js';
 // Populate the town with friendly bots so you can see a busy lobby while
 // testing. Bots are ordinary players: they connect over the same WebSocket
 // protocol and the server treats them exactly like humans.
@@ -24,7 +25,7 @@ const db = openDb();
 const heroes = new Heroes(db);
 const auth = new Auth(db);
 const nodes = generateNodes();
-const col = buildColliders(nodes, generateScenery());
+const col = buildColliders(nodes, generateScenery(), PROPS);
 const nav = new NavGrid(col);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pick = (a) => a[Math.floor(Math.random() * a.length)];

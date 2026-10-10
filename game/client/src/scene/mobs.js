@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mesh, toon, shade } from './toon.js';
 import { MONSTERS } from '../../../shared/monsters.js';
+import * as assets from './assets.js';
 
 const OL = 0.03;
 const sph = (r, a = 16, b = 12) => new THREE.SphereGeometry(r, a, b);
@@ -34,10 +35,36 @@ export class Mob {
     blob.position.y = 0.02;
     this.root.add(blob);
     this.blob = blob;
-    this[type]?.();
+    if (assets.has(`mob_${type}`)) this.#fromModel(`mob_${type}`);
+    else if (this[type]) this[type]();
+    else this.slime(); // unknown type without a model: a tinted blob
     this.root.traverse((o) => {
       if (o.isMesh && o.material.side !== THREE.BackSide && o !== blob) o.castShadow = true;
     });
+  }
+
+  #fromModel(slot) {
+    const made = assets.make(slot, { unique: true });
+    this.body.add(made.object);
+    made.object.traverse((o) => {
+      if (o.isMesh && o.material.side !== THREE.BackSide) this.mats.push(...[].concat(o.material));
+    });
+    this.height = made.size.y + 0.4;
+    this.blob.scale.setScalar(Math.max(made.size.x, made.size.z) * 0.8);
+    if (made.mixer) {
+      this.mixer = made.mixer;
+      this.anim = { idle: assets.findClip(made.actions, 'idle'), walk: assets.findClip(made.actions, 'walk'), attack: assets.findClip(made.actions, 'attack'), hit: assets.findClip(made.actions, 'hit'), die: assets.findClip(made.actions, 'die') };
+      this.loop = null;
+      this.#loop('idle');
+    }
+  }
+
+  #loop(name) {
+    const a = this.anim?.[name] || this.anim?.idle;
+    if (!a || this.loop === a) return;
+    a.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.2).play();
+    this.loop?.fadeOut(0.2);
+    this.loop = a;
   }
 
   m(color) {
@@ -206,11 +233,34 @@ export class Mob {
   play(name) {
     this.oneShot = { name, t: 0, dur: { attack: 0.6, hurt: 0.35, die: 0.8 }[name] || 0.5 };
     if (name === 'hurt') this.flash = 0.3;
+    const clip = this.anim?.[{ attack: 'attack', hurt: 'hit', die: 'die' }[name]];
+    if (clip) {
+      clip.reset().setLoop(THREE.LoopOnce, 1).fadeIn(0.08).play();
+      clip.clampWhenFinished = name === 'die';
+      this.oneShot.clip = true;
+    }
   }
 
   update(dt, moving) {
     this.t += dt;
     const t = this.t;
+    if (this.mixer) {
+      // Animated model: clips do the work; keep procedural lunge/knockback for punch.
+      this.#loop(moving ? 'walk' : 'idle');
+      this.mixer.update(dt);
+      this.body.position.set(0, 0, 0);
+      const os = this.oneShot;
+      if (os) {
+        os.t += dt;
+        const k = Math.min(1, os.t / os.dur);
+        if (os.name === 'attack') this.body.position.z = Math.sin(Math.PI * k) * 1.0;
+        else if (os.name === 'hurt') this.body.position.z = -Math.sin(Math.PI * k) * 0.35;
+        else if (os.name === 'die' && !os.clip) this.body.scale.setScalar(1 - k * 0.9);
+        if (os.t >= os.dur && os.name !== 'die') this.oneShot = null;
+      }
+      this.#flashTick(dt);
+      return;
+    }
     this.body.position.set(0, 0, 0);
     this.body.rotation.set(0, 0, 0);
     this.body.scale.set(1, 1, 1);
@@ -246,6 +296,10 @@ export class Mob {
       }
       if (os.t >= os.dur && os.name !== 'die') this.oneShot = null;
     }
+    this.#flashTick(dt);
+  }
+
+  #flashTick(dt) {
     if (this.flash > 0) {
       this.flash -= dt;
       const on = this.flash > 0 && Math.floor(this.flash * 30) % 2 === 0;

@@ -25,6 +25,42 @@ export const MONSTERS = {
     spawn: { x: 0, z: -86, r: 6, count: 2 },
     boss: true,
   },
+  caterpillar: {
+    name: 'Leafmuncher', lvl: 2, hp: 55, atk: 8, def: 2, xp: 20, gold: [5, 11], color: '#8fd16a',
+    drops: [{ id: 'sunpetal', p: 0.5, min: 1, max: 2 }, { id: 'slime_gel', p: 0.4, min: 1, max: 1 }],
+    moves: [{ name: 'Nibble', mult: 1 }, { name: 'Silk Spit', mult: 1.25 }],
+    spawn: { x: 15, z: -47, r: 7, count: 4 },
+  },
+  crab: {
+    name: 'Snapper Crab', lvl: 3, hp: 70, atk: 10, def: 5, xp: 26, gold: [7, 14], color: '#e2574c',
+    drops: [{ id: 'perch', p: 0.5, min: 1, max: 2 }, { id: 'copper_ore', p: 0.45, min: 1, max: 2 }],
+    moves: [{ name: 'Pinch', mult: 1 }, { name: 'Double Snap', mult: 1.4 }],
+    spawn: { x: -25, z: -47, r: 7, count: 4 },
+  },
+  ghost: {
+    name: 'Wisp', lvl: 5, hp: 95, atk: 15, def: 3, xp: 42, gold: [12, 22], color: '#e9f2ff',
+    drops: [{ id: 'moonbloom', p: 0.6, min: 1, max: 2 }, { id: 'sapphire', p: 0.03, min: 1, max: 1 }],
+    moves: [{ name: 'Chill Touch', mult: 1 }, { name: 'Boo!', mult: 1.5 }],
+    spawn: { x: -12, z: -82, r: 6, count: 3 },
+  },
+  boar: {
+    name: 'Bristle Boar', lvl: 6, hp: 130, atk: 18, def: 6, xp: 52, gold: [14, 26], color: '#8b5a33',
+    drops: [{ id: 'leather', p: 0.6, min: 1, max: 1 }, { id: 'wolf_pelt', p: 0.4, min: 1, max: 2 }],
+    moves: [{ name: 'Tusk Jab', mult: 1 }, { name: 'Charge', mult: 1.55 }],
+    spawn: { x: 30, z: -52, r: 7, count: 4 },
+  },
+  skeleton: {
+    name: 'Rattlebones', lvl: 9, hp: 210, atk: 24, def: 9, xp: 95, gold: [26, 45], color: '#e8d9b0',
+    drops: [{ id: 'iron_ore', p: 0.7, min: 1, max: 3 }, { id: 'goblin_coin', p: 0.5, min: 1, max: 2 }],
+    moves: [{ name: 'Bone Bonk', mult: 1 }, { name: 'Rattle Slash', mult: 1.45 }],
+    spawn: { x: 16, z: -86, r: 6, count: 3 },
+  },
+  bear: {
+    name: 'Frost Bear', lvl: 10, hp: 300, atk: 27, def: 11, xp: 125, gold: [32, 55], color: '#f2f6fa',
+    drops: [{ id: 'wolf_pelt', p: 0.9, min: 2, max: 3 }, { id: 'golem_core', p: 0.08, min: 1, max: 1 }],
+    moves: [{ name: 'Maul', mult: 1 }, { name: 'Roar', mult: 1.3, aoe: true }],
+    spawn: { x: -28, z: -78, r: 6, count: 2 },
+  },
 };
 
 // Hero combat stats derived from level + gear.

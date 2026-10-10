@@ -1,9 +1,11 @@
+import { PROPS } from '../../shared/props.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateNodes, generateScenery, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKE, DOCK } from '../../shared/world.js';
+import { generateNodes, generateScenery, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKE, DOCK, GATE, gateColliders } from '../../shared/world.js';
+import { MONSTERS } from '../../shared/monsters.js';
 
 const nodes = generateNodes();
-const col = buildColliders(nodes, generateScenery());
+const col = buildColliders(nodes, generateScenery(), PROPS);
 const nav = new NavGrid(col);
 
 // The hard rule for any route: never through a building, over water or off
@@ -13,6 +15,7 @@ function solid(x, z) {
   const dock = Math.abs(x - DOCK.x) <= DOCK.w / 2 && Math.abs(z - DOCK.z) <= DOCK.d / 2;
   if (!dock && Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r - 0.05) return 'water';
   for (const b of BUILDINGS) if (Math.abs(x - b.x) < b.w / 2 - 0.05 && Math.abs(z - b.z) < b.d / 2 - 0.05) return `inside ${b.id}`;
+  for (const g of gateColliders()) if (Math.abs(x - g.x) < g.w / 2 - 0.05 && Math.abs(z - g.z) < g.d / 2 - 0.05) return 'through the gate wall';
   return null;
 }
 function hopProblem(ax, az, bx, bz) {
@@ -73,4 +76,22 @@ test('random paths never go through buildings, water or off the island, and are 
     checked++;
   }
   assert.ok(checked > 300, `checked ${checked} paths`);
+});
+
+test('the road to the Wilds goes through the gate arch, and every monster camp is reachable', () => {
+  const path = nav.findPath(SPAWN.x, SPAWN.z, GATE.x, GATE.z - 10);
+  assert.ok(path, 'the Wilds are reachable from town');
+  let [ax, az] = [SPAWN.x, SPAWN.z];
+  for (const [bx, bz] of path) {
+    assert.equal(hopProblem(ax, az, bx, bz), null);
+    if ((az - GATE.z) * (bz - GATE.z) <= 0) {
+      const x = ax + ((bx - ax) * (GATE.z - az)) / (bz - az || 1);
+      assert.ok(Math.abs(x - GATE.x) < 1.25, `crosses the wall line at x=${x.toFixed(2)}, not through the arch`);
+    }
+    [ax, az] = [bx, bz];
+  }
+  for (const [id, m] of Object.entries(MONSTERS)) {
+    const p = nav.nearestOpen(m.spawn.x, m.spawn.z);
+    assert.ok(p && nav.findPath(SPAWN.x, SPAWN.z, p[0], p[1]), `${id} camp at ${m.spawn.x},${m.spawn.z} is reachable`);
+  }
 });

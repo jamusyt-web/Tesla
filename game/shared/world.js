@@ -24,7 +24,7 @@ export const BUILDINGS = [
   { id: 'workshop', label: 'Workshop', icon: '🔨', action: 'craft', x: -17, z: -6, w: 9, d: 7, face: 'e', color: '#d98b5f', roof: '#8a4b3a' },
   { id: 'market', label: 'Grand Market', icon: '⚖️', action: 'market', x: 18, z: -6, w: 11, d: 8, face: 'w', color: '#f2d38a', roof: '#3f7fbf' },
   { id: 'shop', label: 'Your Shop', icon: '🏪', action: 'shop', x: -15, z: 16, w: 9, d: 7, face: 'n', color: '#f6c6a6', roof: '#c4534a' },
-  { id: 'townhall', label: 'Town Hall', icon: '🏛️', action: 'townhall', x: 16, z: 17, w: 11, d: 8, face: 'n', color: '#efe6d2', roof: '#5b7f4a' },
+  { id: 'townhall', label: 'Town Hall', icon: '🏛️', action: 'townhall', x: 16, z: 17.5, w: 11, d: 10, face: 'n', color: '#efe6d2', roof: '#5b7f4a' },
   { id: 'cottage1', x: -30, z: 4, w: 6, d: 5, face: 'e', color: '#f1e1b6', roof: '#b4553f', deco: true },
   { id: 'cottage2', x: 31, z: 6, w: 6, d: 5, face: 'w', color: '#d7e7f0', roof: '#6d5aa8', deco: true },
   { id: 'cottage3', x: -2, z: 30, w: 6, d: 5, face: 'n', color: '#f8d7da', roof: '#4f7d8c', deco: true },
@@ -32,8 +32,24 @@ export const BUILDINGS = [
   { id: 'cottage5', x: 30, z: -22, w: 6, d: 5, face: 's', color: '#fbe7c6', roof: '#3d6f9c', deco: true },
 ];
 
-// The gate to the Wilds is an arch you walk through; the posts are solid.
+// The gate to the Wilds: a castle wall with an arch you walk through. The
+// client builds it from castle-kit modules (1 unit = GATE_SCALE metres):
+// the arch tower in the middle, two wall sections and a corner tower each side.
 export const GATE = { id: 'gate', label: 'Wilds Gate', icon: '⚔️', x: 0, z: -34, width: 7 };
+export const GATE_SCALE = 4.5;
+const GATE_OPENING = 1.25; // half-width of the walkable arch (model: 0.255 × scale)
+
+export function gateColliders() {
+  const s = GATE_SCALE;
+  const out = [];
+  for (const sx of [-1, 1]) {
+    // arch tower sides
+    out.push({ x: GATE.x + sx * (GATE_OPENING + 0.5 * s) / 2, z: GATE.z, w: 0.5 * s - GATE_OPENING, d: 0.94 * s });
+    // two wall sections and the corner tower
+    out.push({ x: GATE.x + sx * 2 * s, z: GATE.z, w: 3 * s, d: s });
+  }
+  return out;
+}
 
 export const FOUNTAIN = { x: 0, z: 0, r: 3.2 };
 export const LAKE = { x: 26, z: 46, r: 14 };
@@ -133,6 +149,7 @@ export function generateScenery() {
   const blocked = (x, z) =>
     Math.hypot(x, z) < 12 ||
     BUILDINGS.some((b) => inRect(x, z, b, 3)) ||
+    gateColliders().some((g) => inRect(x, z, g, 2)) ||
     ZONES.some((zn) => Math.hypot(x - zn.x, z - zn.z) < zn.r + 2) ||
     Math.abs(x) < 3 || Math.abs(z) < 3 || Math.hypot(x, z) > WORLD_RADIUS - 4;
   const deco = scatter(rng, 46, 0, 0, WORLD_RADIUS - 6, 4, blocked, []);
@@ -150,16 +167,16 @@ export function generateScenery() {
 }
 
 // ── Collision ──────────────────────────────────────────────────────────
-export function buildColliders(nodes, scenery) {
-  const rects = BUILDINGS.map((b) => ({ x: b.x, z: b.z, w: b.w, d: b.d }));
+// props: solid town dressing from shared/props.js (passed in to avoid a circular import).
+export function buildColliders(nodes, scenery, props = []) {
+  const rects = BUILDINGS.map((b) => ({ x: b.x, z: b.z, w: b.w, d: b.d })).concat(gateColliders());
   const circles = [{ x: FOUNTAIN.x, z: FOUNTAIN.z, r: FOUNTAIN.r }];
-  // Gate posts
-  circles.push({ x: GATE.x - GATE.width / 2, z: GATE.z, r: 0.9 }, { x: GATE.x + GATE.width / 2, z: GATE.z, r: 0.9 });
   for (const n of nodes) {
     const t = NODE_TYPES[n.type];
     if (t.r > 0) circles.push({ x: n.x, z: n.z, r: t.r * n.s });
   }
   for (const t of scenery.trees) if (t.solid) circles.push({ x: t.x, z: t.z, r: 0.8 * t.s });
+  for (const p of props) if (p.r > 0) circles.push({ x: p.x, z: p.z, r: p.r });
   return { rects, circles };
 }
 

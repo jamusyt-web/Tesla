@@ -1,3 +1,4 @@
+import { PROPS } from '../../shared/props.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
@@ -100,7 +101,7 @@ test('gathering is validated by the server and shared between players', async ()
   assert.equal(far.ok, false);
   assert.match(far.err, /closer/);
   // Walk both to the tree.
-  const col = buildColliders(generateNodes(), generateScenery());
+  const col = buildColliders(generateNodes(), generateScenery(), PROPS);
   for (const p of [a, b]) {
     const ap = approachPoint(oak, p.welcome.you.x, p.welcome.you.z, col, new NavGrid(col));
     p.ws.send(JSON.stringify({ t: 'move', x: ap[0], z: ap[1] }));
@@ -149,7 +150,7 @@ test('fishing: hook, fight, and the server replays the fight to confirm the catc
   const { isDeepSpot } = await import('../../shared/world.js');
   const a = await player('Finn');
   try {
-  const col = buildColliders(generateNodes(), generateScenery());
+  const col = buildColliders(generateNodes(), generateScenery(), PROPS);
   const spot = generateNodes().find((n) => n.type === 'fish_spot' && !isDeepSpot(n));
   const ap = approachPoint(spot, a.welcome.you.x, a.welcome.you.z, col, new NavGrid(col));
   a.ws.send(JSON.stringify({ t: 'move', x: ap[0], z: ap[1] }));

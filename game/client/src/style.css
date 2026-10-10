@@ -363,3 +363,7 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 
 .loadbar { width: 220px; height: 12px; margin: 14px auto 0; border-radius: 8px; background: rgba(255,255,255,.6); overflow: hidden; box-shadow: inset 0 2px 0 rgba(0,0,0,.08); }
 .loadbar i { display: block; height: 100%; background: linear-gradient(#ffe27a, var(--gold)); border-radius: 8px; transition: width .2s; }
+
+.icon3d { width: 78%; height: 78%; object-fit: contain; image-rendering: auto; filter: drop-shadow(0 2px 0 rgba(90, 52, 30, .18)); pointer-events: none; }
+
+.vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(90, 50, 20, 0.22) 100%); }

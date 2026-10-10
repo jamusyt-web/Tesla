@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { mesh, toon, shade } from './toon.js';
+import * as assets from './assets.js';
+import { waterMaterial, groundTexture } from './water.js';
+import { buildModular, buildGate } from './buildings.js';
+import { PROPS } from '../../../shared/props.js';
 import {
   BUILDINGS, ZONES, GATE, FOUNTAIN, LAKE, DOCK, WORLD_RADIUS, NODE_TYPES,
   generateNodes, generateScenery, doorPoint, mulberry32,
@@ -32,6 +36,8 @@ function distSeg(px, pz, [ax, az, bx, bz]) {
   const t = Math.max(0, Math.min(1, ((px - ax) * vx + (pz - az) * vz) / (vx * vx + vz * vz)));
   return Math.hypot(px - (ax + vx * t), pz - (az + vz * t));
 }
+
+const hash = (str) => [...str].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) | 0, 7);
 
 // ── Gatherable node views ────────────────────────────────────────────────
 export class NodeView {
@@ -67,11 +73,62 @@ export class NodeView {
   }
 
   get height() {
+    if (this.modelSize) return this.modelSize.y * this.node.s;
     return { tree: this.node.type === 'tree_pine' ? 6 : 4.6, rock: 2, herb: 1, fish: 0.5 }[this.type.kind] * this.node.s;
   }
 
   build() {
     const k = this.node.type;
+    if (assets.has(k)) return this.#buildModel(k);
+    this.#buildProcedural(k);
+  }
+
+  // Imported model for the standing node, plus a stump / rubble / sprout for
+  // the depleted state (model if the manifest has one, procedural otherwise).
+  #buildModel(k) {
+    const kind = this.type.kind;
+    const variant = Math.abs(hash(this.node.id));
+    const m = assets.make(k, { variant });
+    this.full.add(m.object);
+    this.modelSize = m.size;
+    if (kind === 'rock') {
+      const ore = { rock_copper: '#e07b39', rock_iron: '#c9d3df', rock_gold: '#ffd23f' }[k];
+      if (ore) {
+        // Coloured ore crystals studded around the boulder.
+        const r = mulberry32(variant);
+        const om = toon(ore, { emissive: ore, emissiveIntensity: k === 'rock_gold' ? 0.4 : 0.15 });
+        const rad = Math.max(m.size.x, m.size.z) * 0.45;
+        for (let i = 0; i < 6; i++) {
+          const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.16 + r() * 0.1), om);
+          const a = r() * Math.PI * 2;
+          c.position.set(Math.cos(a) * rad, 0.3 + r() * m.size.y * 0.6, Math.sin(a) * rad);
+          c.rotation.set(r() * 3, r() * 3, 0);
+          this.full.add(c);
+        }
+      }
+    }
+    const depleted = { tree: `${k}_stump`, rock: 'rock_rubble', herb: 'herb_sprout' }[kind];
+    if (depleted && assets.has(depleted)) this.stump.add(assets.make(depleted, { variant }).object);
+    else if (kind === 'tree') this.#stump(k === 'tree_birch' ? '#f2efe6' : k === 'tree_pine' ? '#6b4226' : '#8b5a33');
+    else if (kind === 'rock') this.#pebbles('#9c9a94');
+    else if (kind === 'herb') {
+      const sprout = mesh(sph(0.1, 6, 5), '#4fae4f');
+      sprout.position.y = 0.06;
+      sprout.scale.y = 0.5;
+      this.stump.add(sprout);
+    }
+  }
+
+  #pebbles(base) {
+    for (let i = 0; i < 3; i++) {
+      const peb = mesh(new THREE.IcosahedronGeometry(0.22, 0), base);
+      peb.position.set(Math.cos(i * 2.1) * 0.8, 0.12, Math.sin(i * 2.1) * 0.8);
+      peb.scale.y = 0.6;
+      this.stump.add(peb);
+    }
+  }
+
+  #buildProcedural(k) {
     const F = this.full;
     if (k === 'tree_oak' || k === 'tree_birch') {
       const birch = k === 'tree_birch';
@@ -328,12 +385,14 @@ export function buildTown(scene, fx, { low = false } = {}) {
   animated.push((dt, t, cam) => sky.position.copy(cam.position));
 
   // Ocean
-  const ocean = new THREE.Mesh(new THREE.CircleGeometry(420, 48), toon('#4fb7e6', { emissive: '#1d6f9a', emissiveIntensity: 0.15 }));
+  const ocean = new THREE.Mesh(new THREE.RingGeometry(WORLD_RADIUS - 2, 420, 160, 6), waterMaterial({ radius: 420, coast: WORLD_RADIUS + 5.2, shallow: '#6fd6f2', deep: '#2b8fd0', fog: { color: '#cdeaf7', near: 70, far: 190 }, opacity: 1 }));
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = -2.2;
-  ocean.receiveShadow = false;
   scene.add(ocean);
-  animated.push((dt, t) => (ocean.position.y = -2.2 + Math.sin(t * 0.8) * 0.08));
+  animated.push((dt, t) => {
+    ocean.material.uniforms.time.value = t;
+    ocean.position.y = -2.2 + Math.sin(t * 0.8) * 0.06;
+  });
 
   // Ground: vertex-colored terrain with paths, zone tints, sandy shore, cliff falloff.
   const SIZE = 236;
@@ -383,7 +442,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
   }
   g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   g.computeVertexNormals();
-  const ground = new THREE.Mesh(g, new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toon('#fff').gradientMap }));
+  const ground = new THREE.Mesh(g, new THREE.MeshToonMaterial({ vertexColors: true, map: groundTexture(), gradientMap: toon('#fff').gradientMap }));
   ground.receiveShadow = true;
   ground.userData.ground = true;
   scene.add(ground);
@@ -474,7 +533,8 @@ export function buildTown(scene, fx, { low = false } = {}) {
 
   // Flowers
   const scenery = generateScenery();
-  {
+  const flowerSpots = scenery.flowers.map((f, i) => ({ x: f.x, z: f.z, rot: i * 2.39, s: 0.8 + (f.s - 0.7) * 0.6, v: f.c }));
+  if (!scatterModels(scene, 'deco_flower', flowerSpots, { outline: false, castShadow: false })) {
     const fl = scenery.flowers;
     const geo = sph(0.13, 6, 5);
     const im = new THREE.InstancedMesh(geo, toon('#ffffff'), fl.length);
@@ -496,10 +556,14 @@ export function buildTown(scene, fx, { low = false } = {}) {
     scene.add(im, stem);
   }
 
-  // Decorative trees (instanced).
-  {
-    const round = scenery.trees.filter((t) => t.kind === 'round');
-    const pine = scenery.trees.filter((t) => t.kind === 'pine');
+  // Decorative trees (instanced): models if available, procedural otherwise.
+  const roundAll = scenery.trees.filter((t) => t.kind === 'round');
+  const pineAll = scenery.trees.filter((t) => t.kind === 'pine');
+  const roundModel = scatterModels(scene, 'deco_tree_round', roundAll.map((t, i) => ({ x: t.x, z: t.z, rot: i * 1.7, s: t.s })));
+  const pineModel = scatterModels(scene, 'deco_tree_pine', pineAll.map((t, i) => ({ x: t.x, z: t.z, rot: i * 1.3, s: t.s })));
+  if (!roundModel || !pineModel) {
+    const round = roundModel ? [] : roundAll;
+    const pine = pineModel ? [] : pineAll;
     const o = new THREE.Object3D();
     const trunkR = new THREE.InstancedMesh(cyl(0.3, 0.42, 2.2, 7), toon('#8b5a33'), round.length + pine.length);
     const leafR = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.5, 1), toon('#ffffff'), round.length * 2);
@@ -538,11 +602,77 @@ export function buildTown(scene, fx, { low = false } = {}) {
     }
   }
 
+  // Extra greenery that only exists when models are available.
+  {
+    const nodeList = generateNodes();
+    const blocked = (x, z, pad = 1.5) =>
+      BUILDINGS.some((b) => Math.abs(x - b.x) < b.w / 2 + pad && Math.abs(z - b.z) < b.d / 2 + pad) ||
+      Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r + 1.2 ||
+      segs.some((sg) => distSeg(x, z, sg) < sg[4] + 0.8) ||
+      Math.hypot(x, z) < 12.5 || Math.hypot(x, z) > WORLD_RADIUS - 2 ||
+      nodeList.some((n) => Math.hypot(n.x - x, n.z - z) < 2.6);
+    const spots = (n, cx, cz, r, pad) => {
+      const out = [];
+      for (let k = 0; k < n * 6 && out.length < n; k++) {
+        const a = rng() * Math.PI * 2;
+        const d = Math.sqrt(rng()) * r;
+        const x = cx + Math.cos(a) * d;
+        const z = cz + Math.sin(a) * d;
+        if (!blocked(x, z, pad)) out.push({ x, z, rot: rng() * 6.28, s: 0.8 + rng() * 0.5 });
+      }
+      return out;
+    };
+    const forest = ZONES[0];
+    const quarry = ZONES[1];
+    const wilds = ZONES[4];
+    scatterModels(scene, 'deco_bush', [...spots(low ? 40 : 80, 0, 0, WORLD_RADIUS - 6, 1.2), ...spots(18, forest.x, forest.z, forest.r, 1)]);
+    scatterModels(scene, 'deco_mushroom', spots(26, forest.x, forest.z, forest.r, 0.6), { outline: false });
+    scatterModels(scene, 'deco_log', spots(6, forest.x, forest.z, forest.r, 1.5));
+    scatterModels(scene, 'deco_stump', spots(8, forest.x, forest.z, forest.r, 1));
+    scatterModels(scene, 'deco_rock_small', [...spots(22, quarry.x, quarry.z, quarry.r, 1), ...spots(26, wilds.x, wilds.z, wilds.r, 1), ...spots(20, 0, 0, WORLD_RADIUS - 8, 1)]);
+    scatterModels(scene, 'deco_grass', spots(low ? 60 : 140, 0, 0, WORLD_RADIUS - 4, 0.5), { outline: false, castShadow: false });
+    const pads = [];
+    for (let i = 0; i < 14; i++) {
+      const a = rng() * Math.PI * 2;
+      const d = 3 + rng() * (LAKE.r - 5);
+      const x = LAKE.x + Math.cos(a) * d;
+      const z = LAKE.z + Math.sin(a) * d;
+      if (Math.abs(x - DOCK.x) < 3 && z < DOCK.z + DOCK.d / 2 + 2) continue;
+      pads.push({ x, z, y: -0.06, rot: rng() * 6.28, s: 0.8 + rng() * 0.6 });
+    }
+    scatterModels(scene, 'deco_lily_pad', pads, { outline: false, castShadow: false });
+  }
+
+  // Props from shared/props.js (instanced per model; bobbing ones animated).
+  {
+    const groups = new Map();
+    for (const pr of PROPS) {
+      if (!assets.has(pr.slot)) continue;
+      if (pr.bob) {
+        const m = assets.make(pr.slot, { variant: pr.v || 0 });
+        m.object.position.set(pr.x, pr.y || 0, pr.z);
+        m.object.rotation.y = pr.rot;
+        scene.add(m.object);
+        const ph = pr.x * 0.7;
+        animated.push((dt, t) => {
+          m.object.position.y = (pr.y || 0) + Math.sin(t * 1.6 + ph) * 0.08;
+          m.object.rotation.z = Math.sin(t * 1.1 + ph) * 0.06;
+        });
+        continue;
+      }
+      const key = pr.slot + '|' + (pr.v || 0) % assets.variantCount(pr.slot);
+      if (!groups.has(key)) groups.set(key, { slot: pr.slot, v: (pr.v || 0) % assets.variantCount(pr.slot), list: [] });
+      groups.get(key).list.push({ x: pr.x, z: pr.z, y: pr.y || 0, rot: pr.rot });
+    }
+    for (const g of groups.values()) {
+      const inst = assets.instanced(g.slot, g.list, { variant: g.v });
+      if (inst) scene.add(inst);
+    }
+  }
+
   // ── Buildings
-  const buildingMeshes = [];
-  for (const b of BUILDINGS) {
-    const grp = buildHouse(b, rng);
-    scene.add(grp);
+  // Anything that can hide the hero fades out while it's between them and the camera.
+  const fadeable = (grp) => {
     const mats = [];
     const outlines = [];
     grp.traverse((o) => {
@@ -555,6 +685,12 @@ export function buildTown(scene, fx, { low = false } = {}) {
     });
     grp.updateMatrixWorld(true);
     fades.push({ box: new THREE.Box3().setFromObject(grp), mats, outlines, op: 1 });
+  };
+  const buildingMeshes = [];
+  for (const [i, b] of BUILDINGS.entries()) {
+    const grp = buildModular(b, i) || buildHouse(b, rng);
+    scene.add(grp);
+    fadeable(grp);
     grp.traverse((o) => {
       if (o.isMesh) o.userData.building = b.id;
     });
@@ -568,8 +704,22 @@ export function buildTown(scene, fx, { low = false } = {}) {
     });
   }
 
-  // Wilds gate
-  {
+  // Wilds gate: the castle-kit gatehouse, or a simple timber arch without it.
+  const castle = buildGate();
+  if (castle) {
+    scene.add(castle);
+    fadeable(castle);
+    for (const sx of [-1, 1]) {
+      const flame = new THREE.Mesh(sph(0.16, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffb340' }));
+      flame.position.set(GATE.x + sx * 1.75, 3.15, GATE.z + 2.45);
+      const torch = mesh(cyl(0.07, 0.09, 0.55, 6), '#6b4226');
+      torch.position.set(GATE.x + sx * 1.75, 2.75, GATE.z + 2.35);
+      torch.rotation.x = 0.35;
+      animated.push((dt, t) => flame.scale.setScalar(1 + Math.sin(t * 13 + sx) * 0.18));
+      scene.add(torch, flame);
+    }
+    labels.push({ kind: 'place', id: 'gate', text: GATE.label, icon: GATE.icon, pos: new THREE.Vector3(GATE.x, castle.userData.top + 1.2, GATE.z) });
+  } else {
     const grp = new THREE.Group();
     grp.position.set(GATE.x, 0, GATE.z);
     for (const s of [-1, 1]) {
@@ -620,13 +770,13 @@ export function buildTown(scene, fx, { low = false } = {}) {
 
   // Lake + dock + reeds + lily pads
   {
-    const water = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r + 0.6, 48), new THREE.MeshToonMaterial({ color: '#5cc4ee', transparent: true, opacity: 0.88, emissive: '#2b8fc4', emissiveIntensity: 0.2 }));
+    const water = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r + 0.6, 64), waterMaterial({ radius: LAKE.r + 0.6, foamAt: LAKE.r + 0.1, shallow: '#86e3f5', deep: '#2f95cf', opacity: 0.93 }));
     water.rotation.x = -Math.PI / 2;
     water.position.set(LAKE.x, -0.12, LAKE.z);
     water.userData.water = true;
     scene.add(water);
     pickables.push(water);
-    animated.push((dt, t) => (water.material.emissiveIntensity = 0.18 + Math.sin(t * 1.3) * 0.05));
+    animated.push((dt, t) => (water.material.uniforms.time.value = t));
     const dock = new THREE.Group();
     const planks = Math.round(DOCK.d / 0.6);
     for (let i = 0; i < planks; i++) {
@@ -680,6 +830,12 @@ export function buildTown(scene, fx, { low = false } = {}) {
       lamps.push([s[0] + (s[2] - s[0]) * t + nx * (s[4] + 0.9), s[1] + (s[3] - s[1]) * t + nz * (s[4] + 0.9)]);
     }
     for (const [x, z] of lamps) {
+      if (assets.has('lamp_post')) {
+        const m = assets.make('lamp_post');
+        m.object.position.set(x, 0, z);
+        scene.add(m.object);
+        continue;
+      }
       const post = mesh(cyl(0.1, 0.14, 3, 6), '#4a4a5a', { outline: 0.02 });
       post.position.set(x, 1.5, z);
       const lantern = new THREE.Mesh(box(0.4, 0.5, 0.4), toon('#fff1b0', { emissive: '#ffcf5a', emissiveIntensity: 0.8 }));
@@ -815,6 +971,19 @@ export function buildTown(scene, fx, { low = false } = {}) {
       for (const n of nodes.values()) n.update(dt);
     },
   };
+}
+
+// Place many copies of a model slot (instanced), spreading them across the
+// slot's variants. Returns false if the slot has no model (use a fallback).
+function scatterModels(scene, slot, placements, opts = {}) {
+  if (!assets.has(slot) || !placements.length) return false;
+  const n = assets.variantCount(slot);
+  for (let v = 0; v < n; v++) {
+    const mine = placements.filter((p, i) => (p.v ?? i) % n === v);
+    const g = assets.instanced(slot, mine, { ...opts, variant: v });
+    if (g) scene.add(g);
+  }
+  return true;
 }
 
 function smooth(a, b, x) {

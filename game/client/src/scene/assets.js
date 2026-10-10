@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { MODELS } from './manifest.js';
+import { mergeVertices, mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { MODELS, PALETTES, MODULE_PACKS, TEXTURES } from './manifest.js';
 import { toon, outlineMat } from './toon.js';
 
 // Loads every model listed in manifest.js once, converts it to the game's
@@ -20,20 +20,83 @@ const OUTLINE_WORLD = 0.035; // ink line thickness in metres
 
 const gradMap = toon('#ffffff').gradientMap;
 
-// Shift pack colours toward Hearthvale's warm, saturated palette.
-function stylize(color, tint) {
-  const c = color.clone();
-  const hsl = {};
-  c.getHSL(hsl);
-  hsl.s = Math.min(1, hsl.s * 1.12 + 0.03);
-  hsl.l = Math.min(0.92, hsl.l * 1.04 + 0.01);
-  c.setHSL(hsl.h, hsl.s, hsl.l);
-  if (tint) c.lerp(new THREE.Color(tint.color), tint.amount ?? 0.6);
-  return c;
+// Shift every pack toward Hearthvale's warm, saturated palette in the shader,
+// so textured (palette-atlas) and plain-coloured models get the same grade.
+const GRADE = `
+  {
+    float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+    diffuseColor.rgb = mix(vec3(lum), diffuseColor.rgb, 1.18);
+    diffuseColor.rgb *= vec3(1.04, 1.01, 0.95);
+  }`;
+function graded(mat) {
+  mat.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>' + GRADE);
+  };
+  mat.customProgramCacheKey = () => 'hv-grade';
+  return mat;
 }
 
-function toToon(m, tint) {
-  const key = m.uuid + (tint ? JSON.stringify(tint) : '');
+// ── Palette-atlas recolours ───────────────────────────────────────────
+// Most Kenney packs paint models by sampling a shared swatch atlas, so a
+// material colour can only darken them. `remap` repaints the atlas instead:
+// [{ band?, to: '#hex', ref? }] — texels in the hue band (all texels if no
+// band) take the colour `to`, keeping their light/dark steps: a texel whose
+// luma equals `ref` becomes exactly `to`. First matching rule wins.
+const BANDS = {
+  metal: (h, s) => h >= 200 && h <= 265 && s >= 0.08 && s <= 0.45, // lavender-grey steel
+  red: (h, s) => (h >= 340 || h < 15) && s > 0.45,
+  orange: (h, s) => h >= 15 && h < 30 && s > 0.35, // wood handles, leather
+  yellow: (h, s) => h >= 30 && h < 55 && s > 0.35,
+  green: (h, s) => h >= 70 && h < 180 && s > 0.25,
+  white: (h, s, v) => s < 0.12 && v > 0.7,
+};
+const BAND_REF = { metal: 0.62, red: 0.45, orange: 0.55, yellow: 0.7, green: 0.5, white: 0.85 };
+const remapCache = new Map();
+const hexRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+function remapTexture(tex, remap) {
+  const key = tex.uuid + JSON.stringify(remap);
+  if (remapCache.has(key)) return remapCache.get(key);
+  const img = tex.image;
+  const cv = document.createElement('canvas');
+  cv.width = img.width;
+  cv.height = img.height;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, cv.width, cv.height);
+  const px = data.data;
+  const rules = remap.map((r) => ({ test: BANDS[r.band] || null, to: hexRgb(r.to), ref: r.ref ?? BAND_REF[r.band] ?? 0.55 }));
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i] / 255;
+    const g = px[i + 1] / 255;
+    const b = px[i + 2] / 255;
+    const mx = Math.max(r, g, b);
+    const d = mx - Math.min(r, g, b);
+    const s = mx ? d / mx : 0;
+    let h = 0;
+    if (d) h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h *= 60;
+    const rule = rules.find((x) => !x.test || x.test(h, s, mx));
+    if (!rule) continue;
+    const k = (0.299 * r + 0.587 * g + 0.114 * b) / rule.ref;
+    for (let c = 0; c < 3; c++) px[i + c] = Math.min(255, rule.to[c] * k);
+  }
+  ctx.putImageData(data, 0, 0);
+  const t = new THREE.CanvasTexture(cv);
+  t.flipY = false; // same layout as the glTF texture it replaces
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = tex.wrapS;
+  t.wrapT = tex.wrapT;
+  t.magFilter = t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  remapCache.set(key, t);
+  return t;
+}
+
+// def (the manifest entry) can recolour named materials, repaint a palette
+// atlas (`remap`) and make thin leaf/petal planes double-sided.
+function toToon(m, tint, def = {}) {
+  const re = def.recolor?.[m.name] || def.recolor?.['*'] || PALETTES[def._pack]?.[m.name];
+  const key = m.uuid + (tint ? JSON.stringify(tint) : '') + (re || '') + (def.doubleSide ? 'D' : '') + (def.remap ? JSON.stringify(def.remap) : '');
   if (matCache.has(key)) return matCache.get(key);
   if (m.map) {
     // Kenney packs colour models from a small palette atlas: keep it crisp.
@@ -42,22 +105,21 @@ function toToon(m, tint) {
     m.map.generateMipmaps = false;
     m.map.needsUpdate = true;
   }
-  // Textured models get their palette tweak baked into the texture instead
-  // (scripts/import-assets.py), so only plain-coloured materials are shifted.
-  const base = m.color || new THREE.Color('#ffffff');
-  const color = m.map ? (tint ? base.clone().lerp(new THREE.Color(tint.color), tint.amount ?? 0.6) : base.clone()) : stylize(base, tint);
+  const color = re ? new THREE.Color(re) : (m.color || new THREE.Color('#ffffff')).clone();
+  if (tint) color.lerp(new THREE.Color(tint.color), tint.amount ?? 0.6);
   const t = new THREE.MeshToonMaterial({
     color,
-    map: m.map || null,
+    map: m.map && def.remap ? remapTexture(m.map, def.remap) : m.map || null,
     gradientMap: gradMap,
     transparent: m.transparent,
     opacity: m.opacity,
-    side: m.side,
+    side: def.doubleSide ? THREE.DoubleSide : m.side,
     alphaTest: m.alphaTest,
     emissive: tint?.emissive || '#000000',
-    emissiveIntensity: tint?.emissive ? 0.35 : 0,
+    emissiveIntensity: tint?.emissive ? (tint.glow ?? 0.35) : 0,
   });
   t.vertexColors = !!m.vertexColors;
+  graded(t);
   matCache.set(key, t);
   return t;
 }
@@ -76,9 +138,32 @@ function hullGeometry(geo) {
 
 const outlineFor = (scale) => outlineMat(Math.round((OUTLINE_WORLD / Math.max(scale, 1e-3)) * 1000) / 1000);
 
+const textures = new Map(); // url -> Texture (palette variants for modular kits)
+const texLoader = new THREE.TextureLoader();
+
+// Modular building pieces are loaded "raw": no re-centering or resizing,
+// because their pivots are what make walls and roofs line up.
+for (const [pack, names] of Object.entries(MODULE_PACKS)) for (const n of names) MODELS[`${pack}:${n}`] ??= { url: `/models/${pack}/${n}.glb`, raw: true, outline: !/^(flag|banner|stall|fountain-center|metal-gate)/.test(n) };
+
 export async function loadAssets(onProgress = () => {}) {
   const urls = new Set();
   for (const def of Object.values(MODELS)) for (const u of [].concat(def.url)) urls.add(u);
+  const texUrls = Object.values(TEXTURES).flatMap((t) => Object.values(t));
+  const total = urls.size + texUrls.length;
+  await Promise.all(
+    texUrls.map((u) =>
+      texLoader
+        .loadAsync(u)
+        .then((t) => {
+          t.flipY = false; // glTF UV convention
+          t.colorSpace = THREE.SRGBColorSpace;
+          t.magFilter = t.minFilter = THREE.NearestFilter;
+          t.generateMipmaps = false;
+          textures.set(u, t);
+        })
+        .catch(() => console.warn('texture failed to load:', u)),
+    ),
+  );
   let done = 0;
   await Promise.all(
     [...urls].map((url) =>
@@ -86,7 +171,7 @@ export async function loadAssets(onProgress = () => {}) {
         .loadAsync(url)
         .then((g) => gltfs.set(url, g))
         .catch((e) => console.warn('model failed to load, using fallback:', url, e?.message))
-        .finally(() => onProgress(++done / urls.size)),
+        .finally(() => onProgress((++done + texUrls.length) / total)),
     ),
   );
   for (const [slot, def] of Object.entries(MODELS)) {
@@ -98,16 +183,25 @@ export async function loadAssets(onProgress = () => {}) {
 
 // Normalise a loaded model: toon materials, size in metres, feet on y=0.
 function prepare(gltf, def) {
+  def._pack = [].concat(def.url)[0].split('/')[2];
   const root = gltf.scene;
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
   const size = box.getSize(new THREE.Vector3());
+  if (def.raw) {
+    root.updateMatrixWorld(true);
+    const sz = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3());
+    return { gltf, def, scale: 1, stretch: [1, 1, 1], offset: new THREE.Vector3(), size: sz, skinned: false };
+  }
   let scale = def.scale ?? 1;
   if (def.height) scale = def.height / Math.max(size.y, 1e-3);
   else if (def.width) scale = def.width / Math.max(size.x, size.z, 1e-3);
   else if (def.fit) scale = Math.min(def.fit[0] / Math.max(size.x, 1e-3), def.fit[1] / Math.max(size.z, 1e-3));
   const center = box.getCenter(new THREE.Vector3());
-  return { gltf, def, scale, offset: new THREE.Vector3(-center.x, -box.min.y, -center.z), size: size.multiplyScalar(scale), skinned: hasSkin(root) };
+  const st = def.stretch || [1, 1, 1];
+  const sz = size.multiplyScalar(scale);
+  sz.set(sz.x * st[0], sz.y * st[1] - (def.sink || 0), sz.z * st[2]);
+  return { gltf, def, scale, stretch: st, offset: new THREE.Vector3(-center.x, -box.min.y - (def.sink || 0) / scale, -center.z), size: sz, skinned: hasSkin(root) };
 }
 
 const hasSkin = (o) => {
@@ -122,22 +216,28 @@ export const sizeOf = (slot, v = 0) => ready.get(slot)?.[v % ready.get(slot).len
 
 // A fresh, independent copy of a model (with outlines). Returns
 // { object, mixer?, actions? } — object's origin is at the model's feet.
-export function make(slot, { variant = 0, tint = null, outline = true, castShadow = true } = {}) {
+export function make(slot, { variant = 0, tint = null, outline = true, castShadow = true, unique = false } = {}) {
   const list = ready.get(slot);
   if (!list) return null;
   const p = list[variant % list.length];
+  tint = tint ?? p.def.tint ?? null;
   const src = p.gltf.scene;
   const inner = p.skinned ? cloneSkinned(src) : src.clone(true);
   inner.position.copy(p.offset);
   const pivot = new THREE.Group();
   const scaled = new THREE.Group();
-  scaled.scale.setScalar(p.scale);
+  scaled.scale.set(p.scale * p.stretch[0], p.scale * p.stretch[1], p.scale * p.stretch[2]);
   if (p.def.rotY) scaled.rotation.y = p.def.rotY;
   scaled.add(inner);
   pivot.add(scaled);
-  inner.traverse((o) => {
-    if (!o.isMesh) return;
-    o.material = Array.isArray(o.material) ? o.material.map((m) => toToon(m, tint)) : toToon(o.material, tint);
+  // Collect first: adding outline children while traversing would recurse forever.
+  const meshes = [];
+  inner.traverse((o) => o.isMesh && meshes.push(o));
+  meshes.forEach((o) => {
+    // unique: own material copies (e.g. so one monster can flash red alone)
+    const conv = (m) => (unique ? toToon(m, tint, p.def).clone() : toToon(m, tint, p.def));
+    o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
+    if (unique) [].concat(o.material).forEach(graded);
     o.castShadow = castShadow;
     o.receiveShadow = true;
     if (outline && !o.isSkinnedMesh && p.def.outline !== false) {
@@ -165,18 +265,19 @@ export function instanced(slot, placements, { variant = 0, tint = null, outline 
   const list = ready.get(slot);
   if (!list || !placements.length) return null;
   const p = list[variant % list.length];
+  tint = tint ?? p.def.tint ?? null;
   const group = new THREE.Group();
   const root = p.gltf.scene;
   root.updateMatrixWorld(true);
-  const base = new THREE.Matrix4().compose(new THREE.Vector3(), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, p.def.rotY || 0, 0)), new THREE.Vector3(p.scale, p.scale, p.scale));
+  const base = new THREE.Matrix4().compose(new THREE.Vector3(), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, p.def.rotY || 0, 0)), new THREE.Vector3(p.scale * p.stretch[0], p.scale * p.stretch[1], p.scale * p.stretch[2]));
   const off = new THREE.Matrix4().makeTranslation(p.offset.x, p.offset.y, p.offset.z);
   const o = new THREE.Object3D();
   root.traverse((m) => {
     if (!m.isMesh) return;
     const local = new THREE.Matrix4().multiplyMatrices(base, new THREE.Matrix4().multiplyMatrices(off, m.matrixWorld));
-    const mat = Array.isArray(m.material) ? toToon(m.material[0], tint) : toToon(m.material, tint);
+    const mat = Array.isArray(m.material) ? toToon(m.material[0], tint, p.def) : toToon(m.material, tint, p.def);
     const im = new THREE.InstancedMesh(m.geometry, mat, placements.length);
-    const hull = outline ? new THREE.InstancedMesh(hullGeometry(m.geometry), outlineFor(p.scale * (placements[0].s ?? 1)), placements.length) : null;
+    const hull = outline && p.def.outline !== false ? new THREE.InstancedMesh(hullGeometry(m.geometry), outlineFor(p.scale * (placements[0].s ?? 1)), placements.length) : null;
     placements.forEach((pl, i) => {
       o.position.set(pl.x, pl.y ?? 0, pl.z);
       o.rotation.set(0, pl.rot ?? 0, 0);
@@ -196,3 +297,89 @@ export function instanced(slot, placements, { variant = 0, tint = null, outline 
   });
   return group;
 }
+
+// Find an animation clip by loose name (packs name them differently).
+const CLIP_RE = {
+  idle: /idle|static|stand/i,
+  walk: /walk|run|move/i,
+  attack: /attack|punch|swing|interact|bite|shoot|^eat$/i,
+  hit: /hit|hurt|damage|emote-no|gesture-negative/i,
+  die: /die|death|dead/i,
+};
+export function findClip(actions, what) {
+  if (!actions) return null;
+  if (actions[what]) return actions[what];
+  const re = CLIP_RE[what];
+  const k = re && Object.keys(actions).find((n) => re.test(n));
+  return k ? actions[k] : null;
+}
+
+// ── Modular building assembly ────────────────────────────────────────
+// items: [{ slot, p: [x,y,z], r: degrees, s: number|[x,y,z], tex?: url }]
+// Bakes every module into building space and merges by material, so a whole
+// house is ~2 meshes (+ its outline) instead of hundreds.
+const ATTRS = ['position', 'normal', 'uv'];
+function normalizeGeo(g) {
+  let out = g.index ? g.toNonIndexed() : g.clone();
+  for (const k of Object.keys(out.attributes)) if (!ATTRS.includes(k)) out.deleteAttribute(k);
+  if (!out.attributes.uv) out.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(out.attributes.position.count * 2), 2));
+  if (!out.attributes.normal) out.computeVertexNormals();
+  return out;
+}
+
+export function assemble(items, { castShadow = true } = {}) {
+  const solids = new Map(); // key -> { mat, geos }
+  const hulls = [];
+  const m4 = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  for (const it of items) {
+    const p = ready.get(it.slot)?.[0];
+    if (!p) continue;
+    const sc = Array.isArray(it.s) ? it.s : [it.s ?? 1, it.s ?? 1, it.s ?? 1];
+    e.set(0, ((it.r || 0) * Math.PI) / 180, 0);
+    m4.compose(new THREE.Vector3(...it.p), q.setFromEuler(e), new THREE.Vector3(...sc));
+    const root = p.gltf.scene;
+    root.updateMatrixWorld(true);
+    root.traverse((o) => {
+      if (!o.isMesh) return;
+      const mtx = new THREE.Matrix4().multiplyMatrices(m4, o.matrixWorld);
+      const src = Array.isArray(o.material) ? o.material[0] : o.material;
+      const tex = it.tex && textures.get(it.tex);
+      const key = src.uuid + (tex ? it.tex : '');
+      if (!solids.has(key)) solids.set(key, { src, tex, geos: [] });
+      const g = normalizeGeo(o.geometry);
+      g.applyMatrix4(mtx);
+      solids.get(key).geos.push(g);
+      if (p.def.outline !== false) {
+        const h = hullGeometry(o.geometry).clone();
+        h.applyMatrix4(mtx);
+        hulls.push(h.index ? h.toNonIndexed() : h);
+      }
+    });
+  }
+  const group = new THREE.Group();
+  for (const { src, tex, geos } of solids.values()) {
+    const geo = mergeGeometries(geos);
+    if (!geo) continue;
+    const mat = toToon(src, null, {}).clone();
+    graded(mat);
+    if (tex) mat.map = tex;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = castShadow;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  if (hulls.length) {
+    for (const h of hulls) for (const k of Object.keys(h.attributes)) if (k !== 'position' && k !== 'normal') h.deleteAttribute(k);
+    const hg = mergeGeometries(hulls);
+    if (hg) {
+      const hm = new THREE.Mesh(hg, outlineMat(OUTLINE_WORLD));
+      hm.raycast = () => {};
+      group.add(hm);
+    }
+  }
+  return group;
+}
+
+export const hasModules = (pack, names) => names.every((n) => ready.has(`${pack}:${n}`));
