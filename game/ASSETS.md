@@ -29,6 +29,36 @@ Every imported model is drawn with the game's own look: cel shading, ink outline
    - **Fallback:** delete a slot to go back to the built-in version.
 4. Reload. If the file is missing or broken, the game logs a warning and uses the built-in fallback, so nothing breaks.
 
+### Recolouring without a 3D editor
+
+- **`recolor: { materialName: '#hex' }`**: repaints named materials. Use this for models with plain colours per material.
+- **`remap: [{ band, to: '#hex' }]`**: repaints a model that takes its colours from a small palette image, as most Kenney packs do.
+  - `band` picks which colours to change: `metal`, `red`, `orange`, `yellow`, `green`, `white` or `warm`.
+  - Leave `band` out to tint the whole model.
+  - Light and dark shades are kept.
+  - Example: `axe_gold` is the iron axe with `remap: [{ band: 'metal', to: '#ffd23f' }]`.
+- **`texture: '/models/…/palette.png'`**: swaps in a different palette image with the same layout. This is how each building gets its own roof colour.
+- **`glowBand: { band, color, amount }`**: makes only part of a model glow, such as a lantern's glass.
+- **`heights: [..]`**: gives each variant its own size.
+
+### Item icons
+
+The pictures in the bag, market and workshop are rendered from 3D models, once, when first shown.
+
+- **Using a model:** give an item a model through a slot named `icon:<itemId>`, e.g. `'icon:oak_log'`. Turn it for its portrait with `pose: [x, y, z]` (degrees).
+- **Built in code:** a few icons that no pack has are built in `client/src/ui/proc-icons.js`: fishing rods, the leather vest, the amulet, the acorn and the metal bars.
+- **Fallback:** an item with neither shows its emoji.
+
+To make your own icon, add an `icon:<itemId>` slot pointing at your .glb. A manifest slot always wins over the code-built icon.
+
+### Buildings
+
+Buildings are snapped together from Kenney's modular Fantasy Town Kit pieces in `client/src/scene/buildings.js`: walls, roofs and chimneys on a grid.
+
+The Wilds gate is assembled from castle-kit pieces the same way.
+
+- **Replacing a building:** to use a single model of your own instead, have `buildModular()` return your model for that building id. Keep it inside the building's footprint in `shared/world.js`, because that footprint is what players collide with.
+
 ## Re-importing asset packs
 
 The third-party models were copied in with:

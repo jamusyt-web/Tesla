@@ -56,7 +56,7 @@ const iconCache = new Map();
 export function itemIcon(itemId) {
   if (iconCache.has(itemId)) return iconCache.get(itemId);
   let url = null;
-  const proc = PROC_ICONS[itemId];
+  const proc = !assets.has(`icon:${itemId}`) && PROC_ICONS[itemId]; // a manifest model wins
   if (proc || assets.has(`icon:${itemId}`)) {
     const { r, scene, cam } = renderer();
     const obj = proc ? new THREE.Group().add(proc()) : assets.make(`icon:${itemId}`, { outline: true, castShadow: false }).object;
