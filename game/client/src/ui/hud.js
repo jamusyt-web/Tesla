@@ -7,6 +7,12 @@ import { SKILLS, levelProgress } from '../../../shared/skills.js';
 import { BUILDINGS, ZONES, LAKE, DOCK, WORLD_RADIUS, doorPoint, GATE, NODE_TYPES } from '../../../shared/world.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import { Panels } from './panels.js';
+import { newFight, stepFight, FISH_TICK } from '../../../shared/fishing.js';
+
+const RATING = { easy: ['Easy', '#5cbf5a'], fair: ['Fair', '#f7b928'], tough: ['Tough', '#ff8a3d'], brutal: ['Brutal', '#ea5a4f'] };
+const sizeHint = (d) => (d < 20 ? 'A little nibble…' : d < 45 ? 'A decent fish!' : d < 70 ? 'A big one!' : 'Something HUGE!!');
+
+const isTouchDevice = () => matchMedia('(pointer: coarse)').matches;
 
 const TUTORIAL_TEXT = [
   { text: 'Chop a tree in Whisperwood', hint: 'Tap a tree, then tap again in rhythm to swing your axe!', target: 'tree' },
@@ -49,7 +55,9 @@ export class Hud {
     this.el.append(h('div.topbar', chip, h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } }, gold, online), h('div.spacer'), this.muteBtn, minimap));
 
     this.questEl = h('div.quest.hidden');
-    this.arrow = h('div.guide-arrow.hidden', h('i'));
+    this.arrowIcon = h('div.ga-icon', h('i'));
+    this.arrowLabel = h('div.ga-label');
+    this.arrow = h('div.guide-arrow.hidden', this.arrowIcon, this.arrowLabel);
     this.el.append(this.questEl, this.arrow);
 
     const dockBtn = (ic, label, fn, badge) => h('button', { on: { click: () => (sfx.tap(), fn()) } }, ic, h('span', label), badge);
@@ -238,29 +246,46 @@ export class Hud {
       h('b', `Quest ${step + 1}/${TUTORIAL_TEXT.length}`),
       h('div', { style: { fontWeight: 600 } }, q.text),
       h('div.muted', q.hint),
+      h('button.btn.small.green', { style: { marginTop: '6px' }, on: { click: () => this.#questTarget()?.go() } }, '📍 Take me there'),
+      h('br'),
       h('button.skip', { on: { click: () => (this.sock.rpc('tutorialSkip'), (this.me.tutorial = 99), this.#renderQuest()) } }, 'skip tutorial'),
     );
     this.questEl.classList.remove('hidden');
   }
 
+  // Where the current quest wants you to go. Targets are *locked* (one tree,
+  // one slime) until done, so the guide never flips between candidates.
   #questTarget() {
     const step = this.me.tutorial ?? 0;
     const q = TUTORIAL_TEXT[step];
-    if (!q || !this.game) return null;
+    const g = this.game;
+    if (!q || !g) return null;
+    const p = g.myPos();
     if (q.target === 'tree') {
-      const n = this.game.nearestNode('tree_oak');
-      return n ? { x: n.x, z: n.z, y: 5 } : null;
+      const lock = this.questLock?.kind === 'tree' ? g.town.nodes.get(this.questLock.id) : null;
+      if (!lock || !lock.alive) {
+        const n = g.nearestNode('tree_oak');
+        this.questLock = n ? { kind: 'tree', id: n.id } : null;
+      }
+      if (!this.questLock) return null;
+      const n = g.nodePos(this.questLock.id);
+      return { x: n.x, z: n.z, y: 5.4, label: 'Oak tree', go: () => g.goNode(n.id) };
     }
     if (q.target === 'slime') {
-      const p = this.game.myPos();
-      if (p.z > GATE.z) return { x: GATE.x, z: GATE.z, y: 8 };
-      let best = null;
-      for (const mv of this.game.mobs.values()) if (mv.type === 'slime' && mv.state !== 'dead' && (!best || Math.hypot(mv.x - p.x, mv.z - p.z) < Math.hypot(best.x - p.x, best.z - p.z))) best = mv;
-      return best ? { x: best.x, z: best.z, y: 2.5 } : null;
+      if (p.z > GATE.z - 1) return { x: GATE.x, z: GATE.z, y: 8.5, label: 'Wilds Gate', go: () => g.walkTo(GATE.x, GATE.z - 6, true) };
+      let mv = this.questLock?.kind === 'slime' ? g.mobs.get(this.questLock.id) : null;
+      if (!mv || mv.state === 'dead') {
+        mv = null;
+        for (const m of g.mobs.values()) if (m.type === 'slime' && m.state !== 'dead' && (!mv || Math.hypot(m.x - p.x, m.z - p.z) < Math.hypot(mv.x - p.x, mv.z - p.z))) mv = m;
+        this.questLock = mv ? { kind: 'slime', id: mv.id } : null;
+      }
+      if (!mv) return null;
+      const id = mv.id;
+      return { x: mv.x, z: mv.z, y: 2.6, label: 'Meadow Slime', go: () => g.goMob(id) };
     }
     const b = BUILDINGS.find((x) => x.id === q.target);
     const [dx, dz] = doorPoint(b);
-    return { x: dx, z: dz, y: 3 };
+    return { x: dx, z: dz, y: 3.2, label: b.label, go: () => this.travel(b.id) };
   }
 
   frame(dt) {
@@ -270,24 +295,36 @@ export class Hud {
       this.mapT = 0;
       this.#drawMap();
     }
-    // Guide arrow
-    const tg = this.#questTarget();
-    if (tg && this.game && !this.game.battle) {
-      const s = this.game.project(new THREE.Vector3(tg.x, tg.y, tg.z));
+    // Quest guide: in-world beacon + path trail, and an edge arrow when off-screen.
+    const tg = this.game && !this.game.battle && !this.game.fishing ? this.#questTarget() : null;
+    this.game?.setGuide(tg);
+    if (tg) {
       const p = this.game.myPos();
-      const near = Math.hypot(p.x - tg.x, p.z - tg.z) < 4;
-      this.arrow.classList.toggle('hidden', near);
-      const margin = 40;
-      const on = s.vis && s.x > margin && s.x < innerWidth - margin && s.y > margin + 60 && s.y < innerHeight - 120;
-      if (on) {
-        this.arrow.style.transform = `translate(${s.x}px, ${s.y - 34 + Math.sin(this.t * 6) * 8}px) rotate(90deg)`;
+      const dist = Math.hypot(tg.x - p.x, tg.z - p.z);
+      const s = this.game.project(new THREE.Vector3(tg.x, tg.y, tg.z));
+      const m = 50;
+      const onScreen = s.vis && s.x > m && s.x < innerWidth - m && s.y > 110 && s.y < innerHeight - 130;
+      const hideNear = dist < 3.5 || !!this.game.gather;
+      this.arrow.classList.toggle('hidden', hideNear);
+      this.arrowLabel.textContent = `${tg.label} · ${Math.round(dist)}m`;
+      if (onScreen) {
+        this.arrow.classList.add('over');
+        this.arrow.style.transform = `translate(${s.x}px, ${s.y - 40 + Math.sin(this.t * 6) * 7}px)`;
       } else {
-        const cx = innerWidth / 2;
-        const cy = innerHeight / 2;
-        let ang = Math.atan2(s.y - cy, s.x - cx);
-        if (!s.vis) ang += Math.PI;
-        const r = Math.min(cx, cy) - 60;
-        this.arrow.style.transform = `translate(${cx + Math.cos(ang) * r}px, ${cy + Math.sin(ang) * r}px) rotate(${ang}rad)`;
+        // Direction relative to where the camera is looking (works even when
+        // the target is behind you). The arrow orbits your hero, so it never
+        // covers menus and always reads as "go this way".
+        this.arrow.classList.remove('over');
+        const yaw = this.game.cam.curYaw ?? this.game.cam.yaw;
+        const dx = tg.x - p.x;
+        const dz = tg.z - p.z;
+        const right = dx * Math.cos(yaw) - dz * Math.sin(yaw);
+        const fwd = -dx * Math.sin(yaw) - dz * Math.cos(yaw);
+        const ang = Math.atan2(-fwd, right);
+        const me = this.game.project(new THREE.Vector3(p.x, 1.1, p.z));
+        const r = Math.min(115, Math.min(innerWidth, innerHeight) * 0.22);
+        this.arrow.style.transform = `translate(${me.x + Math.cos(ang) * r}px, ${me.y + Math.sin(ang) * r}px)`;
+        this.arrowIcon.style.transform = `rotate(${ang}rad)`;
       }
     } else this.arrow.classList.add('hidden');
     // Rhythm ring follows the node on screen.
@@ -339,6 +376,98 @@ export class Hud {
   fishState(s) {
     this.fishWait.classList.toggle('hidden', s !== 'wait');
     this.fishBtn.classList.toggle('hidden', s !== 'bite');
+  }
+
+  // ── Reel fight (Stardew-style) ─────────────────────────────────────
+  // Runs the shared deterministic sim at a fixed 60 Hz and records the ticks
+  // where the button toggled; the server replays those to confirm the catch.
+  startFight(bite, onDone) {
+    this.endFight();
+    const state = newFight(bite.fish, bite.gear);
+    const toggles = [];
+    let input = false;
+    let held = false;
+    let acc = 0;
+    let last = performance.now();
+    let sent = false;
+    let clickT = 0;
+    const zone = h('div.fz', { style: { height: `${bite.gear.zone * 100}%` } });
+    const fish = h('div.ff', bite.fish.d >= 70 ? '🐋' : bite.fish.d >= 45 ? '🦈' : '🐟');
+    const meter = h('i');
+    const [label, color] = RATING[bite.rating] || RATING.fair;
+    const status = h('div.fight-status', 'Hold to reel!');
+    const giveUp = h('button.btn.plain.small', { on: { pointerdown: (e) => e.stopPropagation(), click: (e) => (e.stopPropagation(), finish()) } }, 'Let it go');
+    const box = h(
+      'div.fight',
+      h('div.fight-head', h('b', sizeHint(bite.fish.d)), h('span.rating', { style: { background: color } }, label)),
+      h('div.fight-body', h('div.ftrack', h('div.fwater'), zone, fish), h('div.fmeter', meter)),
+      status,
+      h('div.muted', { style: { textAlign: 'center' } }, isTouchDevice() ? 'Hold anywhere to lift the green bar' : 'Hold mouse or Space to lift the green bar'),
+      giveUp,
+    );
+    const scrim = h('div.fight-scrim', box);
+    const press = (on) => (e) => {
+      if (e?.cancelable) e.preventDefault();
+      input = on;
+    };
+    scrim.addEventListener('pointerdown', press(true));
+    scrim.addEventListener('pointerup', press(false));
+    scrim.addEventListener('pointercancel', press(false));
+    scrim.addEventListener('pointerleave', press(false));
+    scrim.addEventListener('contextmenu', (e) => e.preventDefault());
+    const key = (e) => {
+      if (e.code !== 'Space' && e.key !== ' ') return;
+      e.preventDefault();
+      e.stopPropagation();
+      input = e.type === 'keydown';
+    };
+    addEventListener('keydown', key, true);
+    addEventListener('keyup', key, true);
+    this.el.append(scrim);
+    const finish = () => {
+      if (sent) return;
+      sent = true;
+      status.textContent = state.done === 'caught' ? '🎉 Got it!' : '…';
+      onDone(toggles, Math.max(1, state.tick));
+    };
+    const loop = () => {
+      if (this.fight?.state !== state) return;
+      const now = performance.now();
+      acc += Math.min(0.25, (now - last) / 1000);
+      last = now;
+      while (acc >= FISH_TICK && !state.done) {
+        if (input !== held) {
+          toggles.push(state.tick);
+          held = input;
+        }
+        const wasIn = state.inZone;
+        stepFight(state, held);
+        if (wasIn && !state.inZone && navigator.vibrate) navigator.vibrate(15);
+        acc -= FISH_TICK;
+      }
+      zone.style.bottom = `${state.zonePos * 100}%`;
+      zone.classList.toggle('on', state.inZone);
+      fish.style.bottom = `${state.fishPos * 100}%`;
+      fish.classList.toggle('free', !state.inZone);
+      meter.style.height = `${state.progress * 100}%`;
+      meter.style.background = state.progress > 0.7 ? '#5cbf5a' : state.progress > 0.35 ? '#f7b928' : '#ea5a4f';
+      status.textContent = state.inZone ? (held ? '🎣 Reeling in!' : '🎣 Got it on the line!') : '💨 Keep it in the green!';
+      if (held && now - clickT > 110) {
+        clickT = now;
+        sfx.tap();
+      }
+      if (state.done) return finish();
+      requestAnimationFrame(loop);
+    };
+    this.fight = { state, scrim, off: () => (removeEventListener('keydown', key, true), removeEventListener('keyup', key, true)) };
+    requestAnimationFrame(loop);
+  }
+
+  endFight() {
+    if (!this.fight) return;
+    this.fight.off();
+    this.fight.scrim.remove();
+    this.fight = null;
   }
 
   // ── Minimap ────────────────────────────────────────────────────────

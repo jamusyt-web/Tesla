@@ -39,8 +39,11 @@ export const ITEMS = {
   moonbloom: { name: 'Moonbloom', icon: '🪻', cat: 'resource', value: 24, rarity: 'rare' },
   // ── Fishing ─────────────────────────────────────────────
   minnow: { name: 'Minnow', icon: '🐟', cat: 'resource', value: 6, rarity: 'common' },
-  trout: { name: 'Rainbow Trout', icon: '🐠', cat: 'resource', value: 14, rarity: 'uncommon' },
+  perch: { name: 'Perch', icon: '🐠', cat: 'resource', value: 10, rarity: 'common' },
+  trout: { name: 'Rainbow Trout', icon: '🎏', cat: 'resource', value: 16, rarity: 'uncommon' },
+  pike: { name: 'Northern Pike', icon: '🦈', cat: 'resource', value: 45, rarity: 'rare' },
   golden_koi: { name: 'Golden Koi', icon: '🐡', cat: 'resource', value: 90, rarity: 'epic' },
+  lake_king: { name: 'Old Whiskers', icon: '🐋', cat: 'resource', value: 420, rarity: 'legendary' },
   old_boot: { name: 'Old Boot', icon: '🥾', cat: 'resource', value: 1, rarity: 'common' },
   // ── Monster drops ───────────────────────────────────────
   slime_gel: { name: 'Slime Gel', icon: '🫧', cat: 'resource', value: 7, rarity: 'common' },
@@ -58,6 +61,7 @@ export const ITEMS = {
   leather: { name: 'Leather', icon: '🟤', cat: 'material', value: 34, rarity: 'common' },
 
   // ── Consumables ─────────────────────────────────────────
+  fish_stew: { name: 'Fish Stew', icon: '🍲', cat: 'consumable', value: 30, rarity: 'common', heal: 45 },
   grilled_fish: { name: 'Grilled Fish', icon: '🍢', cat: 'consumable', value: 18, rarity: 'common', heal: 30 },
   health_potion: { name: 'Health Potion', icon: '🧪', cat: 'consumable', value: 30, rarity: 'common', heal: 60 },
   moon_elixir: { name: 'Moon Elixir', icon: '⚗️', cat: 'consumable', value: 110, rarity: 'rare', heal: 150 },
@@ -73,6 +77,7 @@ export const ITEMS = {
   pick_gold: { name: 'Golden Pickaxe', icon: '⛏️', cat: 'tool', tool: 'pick', tier: 4, power: 5, speed: 520, value: 650, rarity: 'epic', skin: toolSkin('#3b2a1a', '#f2c230', '#fff1a8', '#ffd84a') },
   rod_basic: { name: 'Bamboo Rod', icon: '🎣', cat: 'tool', tool: 'rod', tier: 1, power: 1, value: 15, rarity: 'common', skin: toolSkin('#b9c46a', '#b9c46a', '#ffffff') },
   rod_fine: { name: 'Angler Rod', icon: '🎣', cat: 'tool', tool: 'rod', tier: 2, power: 2, value: 160, rarity: 'rare', skin: toolSkin('#2f5f8a', '#c0c8d0', '#ffd84a') },
+  rod_master: { name: 'Starcatcher Rod', icon: '🎣', cat: 'tool', tool: 'rod', tier: 3, power: 3, value: 720, rarity: 'epic', skin: toolSkin('#3b2a1a', '#f2c230', '#fff1a8', '#ffd84a') },
 
   // ── Gear ────────────────────────────────────────────────
   sword_wood: { name: 'Training Sword', icon: '🗡️', cat: 'gear', slot: 'weapon', atk: 4, value: 12, rarity: 'common', skin: toolSkin('#9a6b3f', '#c89a62', '#e0bd8a') },

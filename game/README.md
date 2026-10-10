@@ -26,7 +26,8 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
   - **Trees and rocks**: tap to walk over, then **tap to swing**. A shrinking timing ring shows the rhythm, and a swing right on the beat is a **PERFECT** hit for double damage. The server checks the timing, so it can't be faked.
   - **Node feedback**: each node shows an HP bar, wood chips, falling leaves, sparks and camera shake. Trees topple away from you with a thud, rocks shatter, and both regrow later.
   - **Shared nodes**: chop a tree together and everyone who helped gets the loot.
-  - **Herbs and fishing**: herbs are a single pick. Fishing means casting, waiting for a bite, then tapping REEL in time.
+  - **Herbs**: a single pick.
+  - **Fishing**: cast, wait for the bite, tap to hook, then win a **reel fight**. Hold to lift a green catch bar and keep the darting fish inside it until the meter fills. Big fish (pike, golden koi, and Old Whiskers, the legendary lake king that only bites in deep water) are faster and more erratic. Better rods give a bigger bar and faster reeling, so the biggest catches need upgraded gear. The server replays your exact button presses through the same deterministic simulation to confirm every catch, so it can't be faked.
   - **Skills and rare drops**: Foraging, Mining, Herbalism and Fishing level up and increase your double-drop chance. Rare drops (Golden Acorn, Sapphire, Golden Koi) are announced to the whole server.
   - **Tools change in your hand**: the axe, pickaxe, rod or sword shows in your hero's hand depending on what you're doing. Each tier has its own 3D model (wood → copper → iron → gold, with gold glowing). New skins are just data in `shared/items.js`.
 - **Crafting**: 23 recipes at the Workshop: refined materials, potions and food, tool upgrades, weapons, armor and a trinket. Crafted goods are worth much more than raw resources.
@@ -43,7 +44,7 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
   - **Other players**: they can browse your shop from the Town Hall or your profile and buy from it.
 - **Co-op battles in the world**: monsters roam the Wilds (slimes, wolves, goblins, and a Mossy Golem boss). Tap one to start a turn-based fight right where it stands. **Anyone nearby can tap the same monster to join** (up to 4). Each round has a 12 s timer and the actions are Attack, Special (charges up), Defend, Item (potions) and Flee. Other players can watch the fight happen.
 - **Social**: channel chat with speech bubbles, emotes (wave, dance, cheer, heart, sit), player profiles, online list, leaderboards, and a shop directory.
-- **Onboarding quest**: chop → craft → fight → stock your shop, with an on-screen guide arrow and gold rewards.
+- **Onboarding quest**: chop → craft → fight → stock your shop, with gold rewards. A light pillar marks the target, glowing dots trace the walking path, an arrow around your hero points the way with the distance, and a **Take me there** button walks you over.
 
 ## Run it
 
@@ -61,7 +62,7 @@ To play on your phone on the same Wi-Fi, open `http://<your-computer's-IP>:5173`
 
 **See a busy lobby:** in a second terminal, run `npm run bots` (or `npm run bots -- 12` for 12 bots). Bots are ordinary WebSocket players that wander, chop, chat and wave.
 
-**Tests:** `npm test` runs economy conservation tests and real-WebSocket multiplayer tests.
+**Tests:** `npm test` runs the economy conservation tests, the fishing simulation and anti-cheat tests, the map reachability checks, and real-WebSocket multiplayer tests.
 
 ## Deploy (to play with friends over the internet)
 

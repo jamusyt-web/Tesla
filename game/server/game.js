@@ -4,8 +4,9 @@ import { levelFromXp, doubleChance } from '../shared/skills.js';
 import { MONSTERS, heroStats, damage } from '../shared/monsters.js';
 import {
   generateNodes, generateScenery, buildColliders, NavGrid, NODE_TYPES, stepPath,
-  INTERACT_RANGE, FISH_RANGE, SPAWN, fishTable, isWalkable, WORLD_RADIUS,
+  INTERACT_RANGE, FISH_RANGE, SPAWN, isWalkable, WORLD_RADIUS, isDeepSpot,
 } from '../shared/world.js';
+import { rollFish, fishingGear, fightRating, replayFight, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
 import { GameError, fail } from './db.js';
 import { Heroes } from './heroes.js';
 import { Market } from './market.js';
@@ -136,14 +137,26 @@ class Channel {
         if (!e.path && e.act === 'walk') e.act = 'idle';
       }
       if (!c.battle && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + 4 * dt);
-      if (e.fishing && e.fishing.state === 'wait' && now >= e.fishing.biteAt) {
-        e.fishing.state = 'bite';
-        c.send({ t: 'bite', window: e.fishing.window });
+      const f = e.fishing;
+      if (f && f.state === 'wait' && now >= f.biteAt) {
+        // Decide what bit now; the client needs the fight parameters to play it.
+        f.state = 'bite';
+        const rod = ITEMS[c.hero.equip.rod];
+        const lvl = levelFromXp(c.hero.skills.fishing || 0);
+        f.fish = rollFish(Math.random, rod?.tier || 1, lvl, isDeepSpot(this.nodes.get(f.node)));
+        f.gear = fishingGear(rod?.tier || 1, lvl);
+        const { d, behavior, seed } = f.fish;
+        c.send({ t: 'bite', window: f.window, fish: { d, behavior, seed }, gear: f.gear, rating: fightRating(d, f.gear) });
       }
-      if (e.fishing && e.fishing.state === 'bite' && now > e.fishing.biteAt + e.fishing.window + 600) {
+      if (f && f.state === 'bite' && now > f.biteAt + f.window + 600) {
         e.fishing = null;
         e.act = 'idle';
         c.send({ t: 'fishResult', ok: false, reason: 'It got away…' });
+      }
+      if (f && f.state === 'fight' && now > f.fightAt + (FISH_MAX_TICKS / 60) * 1000 + 8000) {
+        e.fishing = null;
+        e.act = 'idle';
+        c.send({ t: 'fishResult', ok: false, reason: 'The line went slack — it got away.' });
       }
       if (c.shopLive) c.tickShop(now);
     }
@@ -696,37 +709,55 @@ export class Game {
     return { ok: true };
   }
 
+  // Tap when it bites to hook the fish; then the reel fight starts.
   reel(c, now) {
     const f = c.ent.fishing;
-    if (!f) return { ok: false };
+    if (!f || f.state === 'fight') return { ok: false };
+    c.ch.broadcast({ t: 'reel', by: c.hero.id });
+    const lost = (reason) => {
+      c.ent.fishing = null;
+      c.ent.act = 'idle';
+      c.send({ t: 'fishResult', ok: false, reason });
+      return { ok: false };
+    };
+    if (f.state === 'wait') return lost('Too early! The fish swam off.');
+    if (now > f.biteAt + f.window + 450) return lost('Too slow — it got away!');
+    f.state = 'fight';
+    f.fightAt = now;
+    return { ok: true, fight: true };
+  }
+
+  // The client reports the ticks at which the reel button toggled; the
+  // server replays the exact same deterministic fight to decide the outcome.
+  land(c, toggles, endTick, now) {
+    const f = c.ent.fishing;
+    if (!f || f.state !== 'fight') return { ok: false };
     c.ent.fishing = null;
     c.ent.act = 'idle';
-    c.ch.broadcast({ t: 'reel', by: c.hero.id });
-    if (f.state === 'wait') {
-      c.send({ t: 'fishResult', ok: false, reason: 'Too early! The fish swam off.' });
+    const end = Math.floor(Number(endTick));
+    const ok =
+      Array.isArray(toggles) &&
+      toggles.length <= FISH_MAX_TICKS &&
+      toggles.every((t, i) => Number.isInteger(t) && t >= 0 && t <= FISH_MAX_TICKS && (i === 0 || t > toggles[i - 1])) &&
+      Number.isInteger(end) &&
+      end > 0 &&
+      end <= FISH_MAX_TICKS;
+    // You can't finish a fight faster than it takes to play it.
+    const tooFast = (now - f.fightAt) < (end / 60) * 1000 * 0.85 - 400;
+    const result = ok && !tooFast ? replayFight(f.fish, f.gear, toggles, end) : null;
+    c.ch.broadcast({ t: 'landed', by: c.hero.id, ok: result?.done === 'caught', item: result?.done === 'caught' ? f.fish.id : null });
+    if (!result || result.done !== 'caught') {
+      c.send({ t: 'fishResult', ok: false, reason: result?.done === 'escaped' || !result ? 'It broke free!' : 'It slipped the hook!' });
       return { ok: false };
     }
-    if (now > f.biteAt + f.window + 450) {
-      c.send({ t: 'fishResult', ok: false, reason: 'Too slow — it got away!' });
-      return { ok: false };
-    }
-    const rod = ITEMS[c.hero.equip.rod];
+    const fish = f.fish;
     const lvl = levelFromXp(c.hero.skills.fishing || 0);
-    const table = fishTable(rod.tier, lvl);
-    let roll = Math.random() * table.reduce((s, r) => s + r.w, 0);
-    let pick = table[0];
-    for (const r of table) {
-      roll -= r.w;
-      if (roll <= 0) {
-        pick = r;
-        break;
-      }
-    }
-    const qty = Math.random() < doubleChance(lvl) && pick.id !== 'old_boot' ? 2 : 1;
-    this.heroes.addItem(c.hero.id, pick.id, qty);
-    const xp = this.heroes.addXp(c.hero, 'fishing', pick.xp);
-    c.send({ t: 'fishResult', ok: true, item: pick.id, qty, xp });
-    if (ITEMS[pick.id].rarity === 'epic') this.announce(`🎣 ${c.hero.name} caught a ${ITEMS[pick.id].name}!`);
+    const qty = Math.random() < doubleChance(lvl) && fish.id !== 'old_boot' && fish.id !== 'lake_king' ? 2 : 1;
+    this.heroes.addItem(c.hero.id, fish.id, qty);
+    const xp = this.heroes.addXp(c.hero, 'fishing', Math.round(FISH[fish.id].xp * (1 + fish.d / 200)));
+    c.send({ t: 'fishResult', ok: true, item: fish.id, qty, kg: fish.kg, xp });
+    const rarity = ITEMS[fish.id].rarity;
+    if (rarity === 'epic' || rarity === 'legendary') this.announce(`🎣 ${c.hero.name} landed a ${fish.kg} kg ${ITEMS[fish.id].name}!`);
     c.pushInventory();
     return { ok: true };
   }
@@ -811,6 +842,7 @@ const HANDLERS = {
   hit: (g, c, m, now) => g.hitNode(c, String(m.node), now),
   cast: (g, c, m, now) => g.cast(c, String(m.node), now),
   reel: (g, c, m, now) => g.reel(c, now),
+  land: (g, c, m, now) => g.land(c, m.toggles, m.end, now),
 
   engage(g, c, m) {
     const mob = c.ch.mobs.get(String(m.mob));

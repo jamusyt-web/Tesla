@@ -123,6 +123,7 @@ export class GameClient {
     this.nodeLabels = new Map();
     this.#makeStaticLabels();
     this.#makeMarker();
+    this.#makeGuide();
     this.raycaster = new THREE.Raycaster();
     this.raycaster.layers.enableAll();
     this.#bindInput();
@@ -164,6 +165,94 @@ export class GameClient {
     m.visible = false;
     this.scene.add(m);
     this.marker = m;
+  }
+
+  // Quest guide: a soft light pillar + spinning gem over the target, and a
+  // trail of glowing dots along the actual walking path to it.
+  #makeGuide() {
+    const grad = document.createElement('canvas');
+    grad.width = 1;
+    grad.height = 64;
+    const gx = grad.getContext('2d');
+    const gg = gx.createLinearGradient(0, 0, 0, 64);
+    gg.addColorStop(0, 'rgba(255,230,120,0)');
+    gg.addColorStop(1, 'rgba(255,230,120,1)');
+    gx.fillStyle = gg;
+    gx.fillRect(0, 0, 1, 64);
+    const tex = new THREE.CanvasTexture(grad);
+    const group = new THREE.Group();
+    const pillar = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.75, 0.75, 26, 20, 1, true),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, fog: false, blending: THREE.AdditiveBlending }),
+    );
+    pillar.position.y = 13;
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), new THREE.MeshBasicMaterial({ color: '#ffd84a', fog: false }));
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.45, 36), new THREE.MeshBasicMaterial({ color: '#ffe066', transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.07;
+    group.add(pillar, gem, ring);
+    group.visible = false;
+    this.scene.add(group);
+    const MAXD = 70;
+    const dots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.2, 12).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#ffe066', transparent: true, opacity: 0.9, depthWrite: false }), MAXD);
+    dots.count = 0;
+    dots.frustumCulled = false;
+    this.scene.add(dots);
+    this.guide = { group, gem, ring, dots, MAXD, pts: [], target: null, recalc: 0, from: null };
+  }
+
+  setGuide(tg) {
+    this.guide.target = tg ? { x: tg.x, z: tg.z, y: tg.y } : null;
+  }
+
+  #updateGuide(dt) {
+    const G = this.guide;
+    const tg = G.target;
+    G.group.visible = !!tg;
+    if (!tg || !this.me) {
+      G.dots.count = 0;
+      return;
+    }
+    G.group.position.set(tg.x, 0, tg.z);
+    G.gem.position.y = tg.y + 0.6 + Math.sin(this.t * 3) * 0.25;
+    G.gem.rotation.y += dt * 2;
+    G.ring.scale.setScalar(1 + Math.sin(this.t * 4) * 0.08);
+    const L = this.me.local;
+    // Re-plan the trail occasionally, or when the target/you moved a lot.
+    G.recalc -= dt;
+    const moved = !G.from || Math.hypot(G.from.x - L.x, G.from.z - L.z) > 2.5 || Math.hypot(G.from.tx - tg.x, G.from.tz - tg.z) > 1.5;
+    if (G.recalc <= 0 || moved) {
+      G.recalc = 0.8;
+      G.from = { x: L.x, z: L.z, tx: tg.x, tz: tg.z };
+      const path = Math.hypot(tg.x - L.x, tg.z - L.z) > 5 ? STATIC.nav.findPath(L.x, L.z, tg.x, tg.z) : null;
+      G.pts = [];
+      if (path) {
+        let ax = L.x;
+        let az = L.z;
+        let carry = 1.6;
+        for (const [bx, bz] of path) {
+          const seg = Math.hypot(bx - ax, bz - az);
+          let d = carry;
+          while (d < seg && G.pts.length < G.MAXD) {
+            G.pts.push([ax + ((bx - ax) * d) / seg, az + ((bz - az) * d) / seg]);
+            d += 1.6;
+          }
+          carry = d - seg;
+          ax = bx;
+          az = bz;
+        }
+        G.pts = G.pts.slice(0, Math.max(0, G.pts.length - 1));
+      }
+    }
+    const o = new THREE.Object3D();
+    G.pts.forEach(([x, z], i) => {
+      o.position.set(x, 0.08, z);
+      o.scale.setScalar(0.75 + 0.35 * Math.max(0, Math.sin(this.t * 5 - i * 0.6)));
+      o.updateMatrix();
+      G.dots.setMatrixAt(i, o.matrix);
+    });
+    G.dots.count = G.pts.length;
+    G.dots.instanceMatrix.needsUpdate = true;
   }
 
   project(v, out = {}) {
@@ -292,6 +381,15 @@ export class GameClient {
         if (pv && !pv.isMe) pv.av.play('reel');
       }),
       s.on('bite', (m) => this.onBite(m)),
+      s.on('landed', (m) => {
+        const pv = this.players.get(m.by);
+        if (!pv || pv.isMe) return;
+        pv.av.hold(null);
+        if (m.ok && ITEMS[m.item]) {
+          pv.av.play('cheer');
+          this.floatText(pv.av.root.position.clone().setY(3), ITEMS[m.item].icon, 'crit');
+        }
+      }),
       s.on('fishResult', (m) => this.onFishResult(m)),
       s.on('emote', (m) => this.onEmote(m)),
       s.on('chat', (m) => this.onChat(m)),
@@ -450,6 +548,12 @@ export class GameClient {
     if (this.fishing) {
       this.reel();
       return;
+    }
+    // Gathering: a tap anywhere on/inside the timing ring (or on the node) is a swing.
+    if (this.gather) {
+      const n = STATIC.nodes.get(this.gather.node);
+      const c = this.project(new THREE.Vector3(n.x, NODE_TYPES[n.type].kind === 'tree' ? 2.2 : 1.3, n.z));
+      if (Math.hypot(x - c.x, y - c.y) <= 110) return this.swing();
     }
     const hit = this.pick(x, y);
     if (!hit) return;
@@ -659,23 +763,40 @@ export class GameClient {
       });
   }
 
-  onBite() {
+  onBite(m) {
     const f = this.fishing;
     if (!f) return;
     f.state = 'bite';
+    f.bite = m;
     sfx.bite();
     if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
     this.rings.spawn(f.bob.position, { color: '#ffffff', size: 2, life: 0.5, y: 0 });
     this.fx.burst(f.bob.position.clone().setY(0.1), { n: 10, color: ['#bfeaff', '#ffffff'], speed: 2, up: 3, size: 0.12, life: 0.6 });
-    this.floatText(f.bob.position.clone().setY(1.5), '❗', 'crit');
+    this.floatText(f.bob.position.clone().setY(1.5), m.fish.d >= 60 ? '‼️' : '❗', 'crit');
     this.hud.fishState('bite');
   }
 
+  // Tap while waiting/biting: try to hook. A good hook starts the reel fight.
   reel() {
-    if (!this.fishing) return;
+    const f = this.fishing;
+    if (!f || f.state === 'fight' || f.state === 'hooking') return;
     this.me.av.play('reel');
-    this.sock.send({ t: 'reel' });
-    this.endFishing();
+    if (f.state !== 'bite') {
+      this.sock.send({ t: 'reel' }); // too early — server answers with fishResult
+      return;
+    }
+    f.state = 'hooking';
+    this.hud.fishState(null);
+    this.sock
+      .req('reel')
+      .then((r) => {
+        if (!r?.fight || this.fishing !== f) return;
+        f.state = 'fight';
+        f.splashT = 0;
+        sfx.splash();
+        this.hud.startFight(f.bite, (toggles, end) => this.sock.send({ t: 'land', toggles, end }));
+      })
+      .catch(() => {});
   }
 
   endFishing() {
@@ -684,6 +805,7 @@ export class GameClient {
     this.scene.remove(f.bob, f.line);
     this.fishing = null;
     this.hud.fishState(null);
+    this.hud.endFight();
     setTimeout(() => {
       if (!this.fishing) {
         this.me.av.setState('idle');
@@ -693,12 +815,16 @@ export class GameClient {
   }
 
   onFishResult(m) {
+    const bob = this.fishing?.bob.position.clone();
     this.endFishing();
     const pos = this.me.av.root.position.clone().setY(3);
     if (m.ok) {
       const it = ITEMS[m.item];
-      this.floatText(pos, `${it.icon} ${m.qty > 1 ? m.qty + '× ' : ''}${it.name}!`, 'loot' + (it.rarity === 'epic' ? ' rare' : ''));
-      it.rarity === 'epic' ? sfx.rare() : sfx.loot();
+      const big = it.rarity === 'epic' || it.rarity === 'legendary';
+      if (bob) this.fx.burst(bob.setY(0.2), { n: 24, color: ['#bfeaff', '#ffffff', '#8fd8ff'], speed: 3, up: 6, size: 0.14, life: 0.9 });
+      this.floatText(pos, `${it.icon} ${m.qty > 1 ? m.qty + '× ' : ''}${it.name} · ${m.kg} kg`, 'loot' + (big ? ' rare' : ''));
+      big ? sfx.rare() : sfx.loot();
+      if (big) this.hud.levelUp(`${it.name}!`, `${m.kg} kg — what a catch!`);
       this.hud.onXp(m.xp);
       this.me.av.play('cheer');
     } else {
@@ -950,7 +1076,21 @@ export class GameClient {
       if (this.fishing) {
         const f = this.fishing;
         f.t += dt;
-        f.bob.position.y = f.state === 'bite' ? -0.25 + Math.sin(f.t * 30) * 0.08 : -0.05 + Math.sin(f.t * 3) * 0.04;
+        if (f.state === 'fight') {
+          const fight = this.hud.fight?.state;
+          const node = STATIC.nodes.get(f.node);
+          const pull = fight ? (fight.fishPos - 0.5) * 1.6 : 0;
+          f.bob.position.x = node.x + Math.sin(f.t * 7) * 0.35 + pull * 0.3;
+          f.bob.position.z = node.z + Math.cos(f.t * 5) * 0.35;
+          f.bob.position.y = -0.3 + Math.sin(f.t * 18) * 0.1;
+          f.splashT -= dt;
+          if (f.splashT <= 0) {
+            f.splashT = 0.25 + Math.random() * 0.35;
+            this.fx.puff.burst(f.bob.position.clone().setY(0.05), { n: 4, color: ['#d9f3ff', '#ffffff'], speed: 1.5, up: 2.5, size: 0.2, life: 0.5, gravity: 8 });
+            if (Math.random() < 0.3) this.rings.spawn(f.bob.position, { color: '#ffffff', size: 1.2, life: 0.5, y: 0 });
+          }
+          if (!me.av.oneShot) me.av.play('reel', 0.35);
+        } else f.bob.position.y = f.state === 'bite' ? -0.25 + Math.sin(f.t * 30) * 0.08 : -0.05 + Math.sin(f.t * 3) * 0.04;
         const tip = me.av.held?.userData.tip;
         if (tip) {
           const a = new THREE.Vector3();
@@ -992,6 +1132,7 @@ export class GameClient {
     this.fx.puff.update(dt);
     this.rings.update(dt);
     this.#fadeOccluders(dt);
+    this.#updateGuide(dt);
     this.#updateCamera(dt);
     this.#updateLabels();
     this.hud.frame(dt);

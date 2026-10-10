@@ -64,16 +64,8 @@ export const NODE_TYPES = {
   fish_spot: { kind: 'fish', tool: 'rod', skill: 'fishing', name: 'Fishing Spot', hp: 1, tier: 1, lvl: 1, xp: 9, respawn: 6, r: 0, drops: [], rare: [] },
 };
 
-// Fishing loot table by rod tier: weights.
-export function fishTable(rodTier, fishingLvl) {
-  const luck = 1 + fishingLvl * 0.04 + (rodTier - 1) * 0.5;
-  return [
-    { id: 'minnow', w: 60, xp: 9 },
-    { id: 'trout', w: 26 * luck, xp: 18 },
-    { id: 'golden_koi', w: 2.2 * luck, xp: 60 },
-    { id: 'old_boot', w: 8, xp: 3 },
-  ];
-}
+// Fishing spots near the middle of the lake are deep water (bigger fish).
+export const isDeepSpot = (n) => Math.hypot(n.x - LAKE.x, n.z - LAKE.z) < 6.5;
 
 function scatter(rng, n, cx, cz, r, minGap, avoid, existing) {
   const out = [];
@@ -245,7 +237,14 @@ export class NavGrid {
       if (!s) return null;
       [si, sj] = this.cell(s[0], s[1]);
     }
-    const [gi, gj] = this.cell(goal[0], goal[1]);
+    let [gi, gj] = this.cell(goal[0], goal[1]);
+    if (!this.open(gi, gj)) {
+      // The goal point is walkable but its grid cell's centre isn't (e.g. the
+      // edge of the narrow dock): aim A* at the nearest open cell instead.
+      const g = this.nearestOpen(goal[0], goal[1]);
+      if (!g) return null;
+      [gi, gj] = this.cell(g[0], g[1]);
+    }
     const start = sj * N + si;
     const target = gj * N + gi;
     const g = new Float32Array(N * N).fill(Infinity);

@@ -7,17 +7,19 @@ import { generateNodes, NODE_TYPES, approachPoint, generateScenery, buildCollide
 
 let srv;
 let game;
+let wss;
 let base;
 
 before(async () => {
   const db = openDb(':memory:');
-  ({ server: srv, game } = createServer(db));
+  ({ server: srv, game, wss } = createServer(db));
   game.auth.openSignup = true;
   game.start();
   await new Promise((r) => srv.listen(0, r));
   base = `http://127.0.0.1:${srv.address().port}`;
 });
 after(() => {
+  for (const ws of wss.clients) ws.terminate(); // a failed test must not hang the run
   game.stop();
   srv.close();
   srv.closeAllConnections?.();
@@ -140,4 +142,55 @@ test('logging in elsewhere replaces the old session (no ghost twins)', async () 
   const live = [...game.channels.flatMap((ch) => [...ch.players.values()])].filter((c) => c.hero.id === a.id);
   assert.equal(live.length, 1, 'exactly one copy of Eve in the world');
   ws2.close();
+});
+
+test('fishing: hook, fight, and the server replays the fight to confirm the catch', async () => {
+  const { newFight, stepFight } = await import('../../shared/fishing.js');
+  const { isDeepSpot } = await import('../../shared/world.js');
+  const a = await player('Finn');
+  try {
+  const col = buildColliders(generateNodes(), generateScenery());
+  const spot = generateNodes().find((n) => n.type === 'fish_spot' && !isDeepSpot(n));
+  const ap = approachPoint(spot, a.welcome.you.x, a.welcome.you.z, col);
+  a.ws.send(JSON.stringify({ t: 'move', x: ap[0], z: ap[1] }));
+  await new Promise((r) => setTimeout(r, 9000));
+
+  // Plays a fight like a skilled player and returns the recorded toggles.
+  const solve = (bite) => {
+    const s = newFight(bite.fish, bite.gear);
+    const toggles = [];
+    let held = false;
+    while (!s.done) {
+      const want = s.fishPos - (s.zonePos + bite.gear.zone / 2) - s.zoneVel * 0.15 > 0;
+      if (want !== held) {
+        toggles.push(s.tick);
+        held = want;
+      }
+      stepFight(s, held);
+    }
+    return { toggles, end: s.tick, done: s.done };
+  };
+  const fishOnce = async (instant) => {
+    a.inbox.length = 0;
+    const c = await a.rpc('cast', { node: spot.id });
+    assert.equal(c.ok, true, c.err);
+    const bite = await a.next((m) => m.t === 'bite', 9000);
+    const hook = await a.rpc('reel', {});
+    assert.equal(hook.data.fight, true);
+    const sol = solve(bite);
+    if (!instant) await new Promise((r) => setTimeout(r, (sol.end / 60) * 1000));
+    a.ws.send(JSON.stringify({ t: 'land', toggles: sol.toggles, end: sol.end }));
+    return { res: await a.next((m) => m.t === 'fishResult', 5000), sol };
+  };
+  // Submitting a whole fight instantly is rejected (can't beat real time).
+  const cheat = await fishOnce(true);
+  assert.equal(cheat.res.ok, false);
+  // Playing it out in real time works.
+  const honest = await fishOnce(false);
+  assert.equal(honest.sol.done, 'caught', 'the test player should land an easy fish');
+  assert.equal(honest.res.ok, true, honest.res.reason);
+  assert.ok(honest.res.kg > 0);
+  } finally {
+    a.ws.close();
+  }
 });
