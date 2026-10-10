@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 // 3-band gradient = the soft cel-shaded "Shop Titans" look.
 const grad = (() => {
-  const data = new Uint8Array([120, 120, 120, 255, 200, 200, 200, 255, 255, 255, 255, 255]);
+  const data = new Uint8Array([150, 150, 150, 255, 215, 215, 215, 255, 255, 255, 255, 255]);
   const t = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat);
   t.minFilter = t.magFilter = THREE.NearestFilter;
   t.needsUpdate = true;

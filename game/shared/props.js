@@ -41,10 +41,10 @@ add('signpost_directions', 12.6, -3.8, deg(-90), 0.4);
   const m = b.market; // x 12.5..23.5, z -10..-2, open pavilion
   for (const [dx, v] of [[-3, 0], [3.6, 1]]) {
     add('market_stall_canopy', m.x + dx, m.z - 8.4, 0, 1.6);
-    add('market_table', m.x + dx, m.z - 8.3, 0, 0, { v });
+    add('market_table', m.x + dx, m.z - 8.3, deg(90), 0, { v });
   }
-  add('market_goods_fruit', m.x - 3.8, m.z - 8.3, 0, 0, { y: 1.0 });
-  add('market_goods_bottles', m.x + 4.3, m.z - 8.2, 0, 0, { y: 1.0 });
+  add('market_goods_fruit', m.x - 3.4, m.z - 8.3, 0, 0, { y: 0.9 });
+  add('market_goods_bottles', m.x + 4.0, m.z - 8.2, 0, 0, { y: 0.9 });
   add('prop_crate', m.x + 6.9, m.z - 2.8, deg(5), 0.65, { v: 1 });
   add('prop_crate', m.x + 6.9, m.z - 1.6, deg(-8), 0.65);
   add('prop_crate_open', m.x + 6.8, m.z + 1.4, deg(90), 0.7, { v: 1 });

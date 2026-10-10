@@ -22,11 +22,23 @@ const gradMap = toon('#ffffff').gradientMap;
 
 // Shift every pack toward Hearthvale's warm, saturated palette in the shader,
 // so textured (palette-atlas) and plain-coloured models get the same grade.
+// Two pulls first: Kenney's jade greens toward our leaf green, and its
+// lavender stone/plaster/iron greys toward warm grey (saturated blues and
+// purples are left alone).
 const GRADE = `
   {
-    float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-    diffuseColor.rgb = mix(vec3(lum), diffuseColor.rgb, 1.18);
-    diffuseColor.rgb *= vec3(1.04, 1.01, 0.95);
+    vec3 c = diffuseColor.rgb;
+    float w = smoothstep(0.08, 0.20, c.g - c.b) * step(c.r, c.b);
+    float d = (c.b - c.r) * w * 0.6;
+    c.r += d;
+    c.b -= d;
+    float mx = max(c.r, max(c.g, c.b));
+    float mn = min(c.r, min(c.g, c.b));
+    float k = step(max(c.r, c.g), c.b) * (1.0 - smoothstep(0.35, 0.6, (mx - mn) / max(mx, 1e-3))) * 0.55;
+    c = mix(c, vec3(dot(c, vec3(0.299, 0.587, 0.114))) * vec3(1.05, 1.0, 0.92), k);
+    float lum = dot(c, vec3(0.299, 0.587, 0.114));
+    c = mix(vec3(lum), c, 1.12);
+    diffuseColor.rgb = c * vec3(1.04, 1.01, 0.95);
   }`;
 function graded(mat) {
   mat.onBeforeCompile = (sh) => {
@@ -49,6 +61,7 @@ const BANDS = {
   yellow: (h, s) => h >= 30 && h < 55 && s > 0.35,
   green: (h, s) => h >= 70 && h < 180 && s > 0.25,
   white: (h, s, v) => s < 0.12 && v > 0.7,
+  warm: (h, s) => h < 60 && s > 0.2, // every orange/tan/cream fur or wood tone
 };
 const BAND_REF = { metal: 0.62, red: 0.45, orange: 0.55, yellow: 0.7, green: 0.5, white: 0.85 };
 const remapCache = new Map();
@@ -92,11 +105,17 @@ function remapTexture(tex, remap) {
   return t;
 }
 
+// A black/white copy of an atlas: white where the texel is in `band`. Used as
+// an emissive map so only part of a model glows (a lantern's glass).
+function maskTexture(tex, band) {
+  return remapTexture(tex, [{ band, to: '#ffffff', ref: 0.0001 }, { to: '#000000' }]);
+}
+
 // def (the manifest entry) can recolour named materials, repaint a palette
 // atlas (`remap`) and make thin leaf/petal planes double-sided.
 function toToon(m, tint, def = {}) {
   const re = def.recolor?.[m.name] || def.recolor?.['*'] || PALETTES[def._pack]?.[m.name];
-  const key = m.uuid + (tint ? JSON.stringify(tint) : '') + (re || '') + (def.doubleSide ? 'D' : '') + (def.remap ? JSON.stringify(def.remap) : '');
+  const key = m.uuid + (tint ? JSON.stringify(tint) : '') + (re || '') + (def.doubleSide ? 'D' : '') + JSON.stringify([def.remap, def.glowBand, def.texture]);
   if (matCache.has(key)) return matCache.get(key);
   if (m.map) {
     // Kenney packs colour models from a small palette atlas: keep it crisp.
@@ -109,7 +128,7 @@ function toToon(m, tint, def = {}) {
   if (tint) color.lerp(new THREE.Color(tint.color), tint.amount ?? 0.6);
   const t = new THREE.MeshToonMaterial({
     color,
-    map: m.map && def.remap ? remapTexture(m.map, def.remap) : m.map || null,
+    map: m.map && def.remap ? remapTexture(m.map, def.remap) : (def.texture && textures.get(def.texture)) || m.map || null,
     gradientMap: gradMap,
     transparent: m.transparent,
     opacity: m.opacity,
@@ -119,16 +138,23 @@ function toToon(m, tint, def = {}) {
     emissiveIntensity: tint?.emissive ? (tint.glow ?? 0.35) : 0,
   });
   t.vertexColors = !!m.vertexColors;
+  if (def.glowBand && m.map) {
+    // { band, color, amount }: light up just that part of the atlas.
+    t.emissiveMap = maskTexture(m.map, def.glowBand.band);
+    t.emissive = new THREE.Color(def.glowBand.color);
+    t.emissiveIntensity = def.glowBand.amount ?? 0.6;
+  }
   graded(t);
   matCache.set(key, t);
   return t;
 }
 
 // Inverted-hull outline needs smooth normals even on flat-shaded models.
-function hullGeometry(geo) {
+function hullGeometry(geo, skinned = false) {
   if (hullCache.has(geo)) return hullCache.get(geo);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', geo.attributes.position.clone());
+  if (skinned) for (const k of ['skinIndex', 'skinWeight']) g.setAttribute(k, geo.attributes[k].clone());
   if (geo.index) g.setIndex(geo.index.clone());
   const merged = mergeVertices(g, 1e-3);
   merged.computeVertexNormals();
@@ -136,7 +162,8 @@ function hullGeometry(geo) {
   return merged;
 }
 
-const outlineFor = (scale) => outlineMat(Math.round((OUTLINE_WORLD / Math.max(scale, 1e-3)) * 1000) / 1000);
+const CHAR_OUTLINE = 0.025; // characters get a finer line than buildings
+const outlineFor = (scale, world = OUTLINE_WORLD) => outlineMat(Math.round((world / Math.max(scale, 1e-3)) * 1000) / 1000);
 
 const textures = new Map(); // url -> Texture (palette variants for modular kits)
 const texLoader = new THREE.TextureLoader();
@@ -148,7 +175,7 @@ for (const [pack, names] of Object.entries(MODULE_PACKS)) for (const n of names)
 export async function loadAssets(onProgress = () => {}) {
   const urls = new Set();
   for (const def of Object.values(MODELS)) for (const u of [].concat(def.url)) urls.add(u);
-  const texUrls = Object.values(TEXTURES).flatMap((t) => Object.values(t));
+  const texUrls = [...new Set(Object.values(TEXTURES).flatMap((t) => Object.values(t)).concat(Object.values(MODELS).map((d) => d.texture).filter(Boolean)))];
   const total = urls.size + texUrls.length;
   await Promise.all(
     texUrls.map((u) =>
@@ -177,7 +204,7 @@ export async function loadAssets(onProgress = () => {}) {
   for (const [slot, def] of Object.entries(MODELS)) {
     const variants = [].concat(def.url).map((u) => gltfs.get(u)).filter(Boolean);
     if (!variants.length) continue;
-    ready.set(slot, variants.map((g) => prepare(g, def)));
+    ready.set(slot, variants.map((g, i) => prepare(g, def.heights ? { ...def, height: def.heights[i % def.heights.length] } : def)));
   }
 }
 
@@ -240,10 +267,18 @@ export function make(slot, { variant = 0, tint = null, outline = true, castShado
     if (unique) [].concat(o.material).forEach(graded);
     o.castShadow = castShadow;
     o.receiveShadow = true;
-    if (outline && !o.isSkinnedMesh && p.def.outline !== false) {
-      const hull = new THREE.Mesh(hullGeometry(o.geometry), outlineFor(p.scale));
+    if (outline && p.def.outline !== false) {
+      let hull;
+      if (o.isSkinnedMesh) {
+        // Same inked look for rigged characters: a skinned hull that bends
+        // with the same skeleton (the push along the normal happens before
+        // skinning, so the line stays even while animating).
+        hull = new THREE.SkinnedMesh(hullGeometry(o.geometry, true), outlineFor(p.scale, CHAR_OUTLINE));
+        hull.bind(o.skeleton, o.bindMatrix);
+      } else hull = new THREE.Mesh(hullGeometry(o.geometry), outlineFor(p.scale));
       hull.raycast = () => {};
       hull.castShadow = false;
+      hull.frustumCulled = !o.isSkinnedMesh; // a posed character can leave its rest-pose bounds
       o.add(hull);
     }
   });

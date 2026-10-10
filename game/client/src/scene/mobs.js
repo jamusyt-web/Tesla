@@ -3,7 +3,7 @@ import { mesh, toon, shade } from './toon.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import * as assets from './assets.js';
 
-const OL = 0.03;
+const OL = 0.025;
 const sph = (r, a = 16, b = 12) => new THREE.SphereGeometry(r, a, b);
 
 function eyes(parent, y, z, spread, r = 0.09, color = '#2b1d14') {

@@ -97,7 +97,7 @@ export class GameClient {
     scene.fog = new THREE.Fog('#cdeaf7', 70, 190);
     this.scene = scene;
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.5, 900);
-    const hemi = new THREE.HemisphereLight('#dff3ff', '#a37d55', 1.5);
+    const hemi = new THREE.HemisphereLight('#dff3ff', '#b08a66', 1.5);
     hemi.layers.enableAll(); // lights must be on the hero layer too
     scene.add(hemi);
     const sun = new THREE.DirectionalLight('#fff3dc', 2.3);

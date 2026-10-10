@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Avatar } from '../scene/avatar.js';
 import * as assets from '../scene/assets.js';
 import { MODELS } from '../scene/manifest.js';
+import { PROC_ICONS } from './proc-icons.js';
 
 // Renders avatar portraits to data URLs with one shared offscreen renderer.
 let R = null;
@@ -55,12 +56,12 @@ const iconCache = new Map();
 export function itemIcon(itemId) {
   if (iconCache.has(itemId)) return iconCache.get(itemId);
   let url = null;
-  if (assets.has(`icon:${itemId}`)) {
+  const proc = PROC_ICONS[itemId];
+  if (proc || assets.has(`icon:${itemId}`)) {
     const { r, scene, cam } = renderer();
-    const made = assets.make(`icon:${itemId}`, { outline: true, castShadow: false });
-    const obj = made.object;
+    const obj = proc ? new THREE.Group().add(proc()) : assets.make(`icon:${itemId}`, { outline: true, castShadow: false }).object;
     scene.add(obj);
-    const pose = MODELS[`icon:${itemId}`].pose;
+    const pose = MODELS[`icon:${itemId}`]?.pose;
     if (pose) obj.rotation.set(...pose.map((d) => (d * Math.PI) / 180));
     obj.rotation.y -= 0.5;
     obj.updateMatrixWorld(true);

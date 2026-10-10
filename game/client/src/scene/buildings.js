@@ -121,7 +121,7 @@ function cottage(W, D, tex, seed) {
 function workshop(W, D) {
   const nx = cells(W, 2.25);
   const nz = cells(D, 2.3);
-  const b = new Builder([W / nx, 2.8, D / nz], TEX.roof_red);
+  const b = new Builder([W / nx, 2.8, D / nz], TEX.roof_slate);
   b.walls(nx, nz, 1, (side, idx) => {
     if (side === 'S') return idx === 0 || idx === nx - 1 ? 'wall-wood-window-shutters' : 'wall-wood-doorway-square-wide';
     if (side === 'E' || side === 'W') return idx === Math.floor(nz / 2) ? 'wall-wood-window-glass' : 'wall-wood-detail-cross';
@@ -139,7 +139,7 @@ function workshop(W, D) {
 function shop(W, D) {
   const nx = cells(W, 2.25);
   const nz = cells(D, 2.3);
-  const b = new Builder([W / nx, 2.8, D / nz], TEX.roof_purple);
+  const b = new Builder([W / nx, 2.8, D / nz], TEX.shop);
   b.walls(nx, nz, 2, (side, idx, f) => {
     if (f === 0) {
       if (side === 'S') return idx === 0 || idx === nx - 1 ? 'wall-window-glass' : idx === 1 ? 'wall-door' : 'wall-doorway-square-wide';
@@ -161,7 +161,7 @@ function townhall(W, D) {
   const nx = cells(W, 2.2) | 1; // odd, so the tower sits on the middle bay
   const nz = cells(D, 2.0) - 1; // body rows; the last row is the tower
   const S = [W / nx, 2.8, D / (nz + 1)];
-  const b = new Builder(S, null);
+  const b = new Builder(S, TEX.hall);
   const mid = (nx - 1) / 2;
   b.walls(nx, nz, 2, (side, idx, f) => {
     if (side === 'S' && idx === mid && f === 0) return null;

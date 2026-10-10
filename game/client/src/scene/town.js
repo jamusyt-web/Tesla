@@ -9,7 +9,7 @@ import {
   generateNodes, generateScenery, doorPoint, mulberry32,
 } from '../../../shared/world.js';
 
-const OL = 0.04;
+const OL = 0.035;
 const sph = (r, a = 14, b = 10) => new THREE.SphereGeometry(r, a, b);
 const cyl = (a, b, h, s = 10) => new THREE.CylinderGeometry(a, b, h, s);
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
@@ -827,7 +827,9 @@ export function buildTown(scene, fx, { low = false } = {}) {
       const t = 0.55;
       const nx = -(s[3] - s[1]) / len;
       const nz = (s[2] - s[0]) / len;
-      lamps.push([s[0] + (s[2] - s[0]) * t + nx * (s[4] + 0.9), s[1] + (s[3] - s[1]) * t + nz * (s[4] + 0.9)]);
+      const x = s[0] + (s[2] - s[0]) * t + nx * (s[4] + 0.9);
+      const z = s[1] + (s[3] - s[1]) * t + nz * (s[4] + 0.9);
+      if (Math.hypot(x, z) > 16) lamps.push([x, z]); // the plaza has its own ring of lamps
     }
     for (const [x, z] of lamps) {
       if (assets.has('lamp_post')) {

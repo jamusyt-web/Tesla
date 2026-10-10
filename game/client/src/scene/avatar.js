@@ -3,7 +3,7 @@ import { mesh, toon, shade, outlineMat } from './toon.js';
 import { buildTool } from './tools.js';
 import { sanitizeAvatar } from '../../../shared/avatar.js';
 
-const OL = 0.022;
+const OL = 0.025;
 const sph = (r, ws = 18, hs = 14) => new THREE.SphereGeometry(r, ws, hs);
 const cyl = (rt, rb, h, s = 14) => new THREE.CylinderGeometry(rt, rb, h, s);
 const ease = (t) => 1 - Math.pow(1 - t, 3);
