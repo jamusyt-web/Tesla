@@ -3,37 +3,24 @@ import { mesh, toon, shade } from './toon.js';
 import * as assets from './assets.js';
 import { waterMaterial, groundTexture } from './water.js';
 import { buildModular, buildGate } from './buildings.js';
-import { PROPS } from '../../../shared/props.js';
+import { PROC_BUILDERS } from './procprops.js';
 import {
-  BUILDINGS, ZONES, GATE, FOUNTAIN, LAKE, DOCK, WORLD_RADIUS, NODE_TYPES,
-  generateNodes, generateScenery, doorPoint, mulberry32,
+  BUILDINGS, ZONES, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, WORLD_RADIUS, NODE_TYPES,
+  pathSegments, zonesOfKind, mulberry32,
 } from '../../../shared/world.js';
 
+// Small ground cover: no ink line and no shadow (they'd just add noise).
+const NO_OUTLINE = new Set(['deco_flower', 'deco_grass', 'deco_lily_pad', 'deco_mushroom']);
+const NO_SHADOW = new Set(['deco_flower', 'deco_grass', 'deco_lily_pad']);
 const OL = 0.03;
 const sph = (r, a = 14, b = 10) => new THREE.SphereGeometry(r, a, b);
 const cyl = (a, b, h, s = 10) => new THREE.CylinderGeometry(a, b, h, s);
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
 
-// Path network: plaza → every building door and every zone.
-function pathSegments() {
-  const segs = [];
-  for (const b of BUILDINGS) {
-    const [dx, dz] = doorPoint(b);
-    segs.push([0, 0, dx, dz, 1.7]);
-  }
-  segs.push([0, 0, GATE.x, GATE.z - 4, 2.2]);
-  segs.push([GATE.x, GATE.z - 4, 0, -56, 1.6]);
-  segs.push([0, 0, -36, 0, 2]);
-  segs.push([0, 0, 36, 0, 2]);
-  segs.push([-14, 16, -26, 36, 1.5]);
-  segs.push([16, 17, DOCK.x, DOCK.z - DOCK.d / 2, 1.6]);
-  return segs;
-}
-
 function distSeg(px, pz, [ax, az, bx, bz]) {
   const vx = bx - ax;
   const vz = bz - az;
-  const t = Math.max(0, Math.min(1, ((px - ax) * vx + (pz - az) * vz) / (vx * vx + vz * vz)));
+  const t = Math.max(0, Math.min(1, ((px - ax) * vx + (pz - az) * vz) / (vx * vx + vz * vz || 1)));
   return Math.hypot(px - (ax + vx * t), pz - (az + vz * t));
 }
 
@@ -371,6 +358,11 @@ export function buildTown(scene, fx, { low = false } = {}) {
   const rng = mulberry32(99);
   const segs = pathSegments();
   const fades = [];
+  const nearPath = (x, z, pad) => segs.some((s) => distSeg(x, z, s) < s[4] + pad);
+  const inPlaza = (x, z, pad = 0) => PLAZAS.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + pad);
+  const inLake = (x, z, pad = 0) => LAKES.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + pad);
+  const inDock = (x, z, pad = 0) => DOCKS.some((d) => Math.abs(x - d.x) < d.w / 2 + pad && Math.abs(z - d.z) < d.d / 2 + pad);
+  const inBuilding = (x, z, pad = 0) => BUILDINGS.some((b) => Math.abs(x - b.x) < b.w / 2 + pad && Math.abs(z - b.z) < b.d / 2 + pad);
 
   // Sky dome
   const sky = new THREE.Mesh(
@@ -398,9 +390,10 @@ export function buildTown(scene, fx, { low = false } = {}) {
     ocean.position.y = -2.2 + Math.sin(t * 0.8) * 0.06;
   });
 
-  // Ground: vertex-colored terrain with paths, zone tints, sandy shore, cliff falloff.
-  const SIZE = 236;
-  const SEG = low ? 150 : 210;
+  // Ground: vertex-coloured terrain with paths, plazas, zone tints, sandy lake
+  // shores and a cliff falling away at the island's edge.
+  const SIZE = Math.ceil((WORLD_RADIUS + 22) * 2);
+  const SEG = Math.round(SIZE / (low ? 1.57 : 1.12));
   const g = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position;
@@ -412,7 +405,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
   const plaza = new THREE.Color('#a89a82');
   const sand = new THREE.Color('#d6bd8a');
   const cliff = new THREE.Color('#7a5b40');
-  const zoneCols = ZONES.map((z) => new THREE.Color(z.ground));
+  const zoneCols = ZONES.map((z) => new THREE.Color(z.ground || '#74a04c'));
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
     const z = pos.getZ(i);
@@ -424,21 +417,26 @@ export function buildTown(scene, fx, { low = false } = {}) {
       const w = 1 - smooth(zn.r - 4, zn.r + 3, d);
       if (w > 0) c.lerp(zoneCols[k], w * 0.75);
     });
-    const dl = Math.hypot(x - LAKE.x, z - LAKE.z);
-    if (dl < LAKE.r + 3.5) c.lerp(sand, 1 - smooth(LAKE.r + 1, LAKE.r + 3.5, dl));
+    let y = 0;
+    let lakeY = null;
+    for (const l of LAKES) {
+      const dl = Math.hypot(x - l.x, z - l.z);
+      if (dl < l.r + 3.5) c.lerp(sand, 1 - smooth(l.r + 1, l.r + 3.5, dl));
+      if (dl < l.r) lakeY = Math.min(lakeY ?? 0, -0.7 * (1 - dl / l.r) - 0.05);
+    }
     let pd = Infinity;
     for (const s of segs) pd = Math.min(pd, distSeg(x, z, s) - s[4]);
     if (pd < 0.6) c.lerp(path, 1 - smooth(-0.4, 0.6, pd));
-    if (r < 12) c.lerp(plaza, 1 - smooth(10.5, 12, r));
-    let y = 0;
+    for (const p of PLAZAS) {
+      const rp = Math.hypot(x - p.x, z - p.z);
+      if (rp < p.r + 0.8) c.lerp(plaza, 1 - smooth(p.r - 0.7, p.r + 0.8, rp));
+    }
     if (r > WORLD_RADIUS + 1) {
       const k = smooth(WORLD_RADIUS + 1, WORLD_RADIUS + 9, r);
       c.lerp(r < WORLD_RADIUS + 5 ? sand : cliff, Math.min(1, k * 2));
       y = -k * 5 + Math.sin(x * 0.3 + z * 0.2) * 0.3 * k;
-    } else {
-      y = r > 14 ? (Math.sin(x * 0.13) * Math.cos(z * 0.11)) * 0.12 : 0;
-    }
-    if (dl < LAKE.r) y = -0.7 * (1 - dl / LAKE.r) - 0.05;
+    } else if (!inPlaza(x, z, 2.8)) y = Math.sin(x * 0.13) * Math.cos(z * 0.11) * 0.12;
+    if (lakeY !== null) y = lakeY;
     pos.setY(i, y);
     colors[i * 3] = c.r;
     colors[i * 3 + 1] = c.g;
@@ -452,25 +450,29 @@ export function buildTown(scene, fx, { low = false } = {}) {
   scene.add(ground);
   pickables.push(ground);
 
-  // Plaza: concentric paving rings, plus sparse stepping stones along paths.
-  {
+  // Plazas: concentric paving rings and spokes (sized to the plaza).
+  for (const p of PLAZAS) {
+    const k = p.r / 11.2;
     const rings = [[0, 11.2, '#b3a58c'], [10.4, 11.2, '#8a7c66'], [6.2, 6.9, '#988a72'], [3.6, 4.2, '#988a72']];
     rings.forEach(([a, b, col], i) => {
-      const m = new THREE.Mesh(a ? new THREE.RingGeometry(a, b, 64) : new THREE.CircleGeometry(b, 64), toon(col));
+      const m = new THREE.Mesh(a ? new THREE.RingGeometry(a * k, b * k, 64) : new THREE.CircleGeometry(b * k, 64), toon(col));
       m.rotation.x = -Math.PI / 2;
-      m.position.y = 0.02 + i * 0.004;
+      m.position.set(p.x, 0.02 + i * 0.004, p.z);
       m.receiveShadow = true;
       scene.add(m);
     });
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
-      const spoke = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 3.4), toon('#988a72'));
+      const spoke = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 3.4 * k), toon('#988a72'));
       spoke.rotation.x = -Math.PI / 2;
       spoke.rotation.z = -a;
-      spoke.position.set(Math.cos(a) * 8.6, 0.035, Math.sin(a) * 8.6);
+      spoke.position.set(p.x + Math.cos(a) * 8.6 * k, 0.035, p.z + Math.sin(a) * 8.6 * k);
       spoke.receiveShadow = true;
       scene.add(spoke);
     }
+  }
+  // Sparse stepping stones along the paths.
+  {
     const stones = [];
     for (const s of segs) {
       const len = Math.hypot(s[2] - s[0], s[3] - s[1]);
@@ -482,7 +484,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
         const nz = (s[2] - s[0]) / len;
         const x = s[0] + (s[2] - s[0]) * t + nx * off;
         const z = s[1] + (s[3] - s[1]) * t + nz * off;
-        if (Math.hypot(x, z) < 11.5) continue;
+        if (inPlaza(x, z, 0.3)) continue;
         stones.push([x, z]);
       }
     }
@@ -503,159 +505,60 @@ export function buildTown(scene, fx, { low = false } = {}) {
     scene.add(im);
   }
 
-  // Grass tufts (instanced cones).
+  // Grass tufts (instanced cones) everywhere that isn't paved, built on or wet.
   {
     const tufts = [];
     for (let i = 0; i < (low ? 1200 : 3000); i++) {
       const a = rng() * Math.PI * 2;
-      const d = 12 + Math.sqrt(rng()) * (WORLD_RADIUS - 13);
+      const d = Math.sqrt(rng()) * (WORLD_RADIUS - 1);
       const x = Math.cos(a) * d;
       const z = Math.sin(a) * d;
-      if (BUILDINGS.some((b) => Math.abs(x - b.x) < b.w / 2 + 1 && Math.abs(z - b.z) < b.d / 2 + 1)) continue;
-      if (Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r + 2) continue;
-      if (segs.some((s) => distSeg(x, z, s) < s[4] + 0.4)) continue;
+      if (inPlaza(x, z, 0.8) || inBuilding(x, z, 1) || inLake(x, z, 2) || nearPath(x, z, 0.4)) continue;
       tufts.push([x, z]);
     }
+    const wilds = zonesOfKind('wilds');
     const geo = new THREE.ConeGeometry(0.12, 0.5, 4);
     geo.translate(0, 0.25, 0);
     const im = new THREE.InstancedMesh(geo, toon('#ffffff'), tufts.length * 3);
     const o = new THREE.Object3D();
     const col = new THREE.Color();
     let k = 0;
-    for (const [x, z] of tufts)
+    for (const [x, z] of tufts) {
+      const wild = wilds.some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 6);
       for (let j = 0; j < 3; j++) {
         o.position.set(x + (rng() - 0.5) * 0.4, 0, z + (rng() - 0.5) * 0.4);
         o.rotation.set((rng() - 0.5) * 0.5, rng() * 3, (rng() - 0.5) * 0.5);
         o.scale.setScalar(0.6 + rng() * 0.9);
         o.updateMatrix();
         im.setMatrixAt(k, o.matrix);
-        const wild = z < -40;
         im.setColorAt(k++, col.set(wild ? ['#4e6e38', '#43602f', '#5b7a42'][j] : ['#6b9a48', '#5a8a3d', '#7caa55'][j]));
       }
+    }
     scene.add(im);
   }
 
-  // Flowers
-  const scenery = generateScenery();
-  const flowerSpots = scenery.flowers.map((f, i) => ({ x: f.x, z: f.z, rot: i * 2.39, s: 0.8 + (f.s - 0.7) * 0.6, v: f.c }));
-  if (!scatterModels(scene, 'deco_flower', flowerSpots, { outline: false, castShadow: false })) {
-    const fl = scenery.flowers;
-    const geo = sph(0.13, 6, 5);
-    const im = new THREE.InstancedMesh(geo, toon('#ffffff'), fl.length);
-    const stem = new THREE.InstancedMesh(cyl(0.02, 0.02, 0.3, 4), toon('#4f9d3f'), fl.length);
-    const o = new THREE.Object3D();
-    const col = new THREE.Color();
-    const pal = ['#ff7aa2', '#ffd84a', '#ffffff', '#b78cff', '#ff9f5a'];
-    fl.forEach((f, i) => {
-      o.position.set(f.x, 0.3 * f.s, f.z);
-      o.scale.setScalar(f.s);
-      o.rotation.set(0, 0, 0);
-      o.updateMatrix();
-      im.setMatrixAt(i, o.matrix);
-      im.setColorAt(i, col.set(pal[f.c]));
-      o.position.y = 0.15 * f.s;
-      o.updateMatrix();
-      stem.setMatrixAt(i, o.matrix);
-    });
-    scene.add(im, stem);
-  }
-
-  // Decorative trees (instanced): models if available, procedural otherwise.
-  const roundAll = scenery.trees.filter((t) => t.kind === 'round');
-  const pineAll = scenery.trees.filter((t) => t.kind === 'pine');
-  const roundModel = scatterModels(scene, 'deco_tree_round', roundAll.map((t, i) => ({ x: t.x, z: t.z, rot: i * 1.7, s: t.s })));
-  const pineModel = scatterModels(scene, 'deco_tree_pine', pineAll.map((t, i) => ({ x: t.x, z: t.z, rot: i * 1.3, s: t.s })));
-  if (!roundModel || !pineModel) {
-    const round = roundModel ? [] : roundAll;
-    const pine = pineModel ? [] : pineAll;
-    const o = new THREE.Object3D();
-    const trunkR = new THREE.InstancedMesh(cyl(0.3, 0.42, 2.2, 7), toon('#8b5a33'), round.length + pine.length);
-    const leafR = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1.5, 1), toon('#ffffff'), round.length * 2);
-    const leafP = new THREE.InstancedMesh(new THREE.ConeGeometry(1.6, 2.4, 8), toon('#ffffff'), pine.length * 3);
-    const col = new THREE.Color();
-    let ti = 0;
-    let li = 0;
-    let pi = 0;
-    for (const t of [...round, ...pine]) {
-      o.rotation.set(0, rng() * 6, 0);
-      o.position.set(t.x, 1.1 * t.s, t.z);
-      o.scale.setScalar(t.s);
-      o.updateMatrix();
-      trunkR.setMatrixAt(ti++, o.matrix);
-      if (t.kind === 'round') {
-        for (let j = 0; j < 2; j++) {
-          o.position.set(t.x + (j ? 0.6 : 0) * t.s, (3 + j * 0.3) * t.s, t.z + (j ? 0.4 : 0) * t.s);
-          o.scale.setScalar(t.s * (j ? 0.75 : 1.05));
-          o.updateMatrix();
-          leafR.setMatrixAt(li, o.matrix);
-          leafR.setColorAt(li++, col.set(['#5fb04a', '#6fc456', '#4f9d3f'][(li + j) % 3]));
-        }
-      } else {
-        for (let j = 0; j < 3; j++) {
-          o.position.set(t.x, (2.4 + j * 1.15) * t.s, t.z);
-          o.scale.setScalar(t.s * (1 - j * 0.25));
-          o.updateMatrix();
-          leafP.setMatrixAt(pi, o.matrix);
-          leafP.setColorAt(pi++, col.set(j % 2 ? '#2f7d4f' : '#3a8f5c'));
-        }
-      }
-    }
-    for (const im of [trunkR, leafR, leafP]) {
-      im.castShadow = true;
-      scene.add(im);
-    }
-  }
-
-  // Extra greenery that only exists when models are available.
+  // Props: every placed object in the map. Models are instanced per slot and
+  // variant; proc_* kinds are built in code (procprops.js); bobbing ones animate.
   {
-    const nodeList = generateNodes();
-    const blocked = (x, z, pad = 1.5) =>
-      BUILDINGS.some((b) => Math.abs(x - b.x) < b.w / 2 + pad && Math.abs(z - b.z) < b.d / 2 + pad) ||
-      Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r + 1.2 ||
-      segs.some((sg) => distSeg(x, z, sg) < sg[4] + 0.8) ||
-      Math.hypot(x, z) < 12.5 || Math.hypot(x, z) > WORLD_RADIUS - 2 ||
-      nodeList.some((n) => Math.hypot(n.x - x, n.z - z) < 2.6);
-    const spots = (n, cx, cz, r, pad) => {
-      const out = [];
-      for (let k = 0; k < n * 6 && out.length < n; k++) {
-        const a = rng() * Math.PI * 2;
-        const d = Math.sqrt(rng()) * r;
-        const x = cx + Math.cos(a) * d;
-        const z = cz + Math.sin(a) * d;
-        if (!blocked(x, z, pad)) out.push({ x, z, rot: rng() * 6.28, s: 0.8 + rng() * 0.5 });
-      }
-      return out;
-    };
-    const forest = ZONES[0];
-    const quarry = ZONES[1];
-    const wilds = ZONES[4];
-    scatterModels(scene, 'deco_bush', [...spots(low ? 40 : 80, 0, 0, WORLD_RADIUS - 6, 1.2), ...spots(18, forest.x, forest.z, forest.r, 1)]);
-    scatterModels(scene, 'deco_mushroom', spots(26, forest.x, forest.z, forest.r, 0.6), { outline: false });
-    scatterModels(scene, 'deco_log', spots(6, forest.x, forest.z, forest.r, 1.5));
-    scatterModels(scene, 'deco_stump', spots(8, forest.x, forest.z, forest.r, 1));
-    scatterModels(scene, 'deco_rock_small', [...spots(22, quarry.x, quarry.z, quarry.r, 1), ...spots(26, wilds.x, wilds.z, wilds.r, 1), ...spots(20, 0, 0, WORLD_RADIUS - 8, 1)]);
-    scatterModels(scene, 'deco_grass', spots(low ? 60 : 140, 0, 0, WORLD_RADIUS - 4, 0.5), { outline: false, castShadow: false });
-    const pads = [];
-    for (let i = 0; i < 14; i++) {
-      const a = rng() * Math.PI * 2;
-      const d = 3 + rng() * (LAKE.r - 5);
-      const x = LAKE.x + Math.cos(a) * d;
-      const z = LAKE.z + Math.sin(a) * d;
-      if (Math.abs(x - DOCK.x) < 3 && z < DOCK.z + DOCK.d / 2 + 2) continue;
-      pads.push({ x, z, y: -0.06, rot: rng() * 6.28, s: 0.8 + rng() * 0.6 });
-    }
-    scatterModels(scene, 'deco_lily_pad', pads, { outline: false, castShadow: false });
-  }
-
-  // Props from shared/props.js (instanced per model; bobbing ones animated).
-  {
+    const ctx = { fx, animate: (fn) => animated.push(fn) };
     const groups = new Map();
     for (const pr of PROPS) {
+      if (pr.slot.startsWith('proc_')) {
+        const make = PROC_BUILDERS[pr.slot];
+        if (!make) continue;
+        const obj = make(pr, ctx);
+        obj.position.set(pr.x, pr.y || 0, pr.z);
+        obj.rotation.y = pr.rot;
+        obj.traverse((o) => o.isMesh && o.material.side !== THREE.BackSide && (o.castShadow = true));
+        scene.add(obj);
+        continue;
+      }
       if (!assets.has(pr.slot)) continue;
       if (pr.bob) {
         const m = assets.make(pr.slot, { variant: pr.v || 0 });
         m.object.position.set(pr.x, pr.y || 0, pr.z);
         m.object.rotation.y = pr.rot;
+        if (pr.s) m.object.scale.multiplyScalar(pr.s);
         scene.add(m.object);
         const ph = pr.x * 0.7;
         animated.push((dt, t) => {
@@ -664,58 +567,19 @@ export function buildTown(scene, fx, { low = false } = {}) {
         });
         continue;
       }
-      const key = pr.slot + '|' + (pr.v || 0) % assets.variantCount(pr.slot);
-      if (!groups.has(key)) groups.set(key, { slot: pr.slot, v: (pr.v || 0) % assets.variantCount(pr.slot), list: [] });
-      groups.get(key).list.push({ x: pr.x, z: pr.z, y: pr.y || 0, rot: pr.rot });
+      const v = (pr.v || 0) % assets.variantCount(pr.slot);
+      const key = pr.slot + '|' + v;
+      if (!groups.has(key)) groups.set(key, { slot: pr.slot, v, list: [] });
+      groups.get(key).list.push({ x: pr.x, z: pr.z, y: pr.y || 0, rot: pr.rot, s: pr.s ?? 1 });
     }
     for (const g of groups.values()) {
-      const inst = assets.instanced(g.slot, g.list, { variant: g.v });
+      const inst = assets.instanced(g.slot, g.list, { variant: g.v, outline: !NO_OUTLINE.has(g.slot), castShadow: !NO_SHADOW.has(g.slot) });
       if (inst) scene.add(inst);
     }
   }
 
-  // ── Crafting stations: a stone forge and a cookpot (the anvil, workbench
-  // and grindstone are props), plus an invisible tap target on each.
+  // Crafting stations: an invisible tap target on each (the visuals are props).
   for (const pr of PROPS.filter((x) => x.station)) {
-    if (pr.station === 'forge') {
-      const g = new THREE.Group();
-      const at = (m, x, y, z) => (m.position.set(x, y, z), m);
-      g.add(at(mesh(box(1.5, 0.75, 1.2), '#8f8a82', { outline: OL }), 0, 0.375, 0));
-      const coals = new THREE.Mesh(box(1.1, 0.08, 0.8), toon('#ff7a2a', { emissive: '#ff5a1a', emissiveIntensity: 0.9 }));
-      coals.position.y = 0.78;
-      g.add(coals);
-      g.add(at(mesh(box(0.7, 2.2, 0.6), '#7d776e', { outline: OL }), 0, 1.6, -0.35));
-      g.add(at(mesh(box(0.85, 0.2, 0.75), '#5f5a54', { outline: OL }), 0, 2.75, -0.35));
-      g.position.set(pr.x, 0, pr.z);
-      g.traverse((o) => o.isMesh && (o.castShadow = true));
-      scene.add(g);
-      animated.push((dt, t) => {
-        coals.material.emissiveIntensity = 0.75 + Math.sin(t * 5) * 0.15 + Math.sin(t * 13) * 0.05;
-        if (Math.random() < dt * 1.5) fx.puff.burst(new THREE.Vector3(pr.x, 3.0, pr.z - 0.35), { n: 1, color: ['#e8e2d8', '#cfc8bc'], speed: 0.2, up: 0.8, gravity: -0.4, size: 0.5, life: 2.2, drag: 0.6, jitter: 0.12, spin: 0 });
-      });
-    } else if (pr.station === 'cookpot') {
-      const g = new THREE.Group();
-      for (const a of [0, 2.1, 4.2]) {
-        const leg = mesh(cyl(0.05, 0.05, 1.3, 5), '#3b2a1a');
-        leg.position.set(Math.cos(a) * 0.55, 0.62, Math.sin(a) * 0.55);
-        leg.rotation.z = Math.cos(a) * 0.35;
-        leg.rotation.x = -Math.sin(a) * 0.35;
-        g.add(leg);
-      }
-      const pot = mesh(new THREE.SphereGeometry(0.45, 14, 10, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.7), '#3a3a42', { outline: OL });
-      pot.position.y = 0.62;
-      const soup = new THREE.Mesh(cyl(0.36, 0.36, 0.04, 16), toon('#d88a3a', { emissive: '#a0501a', emissiveIntensity: 0.3 }));
-      soup.position.y = 0.88;
-      const fire = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.35, 6), toon('#ffb347', { emissive: '#ff7a1a', emissiveIntensity: 1 }));
-      fire.position.y = 0.18;
-      g.add(pot, soup, fire);
-      g.position.set(pr.x, 0, pr.z);
-      scene.add(g);
-      animated.push((dt, t) => {
-        fire.scale.set(1 + Math.sin(t * 11) * 0.1, 1 + Math.sin(t * 7) * 0.2, 1);
-        if (Math.random() < dt * 1.2) fx.puff.burst(new THREE.Vector3(pr.x, 1.0, pr.z), { n: 1, color: ['#ffffff', '#eef6ff'], speed: 0.15, up: 0.6, gravity: -0.3, size: 0.35, life: 1.6, drag: 0.6, jitter: 0.1, spin: 0 });
-      });
-    }
     const pickVol = new THREE.Mesh(cyl(pr.r + 0.35, pr.r + 0.35, 1.8, 10), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
     pickVol.position.set(pr.x, 0.9, pr.z);
     pickVol.layers.set(2); // never drawn; the tap raycaster checks every layer
@@ -740,7 +604,6 @@ export function buildTown(scene, fx, { low = false } = {}) {
     grp.updateMatrixWorld(true);
     fades.push({ box: new THREE.Box3().setFromObject(grp), mats, outlines, op: 1 });
   };
-  const buildingMeshes = [];
   for (const [i, b] of BUILDINGS.entries()) {
     const grp = buildModular(b, i) || buildHouse(b, rng);
     scene.add(grp);
@@ -752,61 +615,64 @@ export function buildTown(scene, fx, { low = false } = {}) {
       pickables.push(grp);
       labels.push({ kind: 'place', id: b.id, text: b.label, icon: b.icon, glyph: b.glyph, pos: new THREE.Vector3(b.x, grp.userData.top + 0.9, b.z) });
     }
-    buildingMeshes.push(grp);
     if (grp.userData.smoke) animated.push((dt, t) => {
       if (Math.random() < dt * 2.5) fx.puff.burst(grp.userData.smoke, { n: 1, color: ['#f4f4f4', '#e2e2e2'], speed: 0.25, up: 0.9, gravity: -0.5, size: 0.55, life: 2.6, drag: 0.6, jitter: 0.15, spin: 0 });
     });
   }
 
-  // Wilds gate: the castle-kit gatehouse, or a simple timber arch without it.
-  const castle = buildGate();
-  if (castle) {
-    scene.add(castle);
-    fadeable(castle);
-    for (const sx of [-1, 1]) {
-      const flame = new THREE.Mesh(sph(0.16, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffb340' }));
-      flame.position.set(GATE.x + sx * 1.75, 3.15, GATE.z + 2.45);
-      const torch = mesh(cyl(0.07, 0.09, 0.55, 6), '#6b4226');
-      torch.position.set(GATE.x + sx * 1.75, 2.75, GATE.z + 2.35);
-      torch.rotation.x = 0.35;
-      animated.push((dt, t) => flame.scale.setScalar(1 + Math.sin(t * 13 + sx) * 0.18));
-      scene.add(torch, flame);
+  // Gatehouses: the castle-kit wall and arch, or a simple timber arch without it.
+  for (const gt of GATES) {
+    const castle = buildGate(gt);
+    const k = gt.scale / 4.5;
+    if (castle) {
+      scene.add(castle);
+      fadeable(castle);
+      for (const sx of [-1, 1]) {
+        const flame = new THREE.Mesh(sph(0.16, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffb340' }));
+        flame.position.set(gt.x + sx * 1.75 * k, 3.15 * k, gt.z + 2.45 * k);
+        const torch = mesh(cyl(0.07, 0.09, 0.55, 6), '#6b4226');
+        torch.position.set(gt.x + sx * 1.75 * k, 2.75 * k, gt.z + 2.35 * k);
+        torch.rotation.x = 0.35;
+        animated.push((dt, t) => flame.scale.setScalar(1 + Math.sin(t * 13 + sx) * 0.18));
+        scene.add(torch, flame);
+      }
+      labels.push({ kind: 'place', id: gt.id, text: gt.label, icon: gt.icon, glyph: gt.glyph, pos: new THREE.Vector3(gt.x, castle.userData.top + 1.2, gt.z) });
+    } else {
+      const grp = new THREE.Group();
+      grp.position.set(gt.x, 0, gt.z);
+      for (const s of [-1, 1]) {
+        const pillar = mesh(box(1.4, 5, 1.4), '#b3aa9c', { outline: OL });
+        pillar.position.set((gt.width / 2) * s, 2.5, 0);
+        const cap = mesh(box(1.8, 0.5, 1.8), '#9c9284', { outline: OL });
+        cap.position.set((gt.width / 2) * s, 5.2, 0);
+        const torch = mesh(cyl(0.08, 0.1, 0.6, 6), '#6b4226');
+        torch.position.set((gt.width / 2 - 0.9) * s, 3.2, 0.75);
+        const flame = new THREE.Mesh(sph(0.18, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffb340' }));
+        flame.position.set((gt.width / 2 - 0.9) * s, 3.65, 0.75);
+        animated.push((dt, t) => flame.scale.setScalar(1 + Math.sin(t * 13 + s) * 0.18));
+        grp.add(pillar, cap, torch, flame);
+      }
+      const beam = mesh(box(gt.width + 2.4, 0.9, 1.0), '#8b5a33', { outline: OL });
+      beam.position.y = 5.9;
+      const roof = mesh(new THREE.ConeGeometry(1, 1, 4), '#c4534a', { outline: OL });
+      roof.scale.set(gt.width * 0.75, 1.1, 1.4);
+      roof.rotation.y = Math.PI / 4;
+      roof.position.y = 6.9;
+      const banner = mesh(box(1.8, 1.4, 0.08), '#c4534a', { outline: 0.02 });
+      banner.position.set(0, 4.8, 0.55);
+      grp.add(beam, roof, banner);
+      scene.add(grp);
+      labels.push({ kind: 'place', id: gt.id, text: gt.label, icon: gt.icon, glyph: gt.glyph, pos: new THREE.Vector3(gt.x, 8.3, gt.z) });
     }
-    labels.push({ kind: 'place', id: 'gate', text: GATE.label, icon: GATE.icon, glyph: GATE.glyph, pos: new THREE.Vector3(GATE.x, castle.userData.top + 1.2, GATE.z) });
-  } else {
-    const grp = new THREE.Group();
-    grp.position.set(GATE.x, 0, GATE.z);
-    for (const s of [-1, 1]) {
-      const pillar = mesh(box(1.4, 5, 1.4), '#b3aa9c', { outline: OL });
-      pillar.position.set((GATE.width / 2) * s, 2.5, 0);
-      const cap = mesh(box(1.8, 0.5, 1.8), '#9c9284', { outline: OL });
-      cap.position.set((GATE.width / 2) * s, 5.2, 0);
-      const torch = mesh(cyl(0.08, 0.1, 0.6, 6), '#6b4226');
-      torch.position.set((GATE.width / 2 - 0.9) * s, 3.2, 0.75);
-      const flame = new THREE.Mesh(sph(0.18, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffb340' }));
-      flame.position.set((GATE.width / 2 - 0.9) * s, 3.65, 0.75);
-      animated.push((dt, t) => flame.scale.setScalar(1 + Math.sin(t * 13 + s) * 0.18));
-      grp.add(pillar, cap, torch, flame);
-    }
-    const beam = mesh(box(GATE.width + 2.4, 0.9, 1.0), '#8b5a33', { outline: OL });
-    beam.position.y = 5.9;
-    const roof = mesh(new THREE.ConeGeometry(1, 1, 4), '#c4534a', { outline: OL });
-    roof.scale.set(GATE.width * 0.75, 1.1, 1.4);
-    roof.rotation.y = Math.PI / 4;
-    roof.position.y = 6.9;
-    const banner = mesh(box(1.8, 1.4, 0.08), '#c4534a', { outline: 0.02 });
-    banner.position.set(0, 4.8, 0.55);
-    grp.add(beam, roof, banner);
-    scene.add(grp);
-    labels.push({ kind: 'place', id: 'gate', text: GATE.label, icon: GATE.icon, glyph: GATE.glyph, pos: new THREE.Vector3(GATE.x, 8.3, GATE.z) });
   }
 
-  // Fountain
-  {
+  // Fountains
+  for (const f of FOUNTAINS) {
     const grp = new THREE.Group();
-    const rim = mesh(cyl(FOUNTAIN.r, FOUNTAIN.r + 0.2, 0.7, 24), '#c9c1b2', { outline: OL });
+    grp.position.set(f.x, 0, f.z);
+    const rim = mesh(cyl(f.r, f.r + 0.2, 0.7, 24), '#c9c1b2', { outline: OL });
     rim.position.y = 0.35;
-    const water = new THREE.Mesh(cyl(FOUNTAIN.r - 0.3, FOUNTAIN.r - 0.3, 0.1, 24), toon('#5aa9c2', { emissive: '#2a7a9a', emissiveIntensity: 0.1 }));
+    const water = new THREE.Mesh(cyl(f.r - 0.3, f.r - 0.3, 0.1, 24), toon('#5aa9c2', { emissive: '#2a7a9a', emissiveIntensity: 0.1 }));
     water.position.y = 0.62;
     const pillar = mesh(cyl(0.35, 0.5, 2.2, 10), '#c9c1b2', { outline: OL });
     pillar.position.y = 1.4;
@@ -816,17 +682,17 @@ export function buildTown(scene, fx, { low = false } = {}) {
     top.position.y = 3.0;
     grp.add(rim, water, pillar, bowl, top);
     scene.add(grp);
-    const spout = new THREE.Vector3(0, 3.1, 0);
+    const spout = new THREE.Vector3(f.x, 3.1, f.z);
     animated.push((dt) => {
       if (Math.random() < dt * 30) fx.puff.burst(spout, { n: 1, color: ['#bfeaff', '#ffffff', '#8fd8ff'], speed: 1.6, up: 3, gravity: 9, size: 0.16, life: 0.75, jitter: 0.1 });
     });
   }
 
-  // Lake + dock + reeds + lily pads
-  {
-    const water = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r + 0.6, 64), waterMaterial({ radius: LAKE.r + 0.6, foamAt: LAKE.r + 0.1, shallow: '#5fb3c4', deep: '#1f5f86', fog: scene.fog, opacity: 0.93 }));
+  // Lakes: water, reeds round the shore, lily pads (skipping any dock).
+  for (const l of LAKES) {
+    const water = new THREE.Mesh(new THREE.CircleGeometry(l.r + 0.6, 64), waterMaterial({ radius: l.r + 0.6, foamAt: l.r + 0.1, shallow: '#5fb3c4', deep: '#1f5f86', fog: scene.fog, opacity: 0.93 }));
     water.rotation.x = -Math.PI / 2;
-    water.position.set(LAKE.x, -0.12, LAKE.z);
+    water.position.set(l.x, -0.12, l.z);
     water.userData.water = true;
     scene.add(water);
     pickables.push(water);
@@ -835,159 +701,51 @@ export function buildTown(scene, fx, { low = false } = {}) {
       u.time.value = t;
       if (scene.fog) (u.fogNear.value = scene.fog.near), (u.fogFar.value = scene.fog.far);
     });
-    const dock = new THREE.Group();
-    const planks = Math.round(DOCK.d / 0.6);
-    for (let i = 0; i < planks; i++) {
-      const p = mesh(box(DOCK.w + 0.4, 0.15, 0.52), i % 2 ? '#b98552' : '#a8763f', { outline: 0.02 });
-      p.position.set(DOCK.x, 0.25, DOCK.z - DOCK.d / 2 + 0.3 + i * 0.6);
-      dock.add(p);
-    }
-    for (const sx of [-1, 1])
-      for (let i = 0; i < 4; i++) {
-        const post = mesh(cyl(0.12, 0.12, 1.6, 6), '#7c4a2c', { outline: 0.02 });
-        post.position.set(DOCK.x + (DOCK.w / 2 + 0.15) * sx, 0.2, DOCK.z - DOCK.d / 2 + 1 + i * (DOCK.d / 3.3));
-        dock.add(post);
+    const ring = (n, d0, d1) => {
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const a = rng() * Math.PI * 2;
+        const d = d0 + rng() * (d1 - d0);
+        const x = l.x + Math.cos(a) * d;
+        const z = l.z + Math.sin(a) * d;
+        if (!inDock(x, z, 1.5)) out.push({ x, z });
       }
-    scene.add(dock);
-    for (let i = 0; i < 26; i++) {
-      const a = rng() * Math.PI * 2;
-      const d = LAKE.r - 0.4 + rng() * 1.2;
-      const x = LAKE.x + Math.cos(a) * d;
-      const z = LAKE.z + Math.sin(a) * d;
-      if (Math.abs(x - DOCK.x) < 3 && z < LAKE.z) continue;
+      return out;
+    };
+    for (const { x, z } of ring(Math.round(26 * (l.r / 14)), l.r - 0.4, l.r + 0.8)) {
       const reed = mesh(cyl(0.03, 0.04, 1.4, 4), '#5f9e4f');
       reed.position.set(x, 0.5, z);
       const cat = mesh(new THREE.CapsuleGeometry(0.07, 0.25, 3, 6), '#7c4a2c');
       cat.position.set(x, 1.25, z);
       scene.add(reed, cat);
     }
-    for (let i = 0; i < 12; i++) {
-      const a = rng() * Math.PI * 2;
-      const d = 3 + rng() * (LAKE.r - 5);
-      const pad = new THREE.Mesh(new THREE.CircleGeometry(0.5 + rng() * 0.3, 12, 0.3, Math.PI * 1.8), toon('#4fae4f'));
-      pad.rotation.x = -Math.PI / 2;
-      pad.position.set(LAKE.x + Math.cos(a) * d, -0.05, LAKE.z + Math.sin(a) * d);
-      scene.add(pad);
-      if (i % 3 === 0) {
-        const fl = mesh(sph(0.14, 8, 6), '#ff9fc4');
-        fl.position.set(pad.position.x, 0.05, pad.position.z);
-        scene.add(fl);
+    const pads = ring(Math.round(14 * (l.r / 14)), 3, l.r - 2).map((p) => ({ ...p, y: -0.06, rot: rng() * 6.28, s: 0.8 + rng() * 0.6 }));
+    scatterModels(scene, 'deco_lily_pad', pads, { outline: false, castShadow: false });
+  }
+  // Docks: planks on posts.
+  for (const d of DOCKS) {
+    const dock = new THREE.Group();
+    const planks = Math.round(d.d / 0.6);
+    for (let i = 0; i < planks; i++) {
+      const p = mesh(box(d.w + 0.4, 0.15, 0.52), i % 2 ? '#b98552' : '#a8763f', { outline: 0.02 });
+      p.position.set(d.x, 0.25, d.z - d.d / 2 + 0.3 + i * 0.6);
+      dock.add(p);
+    }
+    for (const sx of [-1, 1])
+      for (let i = 0; i < 4; i++) {
+        const post = mesh(cyl(0.12, 0.12, 1.6, 6), '#7c4a2c', { outline: 0.02 });
+        post.position.set(d.x + (d.w / 2 + 0.15) * sx, 0.2, d.z - d.d / 2 + 1 + i * (d.d / 3.3));
+        dock.add(post);
       }
-    }
+    scene.add(dock);
   }
 
-  // Lamp posts along the main paths
-  {
-    const lamps = [];
-    for (const s of segs.slice(0, 6)) {
-      const len = Math.hypot(s[2] - s[0], s[3] - s[1]);
-      if (len < 8) continue;
-      const t = 0.55;
-      const nx = -(s[3] - s[1]) / len;
-      const nz = (s[2] - s[0]) / len;
-      const x = s[0] + (s[2] - s[0]) * t + nx * (s[4] + 0.9);
-      const z = s[1] + (s[3] - s[1]) * t + nz * (s[4] + 0.9);
-      if (Math.hypot(x, z) > 16) lamps.push([x, z]); // the plaza has its own ring of lamps
-    }
-    for (const [x, z] of lamps) {
-      if (assets.has('lamp_post')) {
-        const m = assets.make('lamp_post');
-        m.object.position.set(x, 0, z);
-        scene.add(m.object);
-        continue;
-      }
-      const post = mesh(cyl(0.1, 0.14, 3, 6), '#4a4a5a', { outline: 0.02 });
-      post.position.set(x, 1.5, z);
-      const lantern = new THREE.Mesh(box(0.4, 0.5, 0.4), toon('#fff1b0', { emissive: '#ffcf5a', emissiveIntensity: 0.8 }));
-      lantern.position.set(x, 3.2, z);
-      const cap = mesh(new THREE.ConeGeometry(0.35, 0.3, 4), '#4a4a5a');
-      cap.position.set(x, 3.6, z);
-      cap.rotation.y = Math.PI / 4;
-      scene.add(post, lantern, cap);
-    }
-  }
+  // Zone names floating over each zone.
+  for (const zn of ZONES) labels.push({ kind: 'zone', id: zn.id, text: zn.label, glyph: zn.glyph, pos: new THREE.Vector3(zn.x, 0.5, zn.z) });
 
-  // Zone dressing + signposts
-  for (const zn of ZONES) {
-    const sign = new THREE.Group();
-    const dx = -zn.x;
-    const dz = -zn.z;
-    const d = Math.hypot(dx, dz);
-    const sx = zn.x + (dx / d) * (zn.r - 1);
-    const sz = zn.z + (dz / d) * (zn.r - 1);
-    sign.position.set(sx, 0, sz);
-    const post = mesh(cyl(0.1, 0.12, 2, 6), '#7c4a2c', { outline: 0.02 });
-    post.position.y = 1;
-    const board = mesh(box(1.8, 0.7, 0.12), '#d9a066', { outline: 0.025 });
-    board.position.y = 1.9;
-    sign.add(post, board);
-    sign.lookAt(0, 0, 0);
-    scene.add(sign);
-    labels.push({ kind: 'zone', id: zn.id, text: zn.label, glyph: zn.glyph, pos: new THREE.Vector3(zn.x, 0.5, zn.z) });
-  }
-  // Quarry: mine cart + rails
-  {
-    const q = ZONES[1];
-    const cart = new THREE.Group();
-    const tub = mesh(box(1.4, 0.8, 1), '#7c5530', { outline: OL });
-    tub.position.y = 0.7;
-    const ore = mesh(new THREE.IcosahedronGeometry(0.45, 0), '#e07b39', { mat: toon('#e07b39', { flatShading: true }) });
-    ore.position.y = 1.1;
-    cart.add(tub, ore);
-    for (const [x, z] of [[-0.5, -0.45], [0.5, -0.45], [-0.5, 0.45], [0.5, 0.45]]) {
-      const w = mesh(cyl(0.22, 0.22, 0.1, 10), '#3b3b3b');
-      w.rotation.x = Math.PI / 2;
-      w.position.set(x, 0.25, z);
-      cart.add(w);
-    }
-    cart.position.set(q.x - 14, 0, q.z + 9);
-    cart.rotation.y = 0.6;
-    scene.add(cart);
-  }
-  // Forest: mushrooms and logs
-  {
-    const f = ZONES[0];
-    for (let i = 0; i < 22; i++) {
-      const a = rng() * Math.PI * 2;
-      const d = rng() * f.r;
-      const x = f.x + Math.cos(a) * d;
-      const z = f.z + Math.sin(a) * d;
-      const stem = mesh(cyl(0.07, 0.09, 0.3, 6), '#f4ead6');
-      stem.position.set(x, 0.15, z);
-      const capM = mesh(new THREE.SphereGeometry(0.22, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), i % 3 ? '#e2574c' : '#b78cff', { outline: 0.02 });
-      capM.position.set(x, 0.28, z);
-      scene.add(stem, capM);
-    }
-  }
-  // Wilds: standing stones
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    const st = mesh(box(0.9, 2.4 + rng(), 0.7), '#9a9488', { outline: OL, mat: toon('#9a9488', { flatShading: true }) });
-    st.position.set(Math.cos(a) * 9, 1.1, -86 + Math.sin(a) * 9);
-    st.rotation.set((rng() - 0.5) * 0.2, rng() * 3, (rng() - 0.5) * 0.2);
-    scene.add(st);
-  }
-
-  // Clouds
-  for (let i = 0; i < 14; i++) {
-    const cg = new THREE.Group();
-    for (let j = 0; j < 4; j++) {
-      const p = new THREE.Mesh(sph(2 + rng() * 2, 10, 8), toon('#ffffff', { emissive: '#ffffff', emissiveIntensity: 0.35 }));
-      p.position.set(j * 2.6 - 4, rng() * 1.2, rng() * 2);
-      p.scale.y = 0.6;
-      cg.add(p);
-    }
-    cg.position.set((rng() - 0.5) * 300, 34 + rng() * 14, (rng() - 0.5) * 300);
-    const sp = 1 + rng() * 2;
-    scene.add(cg);
-    animated.push((dt) => {
-      cg.position.x += sp * dt;
-      if (cg.position.x > 170) cg.position.x = -170;
-    });
-  }
-
-  // Butterflies around the garden and plaza
-  for (let i = 0; i < 10; i++) {
+  // Butterflies around gardens and plazas.
+  const homes = [...zonesOfKind('garden'), ...PLAZAS];
+  for (let i = 0; homes.length && i < 10; i++) {
     const bf = new THREE.Group();
     const col = ['#ff9fc4', '#ffd84a', '#9fd8ff', '#ffffff'][i % 4];
     const wm = new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide });
@@ -999,7 +757,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
       bf.add(p);
       return p;
     });
-    const home = i < 6 ? ZONES[2] : { x: 0, z: 0 };
+    const home = homes[i < 6 ? 0 : i % homes.length];
     const ph = rng() * 10;
     const r = 4 + rng() * 5;
     scene.add(bf);
@@ -1014,7 +772,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
 
   // ── Gatherable nodes
   const nodes = new Map();
-  for (const n of generateNodes()) {
+  for (const n of NODES) {
     const v = new NodeView(n, fx);
     nodes.set(n.id, v);
     scene.add(v.root);

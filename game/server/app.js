@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { GameError } from './db.js';
 import { Game } from './game.js';
+import { current as currentMap } from './map.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
@@ -48,7 +49,21 @@ export function createServer(db, opts = {}) {
     return a.n > 20;
   }
 
+  // The world map (public: it's the same for everyone). Clients load it before
+  // building the world; it's cached until the map changes (ETag).
+  function sendMap(req, res) {
+    const m = currentMap;
+    if (req.headers['if-none-match'] === m.etag) {
+      res.writeHead(304, { etag: m.etag });
+      return res.end();
+    }
+    const gz = /\bgzip\b/.test(req.headers['accept-encoding'] || '');
+    res.writeHead(200, { 'content-type': 'application/json', etag: m.etag, 'cache-control': 'no-cache', ...(gz ? { 'content-encoding': 'gzip' } : {}) });
+    res.end(gz ? m.gzip : m.body);
+  }
+
   async function api(req, res, url) {
+    if (req.method === 'GET' && url.pathname === '/api/map') return sendMap(req, res);
     const token = (req.headers.authorization || '').replace(/^Bearer /, '');
     try {
       if (req.method === 'POST' && (url.pathname === '/api/signup' || url.pathname === '/api/login')) {

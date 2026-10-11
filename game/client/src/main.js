@@ -43,6 +43,10 @@ async function enterGame() {
   const bar = h('i', { style: { width: '0%' } });
   const loading = h('div.loading', h('div', h('span.spin'), 'Entering Hearthvale…', h('div.loadbar', bar)));
   app.append(loading);
+  // The world map comes from the server (the same one it simulates), and must be
+  // in place before the game modules build anything from it.
+  const [map, { setWorld }] = await Promise.all([fetch('/api/map').then((r) => (r.ok ? r.json() : Promise.reject(new Error(`map: HTTP ${r.status}`)))), import('../../shared/world.js')]);
+  setWorld(map);
   // three.js, the world and its 3D models are big; load them only once we're in.
   const [{ GameClient }, { Hud }, { loadAssets }, { itemIcon }] = await Promise.all([import('./game.js'), import('./ui/hud.js'), import('./scene/assets.js'), import('./ui/portrait.js')]);
   await loadAssets((p) => (bar.style.width = `${Math.round(p * 100)}%`));

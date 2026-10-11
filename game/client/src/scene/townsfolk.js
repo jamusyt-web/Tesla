@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as assets from './assets.js';
-import { BUILDINGS, DOCK, ZONES, doorPoint, mulberry32 } from '../../../shared/world.js';
+import { BUILDINGS, DOCKS, LAKES, PLAZAS, doorPoint, zonesOfKind, mulberry32 } from '../../../shared/world.js';
 
 // Ambient villagers and pets. Purely decorative and client-side, but their
 // routes are driven by the wall clock, so every player sees the same
@@ -92,11 +92,13 @@ class Walker {
 export class Townsfolk {
   constructor(scene, nav, { low = false } = {}) {
     this.walkers = [];
-    const stops = BUILDINGS.map((b) => doorPoint(b)).concat([
-      [5, 6], [-6, 5], [6, -6], [-5, -6], // around the plaza
-      [DOCK.x, DOCK.z - DOCK.d / 2 - 1.5], // foot of the dock
-      [ZONES[2].x + 9, ZONES[2].z - 4], // garden edge
-    ]);
+    // Villagers stroll between doors, plaza corners, the foot of each dock and garden edges.
+    const stops = [
+      ...BUILDINGS.map((b) => doorPoint(b)),
+      ...PLAZAS.flatMap((p) => [[p.x + 5, p.z + 6], [p.x - 6, p.z + 5], [p.x + 6, p.z - 6], [p.x - 5, p.z - 6]]),
+      ...DOCKS.map((d) => [d.x, d.z - d.d / 2 - 1.5]),
+      ...zonesOfKind('garden').map((g) => [g.x + 9, g.z - 4]),
+    ];
     const plan = (seq) => {
       const legs = [];
       for (let i = 0; i < seq.length; i++) {
@@ -123,7 +125,7 @@ export class Townsfolk {
     }
     if (assets.has('npc_pet')) {
       const r = mulberry32(77);
-      const homes = BUILDINGS.filter((b) => b.deco).map((b) => doorPoint(b)).concat([[3, 8], [-8, -3]]);
+      const homes = BUILDINGS.filter((b) => b.deco).map((b) => doorPoint(b)).concat(PLAZAS.flatMap((p) => [[p.x + 3, p.z + 8], [p.x - 8, p.z - 3]]));
       const n = low ? 4 : 7;
       for (let i = 0; i < n; i++) {
         const [hx, hz] = homes[i % homes.length];
@@ -140,9 +142,9 @@ export class Townsfolk {
         scene.add(w.obj);
       }
     }
-    const forest = ZONES[0];
-    this.#wild(scene, nav, 'npc_deer', [[forest.x - 6, forest.z + 8, 7], [forest.x - 10, forest.z - 9, 6]], low ? 2 : 3, 900, ['*the deer flicks its ears*', '*munch munch*']);
-    this.#wild(scene, nav, 'npc_beaver', [[ZONES[3].x - 14, ZONES[3].z - 6, 3]], 1, 950, ['*gnaw gnaw*', '*slaps tail*']);
+    const forests = zonesOfKind('forest');
+    if (forests.length) this.#wild(scene, nav, 'npc_deer', forests.flatMap((f) => [[f.x - 6, f.z + 8, 7], [f.x - 10, f.z - 9, 6]]), (low ? 2 : 3) * forests.length, 900, ['*the deer flicks its ears*', '*munch munch*']);
+    if (LAKES.length) this.#wild(scene, nav, 'npc_beaver', LAKES.map((l) => [l.x - 14, l.z - 6, 3]), LAKES.length, 950, ['*gnaw gnaw*', '*slaps tail*']);
   }
 
   // Forest deer and a lake beaver: same clockwork wandering, in their habitat.

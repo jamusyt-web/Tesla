@@ -1,4 +1,3 @@
-import { PROPS } from '../../shared/props.js';
 import * as THREE from 'three';
 import { Avatar } from './scene/avatar.js';
 import { useGrade } from './scene/grade.js';
@@ -18,7 +17,7 @@ import { ITEMS } from '../../shared/items.js';
 import { MONSTERS } from '../../shared/monsters.js';
 import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
-  generateNodes, generateScenery, buildColliders, NavGrid, stepPath, approachPoint, doorPoint,
+  NODES, buildColliders, NavGrid, stepPath, approachPoint, doorPoint, zonesOfKind,
   BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, GATE, ZONES, SWING_GATE,
 } from '../../shared/world.js';
 
@@ -32,9 +31,8 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 
 // Shared static world data (same deterministic generation as the server).
 const STATIC = (() => {
-  const nodes = generateNodes();
-  const col = buildColliders(nodes, generateScenery(), PROPS);
-  return { nodes: new Map(nodes.map((n) => [n.id, n])), col, nav: new NavGrid(col) };
+  const col = buildColliders();
+  return { nodes: new Map(NODES.map((n) => [n.id, n])), col, nav: new NavGrid(col) };
 })();
 
 const MOOD = { fog: new THREE.Color('#b8c4c8'), fogWild: new THREE.Color('#9faea6'), sun: new THREE.Color('#ffe4bc'), sunWild: new THREE.Color('#ffd0a0') };
@@ -1572,8 +1570,9 @@ export class GameClient {
     // Keep the shadow camera centred on the player.
     this.sun.position.set(c.target.x + 40, 34, c.target.z + 10);
     this.sun.target.position.set(c.target.x, 0, c.target.z);
-    // Mood: the Wilds (north) are hazier, greener-grey and a touch dimmer than town.
-    const w = 1 - THREE.MathUtils.smoothstep(c.target.z, -60, -36);
+    // Mood: the Wilds are hazier, greener-grey and a touch dimmer than town.
+    let w = 0;
+    for (const zn of zonesOfKind('wilds')) w = Math.max(w, 1 - THREE.MathUtils.smoothstep(Math.hypot(c.target.x - zn.x, c.target.z - zn.z), zn.r * 0.2, zn.r));
     if (w !== this.mood) {
       this.mood = w;
       const f = this.scene.fog;

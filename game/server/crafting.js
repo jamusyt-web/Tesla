@@ -3,7 +3,7 @@ import { ITEMS } from '../shared/items.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
 import { levelFromXp } from '../shared/skills.js';
 import { buildSpec, replayCraft, finalizeCraft, scoreOf, isFlawless, outcomeOf, batchCap, isStackable, CRAFT_TICK, CRAFT_MAX_TICKS, STATIONS } from '../shared/crafting.js';
-import { spotsOf, YARD } from '../shared/stations.js';
+import { spotsOf, inYard } from '../shared/stations.js';
 import { tx, fail } from './db.js';
 
 const SESSION_MS = 150_000; // a craft not finished by then settles as-is
@@ -238,7 +238,7 @@ export class Crafting {
     const lvl = this.#level(c);
     if (lvl < r.lvl) fail(`Requires Crafting level ${r.lvl}.`);
     if ((this.q.masteryOne.get(c.hero.id, r.id)?.n || 0) < QUICK_UNLOCK) fail(`Make it by hand ${QUICK_UNLOCK} times (grade B or better) to unlock Quick.`);
-    if (Math.hypot(c.ent.x - YARD.x, c.ent.z - YARD.z) > YARD.r) fail('Quick crafting works in the Workshop yard.');
+    if (!inYard(c.ent.x, c.ent.z)) fail('Quick crafting works in the Workshop yard.');
     times = Math.max(1, Math.min(50, Number(times) || 1));
     const H = this.game.heroes;
     const fee = Math.ceil(QUICK_FEE * r.qty * times * ITEMS[r.out].value);

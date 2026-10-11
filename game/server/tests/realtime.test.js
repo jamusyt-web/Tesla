@@ -1,10 +1,10 @@
-import { PROPS } from '../../shared/props.js';
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { openDb } from '../db.js';
 import { createServer } from '../app.js';
-import { generateNodes, NODE_TYPES, approachPoint, generateScenery, buildColliders, NavGrid } from '../../shared/world.js';
+import '../map.js';
+import { NODES, NODE_TYPES, approachPoint, buildColliders, NavGrid } from '../../shared/world.js';
 
 let srv;
 let game;
@@ -97,13 +97,13 @@ test('players see each other join, move, chat and leave in real time', async () 
 test('gathering is validated by the server and shared between players', async () => {
   const a = await player('Cam');
   const b = await player('Dee');
-  const oak = generateNodes().find((n) => n.type === 'tree_oak');
+  const oak = NODES.find((n) => n.type === 'tree_oak');
   // Too far away: rejected.
   const far = await a.rpc('hit', { node: oak.id });
   assert.equal(far.ok, false);
   assert.match(far.err, /closer/);
   // Walk both to the tree.
-  const col = buildColliders(generateNodes(), generateScenery(), PROPS);
+  const col = buildColliders();
   for (const p of [a, b]) {
     const ap = approachPoint(oak, p.welcome.you.x, p.welcome.you.z, col, new NavGrid(col));
     p.ws.send(JSON.stringify({ t: 'move', x: ap[0], z: ap[1] }));
@@ -156,8 +156,8 @@ test('fishing: hook, fight, and the server replays the fight to confirm the catc
   const { isDeepSpot } = await import('../../shared/world.js');
   const a = await player('Finn');
   try {
-  const col = buildColliders(generateNodes(), generateScenery(), PROPS);
-  const spot = generateNodes().find((n) => n.type === 'fish_spot' && !isDeepSpot(n));
+  const col = buildColliders();
+  const spot = NODES.find((n) => n.type === 'fish_spot' && !isDeepSpot(n));
   const ap = approachPoint(spot, a.welcome.you.x, a.welcome.you.z, col, new NavGrid(col));
   a.ws.send(JSON.stringify({ t: 'move', x: ap[0], z: ap[1] }));
   await new Promise((r) => setTimeout(r, 9000));
@@ -215,7 +215,7 @@ test('walk-in shops: owner stocks, a friend walks in, sees the shelves and buys;
     assert.equal(inA.data.slots[0].item, 'oak_plank');
     await b.next((m) => m.t === 'hide' && m.id === a.id);
     // While inside, the town doesn't hear your chopping (and you can't).
-    const chop = await a.rpc('hit', { node: generateNodes()[0].id });
+    const chop = await a.rpc('hit', { node: NODES[0].id });
     assert.equal(chop.ok, false);
     assert.match(chop.err, /inside a shop/);
     // Buying needs you to be in the shop.
@@ -255,7 +255,7 @@ test('hands-on crafting: materials held while you work, the server replays your 
     const far = await a.call('craft.start', { recipe: 'oak_plank', batch: 3 });
     assert.match(far.err, /Walk up to the Workbench/);
     const spot = spotsOf('workbench')[0];
-    const col = buildColliders(generateNodes(), generateScenery(), PROPS);
+    const col = buildColliders();
     const path = new NavGrid(col).findPath(a.welcome.you.x, a.welcome.you.z, spot.x, spot.z);
     assert.ok(path, 'the workbench is reachable');
     a.ws.send(JSON.stringify({ t: 'move', x: spot.x, z: spot.z }));
@@ -264,7 +264,7 @@ test('hands-on crafting: materials held while you work, the server replays your 
     assert.equal(st.ok, true, st.err);
     assert.equal(game.heroes.count(a.id, 'oak_log'), 14, '6 logs held while crafting');
     // You can't wander off or start something else mid-craft.
-    assert.match((await a.rpc('hit', { node: generateNodes()[0].id })).err, /Finish your craft/);
+    assert.match((await a.rpc('hit', { node: NODES[0].id })).err, /Finish your craft/);
     const { s, tog } = bot(st.data.spec, 0, 5, 0);
     // Finishing instantly is impossible for a human: graded as if nothing was pressed.
     const cheat = await a.call('craft.finish', { sid: st.data.sid, toggles: tog, end: s.tick, off: [0, 0] });

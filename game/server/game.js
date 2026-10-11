@@ -1,10 +1,10 @@
-import { PROPS } from '../shared/props.js';
+import './map.js'; // loads the world map first: everything below reads it
 import { ITEMS, isItem } from '../shared/items.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
 import { levelFromXp, doubleChance } from '../shared/skills.js';
 import { MONSTERS, heroStats, damage } from '../shared/monsters.js';
 import {
-  generateNodes, generateScenery, buildColliders, NavGrid, NODE_TYPES, stepPath,
+  NODES, SPAWNS, buildColliders, NavGrid, NODE_TYPES, stepPath,
   INTERACT_RANGE, FISH_RANGE, SPAWN, isWalkable, WORLD_RADIUS, isDeepSpot, SWING_FLOOR, isPerfectSwing,
 } from '../shared/world.js';
 import { rollFish, fishingGear, fightRating, replayFight, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
@@ -28,10 +28,8 @@ const NPC_SELL_RATE = 0.6; // instant-sell to the town merchant pays 60% of valu
 const CHAT_MAX = 140;
 
 const STATIC = (() => {
-  const nodes = generateNodes();
-  const scenery = generateScenery();
-  const col = buildColliders(nodes, scenery, PROPS);
-  return { nodes, col, nav: new NavGrid(col) };
+  const col = buildColliders();
+  return { nodes: NODES, col, nav: new NavGrid(col) };
 })();
 
 const rint = (a, b, rng = Math.random) => a + Math.floor(rng() * (b - a + 1));
@@ -60,17 +58,18 @@ class Channel {
     this.battles = new Map();
     this.tickNo = 0;
     this.seq = 0;
-    for (const [type, m] of Object.entries(MONSTERS))
-      for (let i = 0; i < m.spawn.count; i++) {
+    // Monster camps come from the map; each monster roams around its own camp.
+    for (const sp of SPAWNS)
+      for (let i = 0; i < sp.count; i++) {
         const id = `m${this.mobs.size}`;
-        const mob = { id, type, hx: m.spawn.x, hz: m.spawn.z, x: 0, z: 0, rot: 0, path: null, state: 'roam', next: 0, respawnAt: 0, battle: null };
+        const mob = { id, type: sp.monster, sp, x: 0, z: 0, rot: 0, path: null, state: 'roam', next: 0, respawnAt: 0, battle: null };
         this.#placeMob(mob);
         this.mobs.set(id, mob);
       }
   }
 
   #placeMob(mob) {
-    const sp = MONSTERS[mob.type].spawn;
+    const sp = mob.sp;
     for (let k = 0; k < 30; k++) {
       const a = Math.random() * Math.PI * 2;
       const d = Math.sqrt(Math.random()) * sp.r;
@@ -194,7 +193,7 @@ class Channel {
       if (m.path) stepPath(m, dt, MOB_SPEED);
       else if (now >= m.next) {
         m.next = now + 2500 + Math.random() * 5000;
-        const sp = MONSTERS[m.type].spawn;
+        const sp = m.sp;
         const a = Math.random() * Math.PI * 2;
         const d = Math.random() * sp.r;
         const tx = sp.x + Math.cos(a) * d;

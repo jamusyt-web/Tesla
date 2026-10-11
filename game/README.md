@@ -21,7 +21,7 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
 
 - **Accounts & invites**: invite-only signup, and every player can create 5 invites (no admins). On first boot the server prints a founder invite code; `npm run invite` prints a fresh one any time.
 - **Character creator**: a full-body, stylised 3D hero with skin, 7 hairstyles, hair and eye colors, eye styles, 5 outfits, pants, 7 hats, and back items (cape, backpack, wings). Costumes are data in `shared/avatar.js`, so adding one is a single entry. You can re-customize any time from Bag → Hero.
-- **3D town, full-screen**: tap or click to move with A* pathfinding. WASD also works on PC. Drag to rotate, pinch or scroll to zoom. The camera follows you, buildings fade when they block your view, and you see an x-ray silhouette when you're behind trees. The town has a minimap, a fountain, a lake with a dock, a forest, a quarry, a herb garden, the Wilds, and drifting clouds and butterflies.
+- **3D town, full-screen**: tap or click to move with A* pathfinding. WASD also works on PC. Drag to rotate, pinch or scroll to zoom. The camera follows you, buildings fade when they block your view, and you see an x-ray silhouette when you're behind trees. The town has a minimap, a fountain, a lake with a dock, a forest, a quarry, a herb garden, the Wilds, and butterflies.
 - **Gathering (Skyblock-style)**:
   - **Trees and rocks**: tap to walk over, then **tap to swing**. A shrinking timing ring shows the rhythm, and a swing right on the beat is a **PERFECT** hit for double damage. The server checks the timing, so it can't be faked.
   - **Node feedback**: each node shows an HP bar, wood chips, falling leaves, sparks and camera shake. Trees topple away from you with a thud, rocks shatter, and both regrow later.
@@ -42,12 +42,12 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
   - **Market data**: price-history chart, order-book depth, and 24h volume and average.
   - **Room to trade**: scalping and flipping are possible on purpose.
 - **Your shop: walk in, set prices, leave**:
-  - **A real interior**: tap 🏪 Shop (or walk through Your Shop's door) and you're inside your own merchant hall, with 8 displays (shelves, tables, a weapon rack, a bin and a pedestal) showing the actual goods.
+  - **A real interior**: tap Shop (or walk through Your Shop's door) and you're inside your own merchant hall, with 8 displays (shelves, tables, a weapon rack, a bin and a pedestal) showing the actual goods.
   - **Passive selling**: put items on displays with a price and go adventuring. NPC townsfolk come in and buy over time, even while you're offline. Each display shows a live forecast: buy chance, sales per hour, when it sells out. The gold goes into your **till**; collect it from the counter or the Ledger.
   - **Town demand**: each item has a town-wide pool of NPC demand that refills over 8 hours, so flooding the town with one item lowers what townsfolk will pay. Fair prices sell, greedy ones don't (never above 1.5× value).
   - **Friends shop in person**: visit any shop from Town Hall → Shops or a player's profile, walk around with whoever's inside, and buy at the shown price (4% fee, same as the market; 8% guild levy on NPC sales).
   - **While you were away**: a summary of what sold, who bought, and your till.
-- **Co-op battles in the world**: monsters roam the Wilds (slimes, wolves, goblins, and a Mossy Golem boss). Tap one to start a turn-based fight right where it stands. **Anyone nearby can tap the same monster to join** (up to 4). Each round has a 12 s timer and the actions are Attack, Special (charges up), Defend, Item (potions) and Flee. Other players can watch the fight happen.
+- **Co-op battles in the world**: monsters roam the Wilds (slimes, wolves, goblins, and a Ruinwarden Golem boss). Tap one to start a turn-based fight right where it stands. **Anyone nearby can tap the same monster to join** (up to 4). Each round has a 12 s timer and the actions are Attack, Special (charges up), Defend, Item (potions) and Flee. Other players can watch the fight happen.
 - **Social**: channel chat with speech bubbles, emotes (wave, dance, cheer, heart, sit), player profiles, online list, leaderboards, and a shop directory.
 - **Onboarding quest**: chop → craft → fight → stock your shop, with gold rewards. A light pillar marks the target, glowing dots trace the walking path, an arrow around your hero points the way with the distance, and a **Take me there** button walks you over.
 
@@ -92,13 +92,15 @@ docker build -t hearthvale . && docker run -p 8787:8787 -v hearthvale-data:/data
 ## Code map
 
 ```
+maps/     world.json  the world map: everything placed in the world (see below)
 shared/   rules & data used by BOTH server and client (items, recipes, skills,
-          monsters, avatar options, the world map + A* navigation)
+          monsters, avatar options, world rules + the map loader, A* navigation)
 server/   game.js   channels, 20Hz tick, movement, gathering, fishing, battles, chat
           market.js order book + matching + escrow
           shop.js   player shops: displays, till, NPC customer simulation
           rooms.js  shop interiors (who's inside, movement)
           heroes.js inventory/gold/xp persistence      auth.js  invites + sessions
+          map.js    loads the world map, serves it at /api/map
           app.js    HTTP API + WebSocket upgrade        index.js entry point
 client/   src/game.js       renderer, camera, input, prediction, interpolation
           src/scene/        town, avatar, tools, monsters, particles (three.js, toon-shaded)
@@ -106,12 +108,30 @@ client/   src/game.js       renderer, camera, input, prediction, interpolation
 scripts/  bots.js (populate the lobby), dev.js
 ```
 
+## The world map
+
+Everything placed in the world lives in **`maps/world.json`**: buildings, the gate, plazas, fountains, lakes and docks, zones, dirt paths, gatherable nodes, monster camps (`spawns`), and every prop, tree and flower. The server loads it on start and sends it to each player's browser (`/api/map`), so both sides always build the same world. Small scatter (grass tufts, stepping stones, reeds, lily pads) is generated from it automatically.
+
+- **Format:** one entity per line, each with a unique `id`. The fields are documented at the top of `shared/world.js`. A prop's `slot` is a model from `client/src/scene/manifest.js` or a code-drawn kind from `client/src/scene/procprops.js` (`proc_…`).
+- **Regions and tiers:** `regions` lists the towns and areas with a difficulty `tier` (Hearthvale is tier 1, the starter town).
+- **Checks:** a broken map stops the server with a list of exactly what's wrong (duplicate ids, unknown node types or monsters, missing coordinates).
+- **Your own copy:** a map saved to `data/maps/world.json` (next to your saves) is used instead, unless the game ships a map with a higher `rev`.
+
 ## Roadmap (next phases)
 
-- **Towns & rivalry**: multiple biome towns, each with its own market and resources (the server already runs separate channels, so this extends naturally), plus town membership and growth projects.
+The big plan, one step at a time:
+
+1. **Map as data** (done): the world lives in `maps/world.json` instead of code.
+2. **In-game map editor**, for the server owner: fly around, place, move and delete buildings, props, trees, nodes and monster camps, paint paths, save.
+3. **A much bigger world**: load and draw only what's near you, split the world into regions, travel between them.
+4. **Four or five major towns**, from the starter town up through harder ones, each with its own biome, resources, monsters and market (prices differ between towns, so hauling goods pays).
+5. **Personal land and building** (Skyblock-style): your own plot with buildings that make money over time, using the editor's placement tools.
+6. **An outlaw zone**: opt-in full-loot PvP for what you carry, bandit NPCs, and the best rewards in the game.
+
+Also planned:
+
 - **Group dungeons**: instanced multi-room co-op runs with bosses and better loot.
 - **PvP duels**, using the same turn-based battle engine.
 - **Auctions** for rare items (bid and buyout), alongside the order book.
-- **Your own island** (stashed idea): a personal, fully customizable plot you build on to earn money, Skyblock-style.
 - **Cosmetics and costumes**: the avatar and tool-skin systems are already data-driven.
 - **Shop decoration** and upgrades (more displays, bigger rooms).

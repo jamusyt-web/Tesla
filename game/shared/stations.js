@@ -1,6 +1,6 @@
 // Where the crafting stations stand and where a hero stands to use one.
-// Positions come from the station props in shared/props.js.
-import { PROPS } from './props.js';
+// Positions come from the station props in the world map (shared/world.js).
+import { PROPS } from './world.js';
 import { STATIONS } from './crafting.js';
 
 const at = (id) => PROPS.find((p) => p.station === id);
@@ -26,5 +26,6 @@ export const stationPos = (id) => {
   return p ? { x: p.x, z: p.z, r: p.r } : null;
 };
 export const STATION_IDS = Object.keys(STATIONS);
-// The Workshop yard: "Quick" crafting works anywhere in here.
-export const YARD = { x: -17, z: -12, r: 14 };
+// "Quick" crafting works anywhere near a crafting station (the Workshop yard).
+export const YARD_RANGE = 10;
+export const inYard = (x, z) => PROPS.some((p) => p.station && Math.hypot(p.x - x, p.z - z) <= YARD_RANGE);

@@ -4,7 +4,7 @@ import { sfx } from '../util/sfx.js';
 import { portrait } from './portrait.js';
 import { ITEMS } from '../../../shared/items.js';
 import { SKILLS, levelProgress } from '../../../shared/skills.js';
-import { BUILDINGS, ZONES, LAKE, DOCK, WORLD_RADIUS, doorPoint, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
+import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, WORLD_RADIUS, doorPoint, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import { Panels } from './panels.js';
 import { glyph, coin } from './glyphs.js';
@@ -553,20 +553,20 @@ export class Hud {
       x.fill();
     }
     x.globalAlpha = 1;
-    x.fillStyle = '#4b88a6';
-    x.beginPath();
-    x.arc(P(LAKE.x), P(LAKE.z), LAKE.r * S, 0, Math.PI * 2);
-    x.fill();
-    x.fillStyle = '#a89a82';
-    x.beginPath();
-    x.arc(128, 128, 11 * S, 0, Math.PI * 2);
-    x.fill();
+    const disc = (col, o) => {
+      x.fillStyle = col;
+      x.beginPath();
+      x.arc(P(o.x), P(o.z), o.r * S, 0, Math.PI * 2);
+      x.fill();
+    };
+    for (const l of LAKES) disc('#4b88a6', l);
+    for (const p of PLAZAS) disc('#a89a82', p);
     for (const b of BUILDINGS) {
       x.fillStyle = b.deco ? '#c9a374' : b.roof;
       x.fillRect(P(b.x - b.w / 2), P(b.z - b.d / 2), b.w * S, b.d * S);
     }
     x.fillStyle = '#a87c4f';
-    x.fillRect(P(DOCK.x - DOCK.w / 2), P(DOCK.z - DOCK.d / 2), DOCK.w * S, DOCK.d * S);
+    for (const d of DOCKS) x.fillRect(P(d.x - d.w / 2), P(d.z - d.d / 2), d.w * S, d.d * S);
     this.mapBase = c;
     this.mapS = S;
   }

@@ -1,22 +1,23 @@
-import { PROPS } from '../../shared/props.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateNodes, generateScenery, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKE, DOCK, GATE, gateColliders, SWING_GATE, SWING_FLOOR, isPerfectSwing } from '../../shared/world.js';
+import { current as currentMap, serverMapProblems, SHIPPED_MAP } from '../map.js';
+import { NODES, SPAWNS, PROPS, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKES, DOCKS, GATE, GATES, gateColliders, SWING_GATE, SWING_FLOOR, isPerfectSwing, mapProblems } from '../../shared/world.js';
 import { ITEMS } from '../../shared/items.js';
-import { MONSTERS } from '../../shared/monsters.js';
+import { MODELS } from '../../client/src/scene/manifest.js';
+import { PROC_BUILDERS } from '../../client/src/scene/procprops.js';
 
-const nodes = generateNodes();
-const col = buildColliders(nodes, generateScenery(), PROPS);
+const nodes = NODES;
+const col = buildColliders();
 const nav = new NavGrid(col);
 
 // The hard rule for any route: never through a building, over water or off
 // the island. (Brushing the edge of a tree or rock is fine.)
 function solid(x, z) {
   if (Math.hypot(x, z) > WORLD_RADIUS + 0.05) return 'off the island';
-  const dock = Math.abs(x - DOCK.x) <= DOCK.w / 2 && Math.abs(z - DOCK.z) <= DOCK.d / 2;
-  if (!dock && Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r - 0.05) return 'water';
+  const dock = DOCKS.some((d) => Math.abs(x - d.x) <= d.w / 2 && Math.abs(z - d.z) <= d.d / 2);
+  if (!dock && LAKES.some((l) => Math.hypot(x - l.x, z - l.z) < l.r - 0.05)) return 'water';
   for (const b of BUILDINGS) if (Math.abs(x - b.x) < b.w / 2 - 0.05 && Math.abs(z - b.z) < b.d / 2 - 0.05) return `inside ${b.id}`;
-  for (const g of gateColliders()) if (Math.abs(x - g.x) < g.w / 2 - 0.05 && Math.abs(z - g.z) < g.d / 2 - 0.05) return 'through the gate wall';
+  for (const g of GATES.flatMap((gt) => gateColliders(gt))) if (Math.abs(x - g.x) < g.w / 2 - 0.05 && Math.abs(z - g.z) < g.d / 2 - 0.05) return 'through the gate wall';
   return null;
 }
 function hopProblem(ax, az, bx, bz) {
@@ -91,10 +92,36 @@ test('the road to the Wilds goes through the gate arch, and every monster camp i
     }
     [ax, az] = [bx, bz];
   }
-  for (const [id, m] of Object.entries(MONSTERS)) {
-    const p = nav.nearestOpen(m.spawn.x, m.spawn.z);
-    assert.ok(p && nav.findPath(SPAWN.x, SPAWN.z, p[0], p[1]), `${id} camp at ${m.spawn.x},${m.spawn.z} is reachable`);
+  for (const sp of SPAWNS) {
+    const p = nav.nearestOpen(sp.x, sp.z);
+    assert.ok(p && nav.findPath(SPAWN.x, SPAWN.z, p[0], p[1]), `${sp.monster} camp ${sp.id} at ${sp.x},${sp.z} is reachable`);
   }
+});
+
+test('the shipped map is valid, and every prop has a model or a procedural kind', () => {
+  assert.equal(currentMap.file, SHIPPED_MAP);
+  assert.deepEqual(serverMapProblems(currentMap.map), []);
+  for (const p of PROPS) assert.ok(MODELS[p.slot] || PROC_BUILDERS[p.slot], `${p.id}: unknown slot ${p.slot}`);
+  assert.ok(PROPS.filter((p) => p.station).length === 5, 'five crafting stations');
+  for (const id of ['workshop', 'market', 'shop', 'townhall']) assert.ok(BUILDINGS.some((b) => b.id === id), `${id} building`);
+});
+
+test('broken maps are rejected with readable reasons', () => {
+  const good = currentMap.map;
+  const clone = () => JSON.parse(JSON.stringify(good));
+  const dupe = clone();
+  dupe.props[1].id = dupe.props[0].id;
+  assert.match(mapProblems(dupe).join(), /used twice/);
+  const typo = clone();
+  typo.nodes[0].type = 'tree_banana';
+  assert.match(mapProblems(typo).join(), /unknown node type "tree_banana"/);
+  const noXY = clone();
+  delete noXY.buildings[0].x;
+  assert.match(mapProblems(noXY).join(), /workshop\) needs numeric x and z/);
+  const badMob = clone();
+  badMob.spawns[0].monster = 'dragon';
+  assert.match(serverMapProblems(badMob).join(), /unknown monster "dragon"/);
+  assert.deepEqual(mapProblems({ ...clone(), format: 2 }).slice(0, 1), ['Unknown map format 2 (expected 1).']);
 });
 
 test('swing rhythm: mashing can never score PERFECT, and on-beat swings always can', () => {

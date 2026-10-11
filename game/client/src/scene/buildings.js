@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as assets from './assets.js';
 import { MODULE_PACKS, TEXTURES } from './manifest.js';
-import { GATE, GATE_SCALE } from '../../../shared/world.js';
+import { GATE } from '../../../shared/world.js';
 
 // Assembles Hearthvale's buildings from Kenney's modular Fantasy Town Kit.
 //
@@ -211,7 +211,7 @@ const COTTAGE_TEX = ['cot_a', 'cot_b', 'cot_c', 'cot_d', 'cot_e'];
 
 export const canBuild = () => assets.hasModules(FTK, MODULE_PACKS[FTK]);
 
-// Build a game building (shared/world.js BUILDINGS entry) as one group.
+// Build a game building (a map `buildings` entry) as one group.
 // Returns null if the kit isn't loaded (caller falls back to procedural).
 export function buildModular(b, index) {
   if (!canBuild()) return null;
@@ -243,10 +243,10 @@ export function buildModular(b, index) {
   return grp;
 }
 
-// The Wilds gatehouse: castle-kit arch tower, walls and corner towers.
-export function buildGate() {
-  if (!assets.hasModules('castle-kit', MODULE_PACKS['castle-kit'])) return null;
-  const s = GATE_SCALE;
+// A gatehouse (a map `gates` entry): castle-kit arch tower, walls and corner towers.
+export function buildGate(g = GATE) {
+  if (!g || !assets.hasModules('castle-kit', MODULE_PACKS['castle-kit'])) return null;
+  const s = g.scale;
   const tex = TEXTURES['castle-kit'].grey_red;
   const items = [];
   const put = (m, x, y, z, r = 0, sc = 1) => items.push({ slot: `castle-kit:${m}`, p: [x * s, y * s, z * s], r, s: s * sc, tex });
@@ -264,7 +264,7 @@ export function buildGate() {
   }
   const grp = new THREE.Group();
   grp.add(assets.assemble(items));
-  grp.position.set(GATE.x, 0, GATE.z);
+  grp.position.set(g.x, 0, g.z);
   grp.userData.top = 3.3 * s;
   return grp;
 }

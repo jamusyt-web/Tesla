@@ -1,8 +1,6 @@
-// The town of Hearthvale. Pure data + deterministic generation so the server
-// (authority) and every client build exactly the same world, node ids included.
+// World rules shared by the server (authority) and every client: movement,
+// gathering, collision and pathfinding, plus the current map (setWorld).
 
-export const WORLD_RADIUS = 96; // walkable island radius
-export const SPAWN = { x: 0, z: 8 };
 export const MOVE_SPEED = 6.2; // units / second
 export const INTERACT_RANGE = 2.9; // how close you must stand to hit a tree/rock
 export const FISH_RANGE = 7.5;
@@ -31,51 +29,136 @@ export function mulberry32(seed) {
   };
 }
 
-// ── Buildings: axis-aligned footprints (w along x, d along z). Door faces +z
-// unless `face` says otherwise. `action` is what tapping it opens.
-export const BUILDINGS = [
-  { id: 'workshop', label: 'Workshop', icon: '🔨', glyph: 'anvil', action: 'craft', x: -17, z: -6, w: 9, d: 7, face: 'e', color: '#d98b5f', roof: '#8a4b3a' },
-  { id: 'market', label: 'Grand Market', icon: '⚖️', glyph: 'scales', action: 'market', x: 18, z: -6, w: 11, d: 8, face: 'w', color: '#f2d38a', roof: '#3f7fbf' },
-  { id: 'shop', label: 'Your Shop', icon: '🏪', glyph: 'shop', action: 'shop', x: -15, z: 16, w: 9, d: 7, face: 'n', color: '#f6c6a6', roof: '#c4534a' },
-  { id: 'townhall', label: 'Town Hall', icon: '🏛️', glyph: 'castle', action: 'townhall', x: 16, z: 17.5, w: 11, d: 10, face: 'n', color: '#efe6d2', roof: '#5b7f4a' },
-  { id: 'cottage1', x: -30, z: 4, w: 6, d: 5, face: 'e', color: '#f1e1b6', roof: '#b4553f', deco: true },
-  { id: 'cottage2', x: 31, z: 6, w: 6, d: 5, face: 'w', color: '#d7e7f0', roof: '#6d5aa8', deco: true },
-  { id: 'cottage3', x: -2, z: 30, w: 6, d: 5, face: 'n', color: '#f8d7da', roof: '#4f7d8c', deco: true },
-  { id: 'cottage4', x: -28, z: -22, w: 6, d: 5, face: 's', color: '#e6f0d0', roof: '#a8643a', deco: true },
-  { id: 'cottage5', x: 30, z: -22, w: 6, d: 5, face: 's', color: '#fbe7c6', roof: '#3d6f9c', deco: true },
-];
+// ── The world map ──────────────────────────────────────────────────────
+// Everything placed in the world lives in a map file (maps/world.json), not in
+// code. The server loads it (server/map.js) and sends it to every client
+// (GET /api/map), and both call setWorld() before building anything, so node
+// ids and colliders always match. The exports below are live bindings: read
+// them inside functions, never copy them at module load.
+//
+// Map format 1 (all positions in metres; x east, z south; rot in radians):
+//   bounds    { r }                     walkable island radius around (0, 0)
+//   spawn     { x, z }                  where new heroes appear
+//   regions   [{ id, name, tier, kind, x, z, r }]   towns / areas, tier 1 = starter
+//   buildings [{ id, label, action, x, z, w, d, face, deco, ... }]
+//   gates     [{ id, label, x, z, width, scale }]   castle-wall gatehouses
+//   plazas, fountains [{ id, x, z, r }]
+//   lakes     [{ id, x, z, r, deep }]   water; fishing spots within `deep` are deep water
+//   docks     [{ id, x, z, w, d }]      walkable piers over water
+//   zones     [{ id, kind, label, x, z, r, ground }]  named areas, tinted ground
+//   paths     [{ id, pts: [[x, z], ...], w }]          dirt paths (w = half-width)
+//   nodes     [{ id, type, x, z, rot, s }]            gatherables (NODE_TYPES)
+//   spawns    [{ id, monster, x, z, r, count }]       monster camps
+//   props     [{ id, slot, x, z, rot, r, s?, y?, v?, bob?, station? }]
+//             slot = model slot (client/src/scene/manifest.js) or a proc_* kind;
+//             r > 0 blocks movement; station marks a crafting station.
+export let MAP = null;
+export let WORLD_RADIUS = 96;
+export let SPAWN = { x: 0, z: 8 };
+export let REGIONS = [];
+export let BUILDINGS = [];
+export let GATES = [];
+export let GATE = null; // the first gate (the Wilds Gate)
+export let PLAZAS = [];
+export let FOUNTAINS = [];
+export let LAKES = [];
+export let LAKE = null;
+export let DOCKS = [];
+export let DOCK = null;
+export let ZONES = [];
+export let PATHS = [];
+export let NODES = [];
+export let SPAWNS = [];
+export let PROPS = [];
+let HALF = WORLD_RADIUS + 2;
 
-// The gate to the Wilds: a castle wall with an arch you walk through. The
-// client builds it from castle-kit modules (1 unit = GATE_SCALE metres):
-// the arch tower in the middle, two wall sections and a corner tower each side.
-export const GATE = { id: 'gate', label: 'Wilds Gate', icon: '⚔️', glyph: 'swords', x: 0, z: -34, width: 7 };
-export const GATE_SCALE = 4.5;
-const GATE_OPENING = 1.25; // half-width of the walkable arch (model: 0.255 × scale)
+const LISTS = ['regions', 'buildings', 'gates', 'plazas', 'fountains', 'lakes', 'docks', 'zones', 'paths', 'nodes', 'spawns', 'props'];
 
-export function gateColliders() {
-  const s = GATE_SCALE;
+// Checks a map's shape and returns a list of problems (empty = fine).
+export function mapProblems(m) {
   const out = [];
-  for (const sx of [-1, 1]) {
-    // arch tower sides
-    out.push({ x: GATE.x + sx * (GATE_OPENING + 0.5 * s) / 2, z: GATE.z, w: 0.5 * s - GATE_OPENING, d: 0.94 * s });
-    // two wall sections and the corner tower
-    out.push({ x: GATE.x + sx * 2 * s, z: GATE.z, w: 3 * s, d: s });
+  if (!m || typeof m !== 'object') return ['The map is not a JSON object.'];
+  if (m.format !== 1) out.push(`Unknown map format ${m.format} (expected 1).`);
+  if (!(m.bounds?.r > 10)) out.push('bounds.r must be a number above 10.');
+  if (!Number.isFinite(m.spawn?.x) || !Number.isFinite(m.spawn?.z)) out.push('spawn needs x and z.');
+  const ids = new Set();
+  for (const k of LISTS) {
+    const list = m[k] ?? [];
+    if (!Array.isArray(list)) {
+      out.push(`${k} must be a list.`);
+      continue;
+    }
+    list.forEach((e, i) => {
+      const where = `${k}[${i}]${e?.id ? ` (${e.id})` : ''}`;
+      if (!e || typeof e !== 'object') return out.push(`${where} is not an object.`);
+      if (typeof e.id !== 'string' || !e.id) out.push(`${where} needs an id.`);
+      else if (ids.has(e.id)) out.push(`${where}: the id "${e.id}" is used twice.`);
+      else ids.add(e.id);
+      if (k === 'paths') {
+        if (!Array.isArray(e.pts) || e.pts.length < 2 || e.pts.some((p) => !Number.isFinite(p?.[0]) || !Number.isFinite(p?.[1]))) out.push(`${where} needs at least two [x, z] points.`);
+      } else if (!Number.isFinite(e.x) || !Number.isFinite(e.z)) out.push(`${where} needs numeric x and z.`);
+      if (k === 'nodes' && !NODE_TYPES[e.type]) out.push(`${where}: unknown node type "${e.type}".`);
+      if (k === 'props' && typeof e.slot !== 'string') out.push(`${where} needs a slot.`);
+      if (k === 'buildings' && !(e.w > 0 && e.d > 0)) out.push(`${where} needs a positive w and d.`);
+    });
   }
   return out;
 }
 
-export const FOUNTAIN = { x: 0, z: 0, r: 3.2 };
-export const LAKE = { x: 26, z: 46, r: 14 };
-export const DOCK = { x: 26, z: 32, w: 3, d: 10 }; // pier running into the lake from the north shore
+// Make `m` the current world. Throws with every problem found if it's invalid.
+export function setWorld(m) {
+  const bad = mapProblems(m);
+  if (bad.length) throw new Error(`Invalid map:\n- ${bad.join('\n- ')}`);
+  MAP = m;
+  WORLD_RADIUS = m.bounds.r;
+  HALF = WORLD_RADIUS + 2;
+  SPAWN = m.spawn;
+  REGIONS = m.regions ?? [];
+  BUILDINGS = m.buildings ?? [];
+  GATES = (m.gates ?? []).map((g) => ({ scale: GATE_SCALE, width: 7, ...g }));
+  GATE = GATES[0] ?? null;
+  PLAZAS = m.plazas ?? [];
+  FOUNTAINS = m.fountains ?? [];
+  LAKES = (m.lakes ?? []).map((l) => ({ deep: 6.5, ...l }));
+  LAKE = LAKES[0] ?? null;
+  DOCKS = m.docks ?? [];
+  DOCK = DOCKS[0] ?? null;
+  ZONES = m.zones ?? [];
+  PATHS = m.paths ?? [];
+  NODES = m.nodes ?? [];
+  SPAWNS = m.spawns ?? [];
+  PROPS = (m.props ?? []).map((p) => ({ rot: 0, r: 0, ...p }));
+  return m;
+}
 
-// Named regions. Tinted ground + signposts on the client, spawn areas on the server.
-export const ZONES = [
-  { id: 'forest', label: 'Whisperwood', icon: '🌲', glyph: 'pine', x: -54, z: 0, r: 22, ground: '#46703a' },
-  { id: 'quarry', label: 'Copperstone Quarry', icon: '⛏️', glyph: 'pick', x: 54, z: 0, r: 20, ground: '#8f8270' },
-  { id: 'garden', label: 'Herb Garden', icon: '🌿', glyph: 'herbs', x: -30, z: 40, r: 11, ground: '#679a50' },
-  { id: 'lake', label: 'Mirror Lake', icon: '🎣', glyph: 'rod', x: LAKE.x, z: LAKE.z, r: LAKE.r + 4, ground: '#c9b282' },
-  { id: 'wilds', label: 'The Wilds', icon: '⚔️', glyph: 'swords', x: 0, z: -66, r: 30, ground: '#556e40' },
-];
+export const zoneById = (id) => ZONES.find((z) => z.id === id) ?? null;
+export const zonesOfKind = (kind) => ZONES.filter((z) => (z.kind ?? z.id) === kind);
+
+// Every dirt path as straight segments [ax, az, bx, bz, w].
+export function pathSegments() {
+  const out = [];
+  for (const p of PATHS) for (let i = 1; i < p.pts.length; i++) out.push([p.pts[i - 1][0], p.pts[i - 1][1], p.pts[i][0], p.pts[i][1], p.w]);
+  return out;
+}
+
+// The gatehouse is built from castle-kit modules (1 unit = gate.scale metres):
+// the arch tower in the middle, two wall sections and a corner tower each side.
+export const GATE_SCALE = 4.5;
+const GATE_OPENING = 1.25; // half-width of the walkable arch at scale 4.5 (model: 0.255 × scale)
+
+export function gateColliders(g = GATE) {
+  if (!g) return [];
+  const s = g.scale ?? GATE_SCALE;
+  const open = (GATE_OPENING * s) / GATE_SCALE;
+  const out = [];
+  for (const sx of [-1, 1]) {
+    // arch tower sides
+    out.push({ x: g.x + sx * (open + 0.5 * s) / 2, z: g.z, w: 0.5 * s - open, d: 0.94 * s });
+    // two wall sections and the corner tower
+    out.push({ x: g.x + sx * 2 * s, z: g.z, w: 3 * s, d: s });
+  }
+  return out;
+}
 
 // ── Resource node types ────────────────────────────────────────────────
 // hp: total swing power to break; tier: minimum tool tier; lvl: skill level gate.
@@ -93,103 +176,22 @@ export const NODE_TYPES = {
   fish_spot: { kind: 'fish', tool: 'rod', skill: 'fishing', name: 'Fishing Spot', hp: 1, tier: 1, lvl: 1, xp: 9, respawn: 6, r: 0, drops: [], rare: [] },
 };
 
-// Fishing spots near the middle of the lake are deep water (bigger fish).
-export const isDeepSpot = (n) => Math.hypot(n.x - LAKE.x, n.z - LAKE.z) < 6.5;
-
-function scatter(rng, n, cx, cz, r, minGap, avoid, existing) {
-  const out = [];
-  let guard = 0;
-  while (out.length < n && guard++ < n * 200) {
-    const a = rng() * Math.PI * 2;
-    const d = Math.sqrt(rng()) * r;
-    const x = cx + Math.cos(a) * d;
-    const z = cz + Math.sin(a) * d;
-    if (avoid && avoid(x, z)) continue;
-    if ([...existing, ...out].some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < minGap * minGap)) continue;
-    out.push({ x: +x.toFixed(2), z: +z.toFixed(2) });
-  }
-  return out;
-}
+// Fishing spots near the middle of a lake are deep water (bigger fish).
+export const isDeepSpot = (n) => LAKES.some((l) => Math.hypot(n.x - l.x, n.z - l.z) < l.deep);
 
 const inRect = (x, z, b, pad = 0) => Math.abs(x - b.x) < b.w / 2 + pad && Math.abs(z - b.z) < b.d / 2 + pad;
 
-// Deterministic list of all gatherable nodes in the town.
-export function generateNodes() {
-  const rng = mulberry32(1337);
-  const nodes = [];
-  const add = (type, pts) => pts.forEach((p) => nodes.push({ id: `n${nodes.length}`, type, x: p.x, z: p.z, rot: +(rng() * 6.28).toFixed(2), s: +(0.9 + rng() * 0.25).toFixed(2) }));
-  const placed = () => nodes;
-  const forest = ZONES[0];
-  // Oaks on the town-side edge, birch in the middle, ancient pines deep west.
-  const forestAvoid = (x, z) => x > forest.x + 18 || x < -WORLD_RADIUS + 6;
-  add('tree_oak', scatter(rng, 16, forest.x + 9, forest.z, 12, 3.4, forestAvoid, placed()));
-  add('tree_birch', scatter(rng, 12, forest.x - 4, forest.z, 11, 3.4, forestAvoid, placed()));
-  add('tree_pine', scatter(rng, 8, forest.x - 16, forest.z, 9, 3.8, forestAvoid, placed()));
-  const q = ZONES[1];
-  const qAvoid = (x, z) => x > WORLD_RADIUS - 6 || x < q.x - 18;
-  add('rock_stone', scatter(rng, 12, q.x - 7, q.z, 11, 3.2, qAvoid, placed()));
-  add('rock_copper', scatter(rng, 9, q.x + 1, q.z, 12, 3.2, qAvoid, placed()));
-  add('rock_iron', scatter(rng, 6, q.x + 10, q.z - 4, 8, 3.5, qAvoid, placed()));
-  add('rock_gold', scatter(rng, 4, q.x + 13, q.z + 6, 6, 3.6, qAvoid, placed()));
-  const g = ZONES[2];
-  add('herb_mint', scatter(rng, 10, g.x, g.z, 8, 1.8, null, placed()));
-  add('herb_sun', scatter(rng, 7, g.x, g.z, 8, 1.8, null, placed()));
-  add('herb_moon', scatter(rng, 4, g.x, g.z, 8, 1.8, null, placed()));
-  // Fishing spots sit on the water around the end of the dock and the shore.
-  const fishPts = [
-    { x: DOCK.x - 3.5, z: DOCK.z + DOCK.d / 2 + 1.5 },
-    { x: DOCK.x + 3.5, z: DOCK.z + DOCK.d / 2 + 1.5 },
-    { x: DOCK.x, z: DOCK.z + DOCK.d / 2 + 4 },
-    { x: LAKE.x - 10, z: LAKE.z + 2 },
-    { x: LAKE.x + 10, z: LAKE.z - 1 },
-    { x: LAKE.x + 3, z: LAKE.z + 10 },
-  ];
-  add('fish_spot', fishPts);
-  return nodes;
-}
-
-// Decorative scenery (not gatherable) — still deterministic so collisions match.
-export function generateScenery() {
-  const rng = mulberry32(4242);
-  const trees = [];
-  // A ring of big decorative trees framing the island edge.
-  for (let i = 0; i < 70; i++) {
-    const a = (i / 70) * Math.PI * 2 + rng() * 0.05;
-    const d = WORLD_RADIUS + 2 + rng() * 6;
-    trees.push({ x: Math.cos(a) * d, z: Math.sin(a) * d, s: 1.2 + rng() * 0.8, kind: rng() > 0.5 ? 'pine' : 'round' });
-  }
-  // Scattered town greenery — avoid paths, plaza, buildings and zones.
-  const blocked = (x, z) =>
-    Math.hypot(x, z) < 12 ||
-    BUILDINGS.some((b) => inRect(x, z, b, 3)) ||
-    gateColliders().some((g) => inRect(x, z, g, 2)) ||
-    ZONES.some((zn) => Math.hypot(x - zn.x, z - zn.z) < zn.r + 2) ||
-    Math.abs(x) < 3 || Math.abs(z) < 3 || Math.hypot(x, z) > WORLD_RADIUS - 4;
-  const deco = scatter(rng, 46, 0, 0, WORLD_RADIUS - 6, 4, blocked, []);
-  deco.forEach((p) => trees.push({ ...p, s: 0.8 + rng() * 0.5, kind: rng() > 0.6 ? 'pine' : 'round', solid: true }));
-  const flowers = [];
-  for (let i = 0; i < 260; i++) {
-    const a = rng() * Math.PI * 2;
-    const d = 6 + Math.sqrt(rng()) * (WORLD_RADIUS - 10);
-    const x = Math.cos(a) * d;
-    const z = Math.sin(a) * d;
-    if (BUILDINGS.some((b) => inRect(x, z, b, 1)) || Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r + 1) continue;
-    flowers.push({ x, z, c: Math.floor(rng() * 5), s: 0.7 + rng() * 0.6 });
-  }
-  return { trees, flowers };
-}
-
 // ── Collision ──────────────────────────────────────────────────────────
-// props: solid town dressing from shared/props.js (passed in to avoid a circular import).
-export function buildColliders(nodes, scenery, props = []) {
-  const rects = BUILDINGS.map((b) => ({ x: b.x, z: b.z, w: b.w, d: b.d })).concat(gateColliders());
-  const circles = [{ x: FOUNTAIN.x, z: FOUNTAIN.z, r: FOUNTAIN.r }];
-  for (const n of nodes) {
+// Everything solid in the current world: building footprints and gatehouse
+// walls as rectangles; fountains, standing nodes and solid props as circles.
+export function buildColliders() {
+  const rects = BUILDINGS.map((b) => ({ x: b.x, z: b.z, w: b.w, d: b.d })).concat(GATES.flatMap((g) => gateColliders(g)));
+  const circles = FOUNTAINS.map((f) => ({ x: f.x, z: f.z, r: f.r }));
+  for (const n of NODES) {
     const t = NODE_TYPES[n.type];
     if (t.r > 0) circles.push({ x: n.x, z: n.z, r: t.r * n.s });
   }
-  for (const t of scenery.trees) if (t.solid) circles.push({ x: t.x, z: t.z, r: 0.8 * t.s });
-  for (const p of props) if (p.r > 0) circles.push({ x: p.x, z: p.z, r: p.r });
+  for (const p of PROPS) if (p.r > 0) circles.push({ x: p.x, z: p.z, r: p.r });
   return { rects, circles };
 }
 
@@ -197,9 +199,8 @@ const PLAYER_R = 0.45;
 
 export function isWalkable(x, z, col) {
   if (Math.hypot(x, z) > WORLD_RADIUS) return false;
-  // Lake is water, except for the dock.
-  const inDock = Math.abs(x - DOCK.x) < DOCK.w / 2 && Math.abs(z - DOCK.z) < DOCK.d / 2;
-  if (!inDock && Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.r + 0.3) return false;
+  // Lakes are water, except where a dock runs over them.
+  if (LAKES.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + 0.3) && !DOCKS.some((d) => Math.abs(x - d.x) < d.w / 2 && Math.abs(z - d.z) < d.d / 2)) return false;
   for (const r of col.rects) if (inRect(x, z, r, PLAYER_R)) return false;
   for (const c of col.circles) if ((x - c.x) ** 2 + (z - c.z) ** 2 < (c.r + PLAYER_R) ** 2) return false;
   return true;
@@ -207,10 +208,9 @@ export function isWalkable(x, z, col) {
 
 // ── Navigation grid + A* ───────────────────────────────────────────────
 const CELL = 1;
-const HALF = WORLD_RADIUS + 2;
 
-// The town uses the defaults; a shop interior passes its own small grid and
-// walkable test (shared/shop.js).
+// The world uses the defaults (sized to the current map); a shop interior
+// passes its own small grid and walkable test (shared/shop.js).
 export class NavGrid {
   constructor(col, { half = HALF, cell = CELL, walkable = isWalkable, margin = 0.2 } = {}) {
     this.col = col;

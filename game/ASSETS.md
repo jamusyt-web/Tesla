@@ -8,6 +8,8 @@ Hearthvale mixes three kinds of art:
 | **World models** (trees, rocks, buildings, props, creatures, item icons) | `.glb` files in `client/public/models/`, listed in `client/src/scene/manifest.js` | Editing the manifest (below) |
 | **Everything else** (ground, water, sky, effects, UI) | Built in code: `client/src/scene/town.js`, `fx.js`, `style.css` | Code |
 
+*Where* things stand in the world is separate from what they look like: positions live in the world map, `maps/world.json` (see the README). A prop there names a model slot from the manifest, so swapping a slot's model changes every copy placed in the map.
+
 Every imported model is drawn with the game's own look: cel shading, ink outlines and a colour grade (`client/src/scene/assets.js`, plus the whole-screen grade in `client/src/scene/grade.js`). That's why models from different sources still feel like one game.
 
 ## Swapping in your own model (or one from an AI generator)
@@ -57,7 +59,7 @@ Buildings are snapped together from Kenney's modular Fantasy Town Kit pieces in 
 
 The Wilds gate is assembled from castle-kit pieces the same way.
 
-- **Replacing a building:** to use a single model of your own instead, have `buildModular()` return your model for that building id. Keep it inside the building's footprint in `shared/world.js`, because that footprint is what players collide with.
+- **Replacing a building:** to use a single model of your own instead, have `buildModular()` return your model for that building id. Keep it inside the building's footprint (`w` × `d` in `maps/world.json`), because that footprint is what players collide with.
 
 ## Re-importing asset packs
 

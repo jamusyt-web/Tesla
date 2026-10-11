@@ -127,7 +127,7 @@ export const MODELS = {
   deco_rock_small: { url: ['stone_smallA', 'stone_smallB', 'stone_smallD', 'stone_smallG', 'stone_smallI', 'stone_smallFlatA'].map(NK), width: 0.9 },
   deco_lily_pad: { url: [NK('lily_large'), NK('lily_small')], width: 1.1, outline: false },
 
-  // ── Props (placed by shared/props.js) ──────────────────────────────
+  // ── Props (placed in the world map, maps/world.json) ───────────────
   prop_barrel: { url: PIR('barrel'), height: 1.1 },
   prop_barrel_alt: { url: PLA('barrel'), height: 1.1 },
   prop_crate: { url: [PLA('crate'), PLA('crate-strong')], height: 1.0 },
