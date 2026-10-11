@@ -26,10 +26,12 @@ export class WorldMap {
     this.isOpen ? this.close() : this.open();
   }
 
-  open() {
+  // opts.select: a waystone to show the travel card for.
+  open(opts = {}) {
     const g = this.hud.game;
     if (this.el || !g?.me) return;
     if (g.battle) return this.hud.toast("You're in a battle!", 'err');
+    if (g.craft || this.hud.fight) return this.hud.toast("You're busy right now.", 'err');
     if (g.room) return this.hud.toast('Step out of the shop to see the world map.', 'err');
     this.hud.panels.close();
     this.canvas = h('canvas');
@@ -58,7 +60,8 @@ export class WorldMap {
     this.timer = setInterval(() => this.draw(), 250); // other heroes move
     sfx.pop();
     const here = this.#here();
-    if (here) this.#select({ stone: here.id });
+    const pick = opts.select && opts.select !== here?.id ? opts.select : here?.id;
+    if (pick) this.#select({ stone: pick });
   }
 
   close() {
@@ -382,7 +385,7 @@ export class WorldMap {
     const [mx, my] = this.#toScreen(me.x, me.z);
     x.save();
     x.translate(mx, my);
-    x.rotate(-g.cam.yaw + Math.PI);
+    x.rotate(-(g.cam.curYaw ?? g.cam.yaw));
     x.beginPath();
     x.moveTo(0, -11);
     x.lineTo(8, 8);
@@ -447,7 +450,7 @@ export class WorldMap {
     if (!here) {
       const near = this.#nearestStone(me);
       card.append(h('div.note', 'Fast travel works from a waystone. Walk to one, then pick where to go.'));
-      if (near && near.id !== st.id) row.append(h('button.btn.small.blue', { on: { click: () => this.#walkToStone(near, { reopen: true }) } }, glyph('waystone'), `Nearest: ${near.name}`));
+      if (near && near.id !== st.id) row.append(h('button.btn.small.blue', { on: { click: () => this.#walkToStone(near, { reopen: { select: st.id } }) } }, glyph('waystone'), `Nearest: ${near.name}`));
       row.append(walkBtn());
       return;
     }

@@ -9,6 +9,7 @@ import { MARKET_TAX as TAX } from '../../../shared/economy.js';
 import { SHOP_PANELS } from './shop-panels.js';
 import { glyph } from './glyphs.js';
 import { BUILDINGS, doorPoint } from '../../../shared/world.js';
+import { inYard, spotsOf } from '../../../shared/stations.js';
 
 const NPC_RATE = 0.6;
 
@@ -56,7 +57,7 @@ export class Panels {
     this.hud.worldMap?.close();
     const body = h('div.panel-body');
     const titleEl = h('h3');
-    const place = this.#placeFor(name);
+    const place = this.#placeFor(name, args);
     const walk = place ? h('button.walk', { title: `Walk to the ${place.label}`, on: { click: () => (this.close(), this.hud.travel(place.id)) } }, glyph('run'), h('span', 'Walk there')) : null;
     const panel = h('div.panel' + (['profile', 'result'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, walk, h('button.close', { 'aria-label': 'Close', on: { click: () => this.close() } }, '✕')), body);
     const scrim = h('div.scrim', { on: { pointerdown: (e) => e.target === scrim && this.close() } }, panel);
@@ -69,10 +70,11 @@ export class Panels {
 
   // A building panel opened from afar (the dock opens them anywhere): the
   // nearest building it belongs to, so you can still walk over.
-  #placeFor(name) {
+  #placeFor(name, args) {
     const g = this.hud.game;
     if (!g?.me || g.room) return null;
     const p = g.myPos();
+    if (name === 'craft' && (args.station || inYard(p.x, p.z))) return null; // already at the stations
     let best = null;
     for (const b of BUILDINGS) {
       if (b.deco || b.action !== name || b.action === 'shop') continue;
@@ -167,6 +169,22 @@ export class Panels {
 
   rpc(m, a, okText) {
     return this.#rpc(m, a, okText);
+  }
+
+  // Quick craft happens in the Workshop yard: opened from afar (the dock),
+  // walk over first, then make it.
+  #quickCraft(r, n, out, load) {
+    const go = () =>
+      this.rpc('craft.quick', { recipe: r.id, times: n })
+        .then((res) => (this.hud.toast(`${res.qty}× ${out.name} (fee ${res.fee} 🪙)`, 'good'), this.hud.onXp(res.xp), this.cur?.name === 'craft' && load()))
+        .catch(() => {});
+    const g = this.hud.game;
+    const p = g.myPos();
+    if (inYard(p.x, p.z)) return go();
+    const sp = spotsOf(r.station)[0];
+    this.close();
+    if (!g.walkTo(sp.x, sp.z, true, go)) return this.hud.toast("Can't reach the Workshop yard.", 'err');
+    this.hud.toast('Off to the Workshop yard…');
   }
 
   async #rpc(m, a, okText) {
@@ -271,7 +289,7 @@ export class Panels {
               'div.row.wrap',
               h('button.btn.green', { disabled: afford < 1, on: { click: (e) => (e.stopPropagation(), this.close(), this.hud.game?.goCraft(r.id, n)) } }, `${STATIONS[r.station].icon} ${STATIONS[r.station].verb} it`),
               stackable && m?.quick
-                ? h('button.btn.blue.small', { disabled: afford < 1, on: { click: (e) => (e.stopPropagation(), this.rpc('craft.quick', { recipe: r.id, times: n }).then((res) => (this.hud.toast(`${res.qty}× ${out.name} (fee ${res.fee} 🪙)`, 'good'), this.hud.onXp(res.xp), load()))) } }, `Quick ×${n}`)
+                ? h('button.btn.blue.small', { disabled: afford < 1, on: { click: (e) => (e.stopPropagation(), this.#quickCraft(r, n, out, load)) } }, `Quick ×${n}`)
                 : null,
             ),
           ),

@@ -107,6 +107,7 @@ export function mapProblems(m) {
       if (k === 'buildings' && !(e.w > 0 && e.d > 0)) out.push(`${where} needs a positive w and d.`);
       if (k === 'lands' && !(e.r >= 5)) out.push(`${where} needs a radius r of at least 5.`);
       if (k === 'stones' && (typeof e.name !== 'string' || !e.name.trim())) out.push(`${where} needs a name.`);
+      if (k === 'stones' && e.rot != null && !Number.isFinite(e.rot)) out.push(`${where} needs a numeric rot (the way it faces, in radians).`);
     });
   }
   return out;
@@ -130,11 +131,15 @@ export function upgradeMap(m) {
     out.lands ??= [{ id: 'island', x: 0, z: 0, r: bounds?.r ?? 96 }];
     m = out;
   }
-  // Maps from before fast travel: add the starter waystones (unless something
-  // already uses their ids).
+  // Maps from before fast travel: add the starter waystones, where they still
+  // fit (on land, clear of buildings) and unless something uses their ids.
   if (m?.format === 2 && !m.stones) {
     const used = new Set(LISTS.flatMap((k) => (Array.isArray(m[k]) ? m[k].map((e) => e?.id) : [])));
-    m = { ...m, stones: FIRST_STONES.filter((s) => !used.has(s.id)).map((s) => ({ ...s })) };
+    const lands = Array.isArray(m.lands) ? m.lands : [];
+    const builds = Array.isArray(m.buildings) ? m.buildings : [];
+    const fits = (x, z) => lands.some((l) => Math.hypot(x - l.x, z - l.z) < l.r - 3) && !builds.some((b) => inRect(x, z, b, 2));
+    const ok = (s) => !used.has(s.id) && fits(s.x, s.z) && fits(...stoneFront(s));
+    m = { ...m, stones: FIRST_STONES.filter(ok).map((s) => ({ ...s })) };
   }
   return m;
 }

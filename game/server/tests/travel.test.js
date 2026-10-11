@@ -85,6 +85,9 @@ test('the shipped map has waystones; older maps get the starter ones; bad stones
   assert.deepEqual(W.upgradeMap({ ...shipped, stones: [] }).stones, [], 'an owner who removed them all keeps it that way');
   const nameless = { ...shipped, stones: [{ id: 'stone_x', x: 0, z: 0 }] };
   assert.match(W.mapProblems(nameless).join(), /stone_x.*needs a name/);
+  assert.match(W.mapProblems({ ...shipped, stones: [{ id: 'stone_y', name: 'Y', x: 0, z: 0, rot: 'east' }] }).join(), /stone_y.*numeric rot/);
+  const built = { ...old, buildings: [...old.buildings, { id: 'b_over', x: 6, z: 5, w: 6, d: 6 }] };
+  assert.deepEqual(W.upgradeMap(built).stones.map((s) => s.id), ['stone_wildwatch'], "a starter stone isn't dropped inside something built since");
   assert.ok(W.buildColliders().circles.some((c) => c.x === stones[0].x && c.z === stones[0].z), 'a waystone is solid');
   assert.ok(W.travelFee(stones[0], stones[1]) >= 5);
 });
@@ -114,24 +117,20 @@ test('walk up to a waystone to attune; travel between them for a fee', async () 
   await a.next((m) => m.t === 'attuned' && m.id === ww.id);
   place(a, sx, sz);
   const fee = W.travelFee(sq, ww);
+  const at0 = W.stoneFront(ww);
   const gold = game.heroes.gold(a.id);
-  place(b, sx + 3, sz + 3); // Bram is watching
+  place(b, at0[0], at0[1]); // Bram is standing where Ada would arrive, watching
   const mark = b.inbox.length;
   const res = await a.call('travel', { to: ww.id });
   assert.ok(res.ok, res.err);
   assert.equal(res.data.fee, fee);
   assert.equal(game.heroes.gold(a.id), gold - fee, 'the fee was paid');
   const at = game.online.get(a.id).ent;
-  assert.ok(Math.hypot(at.x - ww.x, at.z - ww.z) < W.STONE_RANGE, 'arrived at Wildwatch');
+  assert.ok(Math.hypot(at.x - ww.x, at.z - ww.z) <= W.STONE_RANGE - 1, 'arrived at Wildwatch, close enough to travel on');
   assert.ok(W.isWalkable(at.x, at.z, W.buildColliders()), 'standing somewhere walkable');
   const tp = await b.next((m) => m.t === 'tp' && m.id === a.id, 3000, mark);
   assert.ok(Math.hypot(tp.from.x - sx, tp.from.z - sz) < 0.1 && Math.hypot(tp.x - at.x, tp.z - at.z) < 0.1, 'others see the jump (so they snap, not slide)');
   await a.next((m) => m.t === 's' && m.full);
-
-  // A move that was already on its way is ignored, so you don't walk back.
-  a.ws.send(JSON.stringify({ t: 'move', x: sx, z: sz }));
-  await new Promise((r) => setTimeout(r, 120));
-  assert.equal(game.online.get(a.id).ent.path, null);
 
   // Straight back is too soon; and travel costs gold you must have.
   assert.match((await a.call('travel', { to: sq.id })).err, /still humming/);

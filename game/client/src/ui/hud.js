@@ -463,6 +463,7 @@ export class Hud {
   // Runs the shared deterministic sim at a fixed 60 Hz and records the ticks
   // where the button toggled; the server replays those to confirm the catch.
   startFight(bite, onDone) {
+    this.worldMap.close();
     this.endFight();
     const state = newFight(bite.fish, bite.gear);
     const toggles = [];
@@ -628,7 +629,7 @@ export class Hud {
     // Player arrow in the centre, pointing where the camera faces.
     x.save();
     x.translate(128, 128);
-    x.rotate(-this.game.cam.yaw + Math.PI);
+    x.rotate(-(this.game.cam.curYaw ?? this.game.cam.yaw));
     x.fillStyle = '#ffd84a';
     x.strokeStyle = '#7a3f1c';
     x.lineWidth = 3;
@@ -652,7 +653,8 @@ export class Hud {
     if (!g?.me || g.room) return;
     const p = g.myPos();
     const raw = placeAt(p.x, p.z);
-    const keep = (old, now) => (old && old !== now && Math.hypot(p.x - old.x, p.z - old.z) < old.r + 3 ? old : now);
+    // Slack only when leaving for somewhere bigger (or nowhere): a smaller area inside is announced at once.
+    const keep = (old, now) => (old && old !== now && (!now || now.r >= old.r) && Math.hypot(p.x - old.x, p.z - old.z) < old.r + 3 ? old : now);
     const prev = this.place;
     const zone = keep(prev?.zone, raw.zone);
     const region = keep(prev?.region, raw.region);

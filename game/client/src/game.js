@@ -191,6 +191,7 @@ export class GameClient {
     }
   }
   #beginCraft(st, recipe, batch) {
+    this.hud.worldMap.close();
     this.craft = { ...st, recipe, batch };
     const L = this.me.local;
     L.path = [[st.spot.x, st.spot.z]];
@@ -774,7 +775,7 @@ export class GameClient {
         this.actionKey();
         return;
       }
-      if (k === 'm') return this.hud.worldMap.toggle();
+      if (k === 'm') return !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && this.hud.worldMap.toggle();
       if (k === 'escape' && this.hud.worldMap.isOpen) return this.hud.worldMap.close();
       if (k === 'q') this.cam.yaw += 0.3;
       if (k === 'r') this.cam.yaw -= 0.3;
@@ -1217,7 +1218,7 @@ export class GameClient {
     const st = stoneById(id);
     if (!st || this.battle) return false;
     const L = this.me.local;
-    const arrive = () => openMap && this.hud.worldMap.open();
+    const arrive = () => openMap && this.hud.worldMap.open(typeof openMap === 'object' ? openMap : {});
     if (Math.hypot(L.x - st.x, L.z - st.z) < STONE_RANGE - 1) return arrive(), true;
     this.stopGather();
     const [fx, fz] = stoneFront(st, 2);

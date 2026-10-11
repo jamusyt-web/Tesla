@@ -6,7 +6,7 @@ import { MONSTERS, heroStats, damage } from '../shared/monsters.js';
 import {
   NODES, SPAWNS, buildColliders, NavGrid, NODE_TYPES, stepPath,
   INTERACT_RANGE, FISH_RANGE, SPAWN, isWalkable, WORLD_RADIUS, isDeepSpot, SWING_FLOOR, isPerfectSwing,
-  stoneById, stoneNear, stoneFront, travelFee,
+  stoneById, stoneNear, stoneFront, travelFee, STONE_RANGE,
 } from '../shared/world.js';
 import { rollFish, fishingGear, fightRating, replayFight, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
 import { GameError, fail } from './db.js';
@@ -103,14 +103,15 @@ class Channel {
   }
 
   // A free spot at or near (x, z), so nobody materialises inside another hero.
-  freeSpot(x, z, except = null) {
+  // `ok` can veto candidate spots (the original spot is always allowed).
+  freeSpot(x, z, except = null, ok = () => true) {
     const crowded = (px, pz) => [...this.players.values()].some((o) => o !== except && !o.room && Math.hypot(o.ent.x - px, o.ent.z - pz) < 1.3);
     for (let k = 0; k < 40 && crowded(x, z); k++) {
       const a = Math.random() * Math.PI * 2;
       const d = 1.5 + Math.random() * 3.5;
       const nx = x + Math.cos(a) * d;
       const nz = z + Math.sin(a) * d;
-      if (isWalkable(nx, nz, STATIC.col) && !crowded(nx, nz)) [x, z] = [nx, nz];
+      if (isWalkable(nx, nz, STATIC.col) && !crowded(nx, nz) && ok(nx, nz)) [x, z] = [nx, nz];
     }
     return [x, z];
   }
@@ -708,12 +709,13 @@ export class Game {
     if (this.heroes.gold(c.hero.id) < fee) fail(`Travelling to ${dest.name} costs ${fee} gold.`);
     const [fx, fz] = stoneFront(dest);
     const open = isWalkable(fx, fz, STATIC.col) ? [fx, fz] : STATIC.nav.nearestOpen(fx, fz);
-    if (!open) fail("That waystone's way is blocked.");
+    if (!open || Math.hypot(open[0] - dest.x, open[1] - dest.z) > STONE_RANGE) fail("That waystone's way is blocked.");
     this.heroes.addGold(c.hero.id, -fee);
     c.cancelFishing();
     const e = c.ent;
     const from = { x: e.x, z: e.z };
-    [e.x, e.z] = c.ch.freeSpot(open[0], open[1], c);
+    // Make room if someone's standing there, but stay at the stone, on this side of any wall.
+    [e.x, e.z] = c.ch.freeSpot(open[0], open[1], c, (nx, nz) => Math.hypot(nx - dest.x, nz - dest.z) <= STONE_RANGE - 1 && STATIC.nav.clear(open[0], open[1], nx, nz));
     Object.assign(e, { path: null, act: 'idle', rot: dest.rot ?? 0 });
     c.lastTravel = now;
     this.heroes.savePos(c.hero.id, e.x, e.z);
@@ -1033,7 +1035,6 @@ const HANDLERS = {
     if (c.battle || c.craft) return;
     if ((m.v === 'room') !== !!c.room) return; // a stale move from the other view
     if (now - (c.lastMove || 0) < 80) return; // pathfinding is the expensive bit; cap it
-    if (now - (c.lastTravel || 0) < 600) return; // sent before the client saw it travel: don't walk back
     c.lastMove = now;
     const x = num(m.x);
     const z = num(m.z);

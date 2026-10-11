@@ -107,6 +107,8 @@ class Editor {
     return sel ? this.list(sel.kind).find((e) => e.id === sel.id) ?? null : null;
   }
   newId(kind) {
+    // Heroes remember waystones by id: never hand a new stone an old one's id.
+    if (kind === 'stones') return `stone_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
     const used = new Set(KIND_KEYS.flatMap((k) => this.list(k).map((e) => e.id)));
     const pre = KINDS[kind].prefix;
     let n = 0;
