@@ -4,10 +4,10 @@ import { portrait, itemIcon } from './portrait.js';
 import { ITEMS, RARITY, CATEGORIES } from '../../../shared/items.js';
 import { RECIPES } from '../../../shared/recipes.js';
 import { SKILLS, SKILL_IDS, levelProgress, levelFromXp } from '../../../shared/skills.js';
+import { MARKET_TAX as TAX } from '../../../shared/economy.js';
+import { SHOP_PANELS } from './shop-panels.js';
 
 const NPC_RATE = 0.6;
-const TAX = 0.04;
-const SHOP_SLOTS = 8;
 
 // 3D-rendered icon when the item has a model, emoji otherwise.
 export const iconEl = (id, size = null) => {
@@ -53,7 +53,7 @@ export class Panels {
     const scrim = h('div.scrim', { on: { pointerdown: (e) => e.target === scrim && this.close() } }, panel);
     this.hud.el.append(scrim);
     this.cur = { name, scrim, body, titleEl, args, refresh: null, onClose: null };
-    const fn = this['p_' + name];
+    const fn = this['p_' + name] || SHOP_PANELS[name];
     if (fn) fn.call(this, this.cur, args);
     sfx.pop();
   }
@@ -138,6 +138,10 @@ export class Panels {
     } catch (e) {
       this.hud.toast(e.message, 'err');
     }
+  }
+
+  rpc(m, a, okText) {
+    return this.#rpc(m, a, okText);
   }
 
   async #rpc(m, a, okText) {
@@ -465,195 +469,11 @@ export class Panels {
   }
 
   // ── Your Shop ──────────────────────────────────────────────────────
-  p_shop(c) {
-    this.title(c, `🏪 ${this.hud.myName}'s Shop`);
-    this.sock.rpc('shop.live', { on: true }).catch(() => {});
-    this.customers = new Map();
-    c.onClose = () => {
-      this.sock.rpc('shop.live', { on: false }).catch(() => {});
-      this.customers = null;
-      this.custEl = null;
-    };
-    let slots = [];
-    let editing = null;
-    const custEl = h('div.customers');
-    this.custEl = custEl;
-    const shelvesEl = h('div.shelves');
-    const editEl = h('div');
-    c.body.append(
-      h('div.muted', { style: { marginBottom: '8px' } }, 'Stock your shelves. Customers visit while you’re here (serve them yourself for the best deals!), and shoppers keep buying slowly while you’re away. Other players can buy from you too.'),
-      h('div.section-title', 'Customers'),
-      custEl,
-      h('div.section-title', 'Shelves'),
-      shelvesEl,
-      editEl,
-    );
-    this.#renderCustomers();
-    const load = async () => {
-      try {
-        slots = (await this.sock.rpc('shop.get')).slots;
-      } catch {}
-      draw();
-    };
-    const draw = () => {
-      clear(shelvesEl);
-      for (let i = 0; i < SHOP_SLOTS; i++) {
-        const s = slots.find((x) => x.slot === i);
-        shelvesEl.append(
-          s
-            ? h('div.shelf', { on: { click: () => ((editing = i), drawEdit()) } }, h('div.ic', iconEl(s.item, '48px')), h('div.nm', ITEMS[s.item].name), h('div.pr', `${s.price} 🪙`), h('div.muted', `×${s.qty}`))
-            : h('div.shelf.empty', { on: { click: () => ((editing = i), drawEdit()) } }, '＋ Stock'),
-        );
-      }
-      drawEdit();
-    };
-    const drawEdit = () => {
-      clear(editEl);
-      if (editing == null) return;
-      const s = slots.find((x) => x.slot === editing);
-      const box = h('div.detail');
-      editEl.append(box);
-      if (s) {
-        const it = ITEMS[s.item];
-        const price = qtyInput(s.price, 1e6);
-        const add = qtyInput(Math.max(1, this.me.inv[s.item] || 1), 9999);
-        box.append(
-          h('div.row', h('div', { style: { fontSize: '36px' } }, it.icon), h('div', h('b', it.name), h('div.muted', `${s.qty} on shelf · base value ${it.value} 🪙`))),
-          h('div.row', { style: { marginTop: '8px', flexWrap: 'wrap' } }, h('label.qty', 'Price ', price), h('button.btn.small', { on: { click: () => this.#rpc('shop.price', { slot: s.slot, price: +price.value }, 'Price updated').then((r) => ((slots = r.slots), draw())) } }, 'Set price')),
-          this.me.inv[s.item] ? h('div.row', { style: { marginTop: '8px' } }, h('label.qty', 'Add ', add), h('button.btn.green.small', { on: { click: () => this.#rpc('shop.stock', { slot: s.slot, item: s.item, qty: +add.value, price: +price.value }, 'Restocked!').then((r) => ((slots = r.slots), draw())) } }, 'Restock')) : null,
-          h('button.btn.red.small', { style: { marginTop: '8px' }, on: { click: () => this.#rpc('shop.unstock', { slot: s.slot }, 'Back in your bag.').then((r) => ((slots = r.slots), (editing = null), draw())) } }, 'Take back'),
-        );
-      } else {
-        const inv = Object.entries(this.me.inv).filter(([id, n]) => n > 0 && ITEMS[id] && !(Object.values(this.me.equip).includes(id) && n <= 1));
-        if (!inv.length) return box.append(h('div.empty', 'Your bag is empty — gather or craft something to sell!'));
-        let pick = null;
-        const form = h('div');
-        box.append(h('b', `Shelf ${editing + 1}: choose an item`), h('div.grid', { style: { marginTop: '8px' } }, ...inv.map(([id, n]) => itemSlot(id, n, { on: () => ((pick = id), drawForm()) }))), form);
-        const drawForm = () => {
-          clear(form);
-          if (!pick) return;
-          const it = ITEMS[pick];
-          const max = this.me.inv[pick] - (Object.values(this.me.equip).includes(pick) ? 1 : 0);
-          const qty = qtyInput(max, max);
-          const price = qtyInput(it.value, 1e6);
-          form.append(
-            h('div.row', { style: { marginTop: '10px', flexWrap: 'wrap' } }, h('b', `${it.icon} ${it.name}`), h('label.qty', 'Qty ', qty), h('label.qty', 'Price ', price)),
-            h('div.row', { style: { marginTop: '6px', flexWrap: 'wrap' } }, h('span.muted', 'Quick price:'), ...[[1, 'Fair'], [1.25, '+25%'], [1.5, '+50%']].map(([m, l]) => h('button.chip', { on: { click: () => (price.value = Math.round(it.value * m)) } }, `${l} (${Math.round(it.value * m)})`))),
-            h('button.btn.green', { style: { marginTop: '10px' }, on: { click: () => this.#rpc('shop.stock', { slot: editing, item: pick, qty: +qty.value, price: +price.value }, `${it.name} is on the shelf!`).then((r) => ((slots = r.slots), (editing = null), sfx.coin(), draw())) } }, 'Put on shelf'),
-          );
-        };
-      }
-    };
-    c.refresh = () => drawEdit();
-    load();
-    this.reloadShop = load;
-  }
-
-  customerArrived(cu) {
-    if (!this.customers) return;
-    this.customers.set(cu.id, { ...cu, arrived: performance.now() });
-    sfx.bell();
-    this.#renderCustomers();
-  }
-  customerLeft(id) {
-    if (!this.customers) return;
-    this.customers.delete(id);
-    this.#renderCustomers();
-  }
-
-  #renderCustomers() {
-    const el = this.custEl;
-    if (!el) return;
-    clear(el);
-    if (!this.customers.size) {
-      el.append(h('div.muted', { style: { padding: '6px' } }, '…waiting for customers. (Stock a shelf to attract shoppers!)'));
-      return;
-    }
-    for (const cu of this.customers.values()) {
-      const it = ITEMS[cu.item];
-      const fill = h('i', { style: { width: '100%' } });
-      const left = cu.leaveIn - (performance.now() - cu.arrived);
-      fill.animate([{ width: `${(100 * left) / cu.leaveIn}%` }, { width: '0%' }], { duration: Math.max(0, left), fill: 'forwards' });
-      const deal = cu.offer >= cu.listed ? `wants ${it.icon} ${it.name} for ${cu.offer} 🪙` : `offers ${cu.offer} 🪙 for ${it.icon} ${it.name} (you list ${cu.listed})`;
-      const serve = async (action) => {
-        try {
-          const r = await this.sock.rpc('shop.serve', { id: cu.id, action });
-          if (r.sale) {
-            sfx.coin();
-            this.hud.toast(`💰 Sold ${it.name} to ${cu.name} for ${r.sale.gold} 🪙`, 'gold');
-            this.customers.delete(cu.id);
-            this.reloadShop?.();
-          } else if (r.haggle === 'up') {
-            sfx.level();
-            cu.offer = r.offer;
-            cu.haggled = true;
-            this.hud.toast(`😄 ${cu.name}: "Fine, ${r.offer} 🪙 it is!"`, 'good');
-          } else if (r.haggle === 'left') {
-            this.hud.toast(`😤 ${cu.name} stormed off!`, 'err');
-            this.customers.delete(cu.id);
-          } else this.customers.delete(cu.id);
-          this.#renderCustomers();
-        } catch (e) {
-          this.hud.toast(e.message, 'err');
-          this.customers.delete(cu.id);
-          this.#renderCustomers();
-        }
-      };
-      el.append(
-        h(
-          'div.customer',
-          h('div.face', cu.face),
-          h('div.grow', { style: { flex: 1, minWidth: 0 } }, h('b', cu.name), h('div', { style: { fontSize: '14px' } }, deal), h('div.patience', fill)),
-          h('div.acts', h('button.btn.green.small', { on: { click: () => serve('sell') } }, 'Sell'), !cu.haggled ? h('button.btn.purple.small', { on: { click: () => serve('haggle') } }, 'Haggle') : null, h('button.btn.plain.small', { on: { click: () => serve('decline') } }, '✕')),
-        ),
-      );
-    }
-  }
-
-  // ── Visiting another player's shop ─────────────────────────────────
-  p_visit(c, { id, name }) {
-    this.title(c, `🏪 ${name}'s Shop`);
-    const wrap = h('div');
-    c.body.append(wrap);
-    const draw = (slots) => {
-      clear(wrap);
-      if (!slots.length) return wrap.append(h('div.empty', h('div.big', '🕸️'), 'The shelves are empty right now.'));
-      for (const s of slots) {
-        const it = ITEMS[s.item];
-        const q = qtyInput(1, s.qty);
-        wrap.append(
-          h(
-            'div.rowcard',
-            h('div.ic', it.icon),
-            h('div.grow', h('div.t', it.name), h('div.s', `${s.qty} in stock · ${s.price} 🪙 each (base ${it.value})`)),
-            h('div.qty', q),
-            h('button.btn.green.small', {
-              on: {
-                click: async () => {
-                  try {
-                    const r = await this.sock.rpc('shop.buy', { owner: id, slot: s.slot, qty: +q.value });
-                    sfx.coin();
-                    this.hud.toast(`Bought ${r.sale.qty}× ${it.name} for ${r.sale.gold} 🪙`, 'gold');
-                    draw(r.slots);
-                  } catch (e) {
-                    this.hud.toast(e.message, 'err');
-                  }
-                },
-              },
-            }, 'Buy'),
-          ),
-        );
-      }
-    };
-    this.sock.rpc('shop.get', { owner: id }).then((r) => draw(r.slots)).catch((e) => this.hud.toast(e.message, 'err'));
-  }
-
   // ── Town Hall ──────────────────────────────────────────────────────
   p_townhall(c, args) {
     this.title(c, '🏛️ Town Hall');
     let tab = args.tab || 'online';
     let info = null;
-    let shops = null;
     const tabs = [['online', '🟢 Online'], ['shops', '🏪 Shops'], ['leaders', '🏆 Leaders'], ['channels', '🌐 Channels'], ['invites', '🎟️ Invites']];
     const render = () => {
       clear(c.body);
@@ -664,13 +484,7 @@ export class Panels {
         for (const p of info.online)
           c.body.append(h('div.rowcard', h('div.ic', '🧑'), h('div.grow', h('div.t', p.name, p.id === this.hud.myId ? ' (you)' : ''), h('div.s', `Level ${p.level} · Channel ${p.channel}`)), p.id !== this.hud.myId ? h('button.btn.small', { on: { click: () => this.open('profile', { id: p.id }) } }, 'View') : null));
       } else if (tab === 'shops') {
-        if (!shops) {
-          this.sock.rpc('shop.directory').then((s) => ((shops = s), render()));
-          return c.body.append(h('div.empty', 'Loading…'));
-        }
-        if (!shops.length) return c.body.append(h('div.empty', h('div.big', '🏪'), 'No shops are stocked yet. Be the first!'));
-        for (const s of shops)
-          c.body.append(h('div.rowcard', h('img', { src: portrait(s.avatar), style: { width: '48px', height: '48px', borderRadius: '12px', background: '#bfe8ff' } }), h('div.grow', h('div.t', `${s.name}'s Shop`), h('div.s', `${s.slots} shelves · ${fmt(s.items)} items`)), s.id !== this.hud.myId ? h('button.btn.green.small', { on: { click: () => this.open('visit', { id: s.id, name: s.name }) } }, 'Visit') : h('span.muted', 'yours')));
+        return this.open('shops');
       } else if (tab === 'leaders') {
         c.body.append(h('div.section-title', '💰 Richest'), ...info.rich.map((r, i) => h('div.kv', h('span', `${['🥇', '🥈', '🥉'][i] || i + 1 + '.'} ${r.name}`), h('b.gold', `${fmt(r.gold)} 🪙`))));
         c.body.append(h('div.section-title', '⭐ Most experienced'), ...info.levels.map((r, i) => h('div.kv', h('span', `${['🥇', '🥈', '🥉'][i] || i + 1 + '.'} ${r.name}`), h('b', `${fmt(r.total)} XP`))));
@@ -724,7 +538,7 @@ export class Panels {
             'div.row',
             { style: { marginTop: '12px', flexWrap: 'wrap', justifyContent: 'center' } },
             h('button.btn.small', { on: { click: () => (this.hud.game?.sendEmote('wave'), this.close()) } }, '👋 Wave'),
-            p.shop ? h('button.btn.green.small', { on: { click: () => this.open('visit', { id: p.id, name: p.name }) } }, '🏪 Visit shop') : null,
+            p.shop && (p.shopOpen || p.id === this.hud.myId) ? h('button.btn.green.small', { on: { click: () => (this.close(), this.hud.game?.enterShop(p.id)) } }, '🏪 Visit shop') : null,
             p.online && p.channel !== this.hud.channel ? h('button.btn.blue.small', { on: { click: () => this.#rpc('channel.switch', { id: p.channel }).then(() => this.close()) } }, '🌐 Join their channel') : null,
           ),
         );

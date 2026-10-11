@@ -18,7 +18,7 @@ const TUTORIAL_TEXT = [
   { text: 'Chop a tree in Whisperwood', hint: 'Tap a tree, then tap again in rhythm to swing your axe!', target: 'tree' },
   { text: 'Craft Oak Planks at the Workshop', hint: 'Bring your logs to the 🔨 Workshop.', target: 'workshop' },
   { text: 'Defeat a Meadow Slime', hint: 'Head through the ⚔️ Wilds Gate to the north.', target: 'slime' },
-  { text: 'Put something on a shelf in Your Shop', hint: 'Visit 🏪 Your Shop and stock a shelf.', target: 'shop' },
+  { text: 'Put something on a display in Your Shop', hint: 'Tap 🏪 Shop, then tap an empty display.', target: 'shop' },
 ];
 
 export class Hud {
@@ -67,10 +67,19 @@ export class Hud {
       dockBtn('🎒', 'Bag', () => this.panels.open('bag')),
       dockBtn('🔨', 'Craft', () => this.travel('workshop')),
       dockBtn('⚖️', 'Market', () => this.travel('market')),
-      dockBtn('🏪', 'Shop', () => this.travel('shop'), this.shopBadge),
+      dockBtn('🏪', 'Shop', () => this.game?.enterShop(this.myId), this.shopBadge),
       dockBtn('🏛️', 'Town', () => this.travel('townhall')),
     );
-    this.el.append(this.dock);
+    // Inside a shop the dock changes: leave, bag, the ledger (yours), other shops.
+    this.ledgerBtn = dockBtn('📒', 'Ledger', () => this.panels.open('ledger'));
+    this.roomDock = h(
+      'div.dock.hidden',
+      dockBtn('🚪', 'Leave', () => this.game?.exitShop()),
+      dockBtn('🎒', 'Bag', () => this.panels.open('bag')),
+      this.ledgerBtn,
+      dockBtn('🏪', 'Shops', () => this.panels.open('shops')),
+    );
+    this.el.append(this.dock, this.roomDock);
 
     this.log = h('div.log');
     this.input = h('input', { placeholder: 'Say something…', maxLength: 140, enterKeyHint: 'send' });
@@ -101,18 +110,27 @@ export class Hud {
       sfx.coin();
       this.#renderQuest();
     });
-    s.on('shopSale', (m) => {
-      const it = ITEMS[m.sale.item];
-      this.toast(`🏪 ${m.sale.buyer} bought ${it.icon} ${it.name} for ${m.sale.gold} 🪙`, 'gold');
-      sfx.coin();
-      this.panels.refresh('shop');
-    });
+    s.on('shopSale', (m) => this.#onShopSale(m));
     s.on('awaySales', (m) => {
-      const total = m.sales.reduce((a, b) => a + b.price, 0);
-      setTimeout(() => this.toast(`🏪 While you were away your shop sold ${m.sales.length} item${m.sales.length > 1 ? 's' : ''} for ${fmt(total)} 🪙!`, 'gold'), 1500);
+      this.setTill(m.till);
+      if (m.awayMs < 10 * 60_000) {
+        // Just a quick tab switch: one line is enough.
+        setTimeout(() => this.toast(`🏪 Your shop made ${m.count} sale${m.count === 1 ? '' : 's'} (+${fmt(m.net)} 🪙)`, 'gold'), 1200);
+        this.sock.rpc('shop.ack', { upto: m.upto }, { auto: true }).catch(() => {});
+      } else setTimeout(() => this.panels.open('away', m), 1200);
     });
-    s.on('customer', (m) => this.panels.customerArrived(m.c));
-    s.on('customerLeft', (m) => this.panels.customerLeft(m.id));
+    s.on('rexit', (m) => {
+      this.game?.closeInterior();
+      this.toast(m.why === 'closed' ? `${m.name || 'The shop'} just closed.` : 'You wandered out of the shop.');
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' || !this.saleBuffer?.length) return;
+      const b = this.saleBuffer;
+      this.saleBuffer = [];
+      const gold = b.reduce((a, x) => a + x.net, 0);
+      this.toast(`🏪 ${b.length} sale${b.length === 1 ? '' : 's'} while you were away from the tab (+${fmt(gold)} 🪙)`, 'gold');
+      this.sock.rpc('shop.ack', { upto: Math.max(...b.map((x) => x.id)) }, { auto: true }).catch(() => {});
+    });
     s.on('kicked', (m) => this.toast(m.reason, 'err'));
   }
 
@@ -125,6 +143,7 @@ export class Hud {
     this.chanEl.textContent = `Ch ${m.channel}`;
     this.channel = m.channel;
     this.setMe(y);
+    this.setTill(y.shop?.till || 0);
     this.#renderFace();
     this.#renderQuest();
     this.#drawMapBase();
@@ -185,6 +204,38 @@ export class Hud {
     }
     this.el.append(wrap);
     setTimeout(() => wrap.remove(), 3800);
+  }
+
+  // Sales from your shop (NPCs and players): one toast per batch, player
+  // purchases and sell-outs called out, the till badge kept current.
+  #onShopSale(m) {
+    this.setTill(m.till);
+    this.game?.room?.setTill(m.till);
+    this.panels.refresh();
+    if (document.visibilityState !== 'visible') {
+      (this.saleBuffer ||= []).push(...m.sales);
+      return;
+    }
+    const npc = m.sales.filter((x) => x.kind !== 'player');
+    for (const x of m.sales.filter((x) => x.kind === 'player')) this.toast(`🧑 ${x.buyer} bought ${x.qty}× ${ITEMS[x.item].name} (+${fmt(x.net)} 🪙)`, 'gold');
+    if (npc.length === 1) this.toast(`🏪 Sold ${npc[0].qty}× ${ITEMS[npc[0].item].name} (+${fmt(npc[0].net)} 🪙)`, 'gold');
+    else if (npc.length > 1) this.toast(`🏪 ${npc.length} sales (+${fmt(npc.reduce((a, x) => a + x.net, 0))} 🪙)`, 'gold');
+    for (const x of m.sales) if (x.left === 0) this.toast(`Your ${ITEMS[x.item].name} sold out!`, 'good');
+    sfx.coin();
+    this.sock.rpc('shop.ack', { upto: m.upto }, { auto: true }).catch(() => {});
+  }
+  setTill(v) {
+    this.till = v || 0;
+    this.shopBadge.textContent = this.till >= 1000 ? `${(this.till / 1000).toFixed(this.till >= 10000 ? 0 : 1)}k` : String(this.till);
+    this.shopBadge.classList.toggle('hidden', !this.till);
+  }
+  // Town vs inside a shop: swap the dock, hide the town-only bits.
+  setMode(mode, { isOwner = false } = {}) {
+    const room = mode === 'room';
+    this.dock.classList.toggle('hidden', room);
+    this.roomDock.classList.toggle('hidden', !room);
+    this.ledgerBtn.style.display = isOwner ? '' : 'none';
+    this.el.classList.toggle('in-room', room);
   }
 
   toast(text, kind = '') {

@@ -2,7 +2,7 @@
 
 A cozy multiplayer economy adventure game for phone and PC. You gather, craft, and run a shop, trade on a player-driven market, and fight monsters with friends, all in one shared, living 3D town.
 
-> Inspired by Hypixel Skyblock (gathering skills), Albion Online (player-driven order-book market), Unison League (social lobby + co-op turn-based fights) and Shop Titans (cozy look, serving customers in your shop).
+> Inspired by Hypixel Skyblock (gathering skills), Albion Online (player-driven order-book market), Unison League (social lobby + co-op turn-based fights) and Shop Titans (cozy look, running your own shop).
 
 ## Why this needs a real game server
 
@@ -37,11 +37,12 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
   - **Tax**: a 4% sales tax acts as the gold sink.
   - **Market data**: price-history chart, order-book depth, and 24h volume and average.
   - **Room to trade**: scalping and flipping are possible on purpose.
-- **Your shop (Shop Titans-style)**:
-  - **Shelves**: stock 8 shelves and set your own prices.
-  - **Live customers**: while you're in your shop, NPC customers walk in. **Sell**, **Haggle** (a gamble on +25%) or decline each one before their patience runs out.
-  - **Selling while away**: NPC shoppers keep buying when you're offline, and you get a "while you were away" summary. They buy at fair prices and avoid greedy ones.
-  - **Other players**: they can browse your shop from the Town Hall or your profile and buy from it.
+- **Your shop: walk in, set prices, leave**:
+  - **A real interior**: tap 🏪 Shop (or walk through Your Shop's door) and you're inside your own merchant hall, with 8 displays (shelves, tables, a weapon rack, a bin and a pedestal) showing the actual goods.
+  - **Passive selling**: put items on displays with a price and go adventuring. NPC townsfolk come in and buy over time, even while you're offline. Each display shows a live forecast: buy chance, sales per hour, when it sells out. The gold goes into your **till**; collect it from the counter or the Ledger.
+  - **Town demand**: each item has a town-wide pool of NPC demand that refills over 8 hours, so flooding the town with one item lowers what townsfolk will pay. Fair prices sell, greedy ones don't (never above 1.5× value).
+  - **Friends shop in person**: visit any shop from Town Hall → Shops or a player's profile, walk around with whoever's inside, and buy at the shown price (4% fee, same as the market; 8% guild levy on NPC sales).
+  - **While you were away**: a summary of what sold, who bought, and your till.
 - **Co-op battles in the world**: monsters roam the Wilds (slimes, wolves, goblins, and a Mossy Golem boss). Tap one to start a turn-based fight right where it stands. **Anyone nearby can tap the same monster to join** (up to 4). Each round has a 12 s timer and the actions are Attack, Special (charges up), Defend, Item (potions) and Flee. Other players can watch the fight happen.
 - **Social**: channel chat with speech bubbles, emotes (wave, dance, cheer, heart, sit), player profiles, online list, leaderboards, and a shop directory.
 - **Onboarding quest**: chop → craft → fight → stock your shop, with gold rewards. A light pillar marks the target, glowing dots trace the walking path, an arrow around your hero points the way with the distance, and a **Take me there** button walks you over.
@@ -89,7 +90,8 @@ shared/   rules & data used by BOTH server and client (items, recipes, skills,
           monsters, avatar options, the world map + A* navigation)
 server/   game.js   channels, 20Hz tick, movement, gathering, fishing, battles, chat
           market.js order book + matching + escrow
-          shop.js   personal shops, NPC customers
+          shop.js   player shops: displays, till, NPC customer simulation
+          rooms.js  shop interiors (who's inside, movement)
           heroes.js inventory/gold/xp persistence      auth.js  invites + sessions
           app.js    HTTP API + WebSocket upgrade        index.js entry point
 client/   src/game.js       renderer, camera, input, prediction, interpolation
@@ -106,4 +108,4 @@ scripts/  bots.js (populate the lobby), dev.js
 - **Auctions** for rare items (bid and buyout), alongside the order book.
 - **Your own island** (stashed idea): a personal, fully customizable plot you build on to earn money, Skyblock-style.
 - **Cosmetics and costumes**: the avatar and tool-skin systems are already data-driven.
-- **Shop decoration** and a 3D shop interior.
+- **Shop decoration** and upgrades (more displays, bigger rooms).

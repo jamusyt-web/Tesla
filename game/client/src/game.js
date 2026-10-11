@@ -5,6 +5,7 @@ import { Mob } from './scene/mobs.js';
 import { buildTown } from './scene/town.js';
 import { Particles, Rings } from './scene/fx.js';
 import { Townsfolk } from './scene/townsfolk.js';
+import { RoomView } from './room.js';
 import { h } from './util/dom.js';
 import { sfx } from './util/sfx.js';
 import { ITEMS } from '../../shared/items.js';
@@ -79,6 +80,8 @@ export class GameClient {
     this.t = 0;
     this.keys = new Set();
     this.lastKeyMove = 0;
+    this.room = null; // RoomView while inside a shop
+    this.lastRoom = null; // shop to step back into after a reconnect
 
     const low = isTouch || Math.min(screen.width, screen.height) < 700;
     this.low = low;
@@ -146,6 +149,60 @@ export class GameClient {
     this.camera.aspect = w / hh;
     this.camera.fov = w < hh ? 55 : 45;
     this.camera.updateProjectionMatrix();
+    this.room?.resize();
+  }
+
+  // ── Shops ────────────────────────────────────────────────────────────
+  async enterShop(owner, { auto = false } = {}) {
+    if (this.battle) return this.hud.toast("You're in a battle!", 'err');
+    if (this.hud.fight) return;
+    if (this.fishing) this.endFishing();
+    this.stopGather();
+    try {
+      const p = await this.sock.rpc('shop.enter', { owner }, { auto });
+      this.openInterior(p);
+    } catch (e) {
+      this.hud.toast(auto ? "Couldn't get back into the shop." : e.message, 'err');
+    }
+  }
+  openInterior(p) {
+    this.#fade();
+    if (this.room) this.closeInterior({ quiet: true });
+    if (this.me) this.me.local.path = null;
+    this.intent = null;
+    this.room = new RoomView(this, p);
+    this.labelLayer.style.display = 'none';
+    this.hud.setMode('room', { isOwner: this.room.isOwner });
+    sfx.bell();
+    if (this.room.isOwner && !p.slots.length) this.hud.toast('Tap a display to put something on it.');
+  }
+  async exitShop() {
+    if (!this.room) return;
+    this.lastRoom = null;
+    try {
+      await this.sock.rpc('shop.exit');
+    } catch {}
+    this.closeInterior();
+  }
+  closeInterior({ quiet = false } = {}) {
+    if (!this.room) return;
+    if (!quiet) this.#fade();
+    this.room.dispose();
+    this.room = null;
+    this.labelLayer.style.display = '';
+    this.hud.setMode('town');
+    this.hud.panels.close();
+  }
+  #fade() {
+    const f = h('div.fade');
+    this.el.append(f);
+    setTimeout(() => f.remove(), 450);
+  }
+  // Players inside a shop are hidden from the town.
+  #setHidden(pv, hidden) {
+    pv.hidden = hidden;
+    pv.av.root.visible = !hidden;
+    if (!hidden) pv.body.buf = [];
   }
 
   // ── Labels (HTML overlay, always crisp, never clipped) ──────────────
@@ -302,6 +359,7 @@ export class GameClient {
       this.cam.target.set(p.x, 0, p.z);
     }
     this.#applyAct(pv, p.act);
+    if (!isMe && p.inside != null) this.#setHidden(pv, true);
     return pv;
   }
   removePlayer(id) {
@@ -363,7 +421,28 @@ export class GameClient {
       s.on('_close', () => {
         this.endFishing();
         this.stopGather();
+        if (this.room) {
+          this.lastRoom = this.room.owner;
+          this.closeInterior({ quiet: true });
+        }
       }),
+      s.on('hide', (m) => {
+        const pv = this.players.get(m.id);
+        if (pv && !pv.isMe) this.#setHidden(pv, true);
+      }),
+      s.on('show', (m) => {
+        const pv = this.players.get(m.p.id);
+        if (!pv || pv.isMe) return;
+        pv.body.buf = [];
+        pv.body.push(m.p.x, m.p.z, m.p.rot, m.p.act);
+        this.#setHidden(pv, false);
+      }),
+      s.on('rjoin', (m) => this.room?.onJoin(m)),
+      s.on('rleave', (m) => this.room?.onLeave(m)),
+      s.on('rs', (m) => this.room?.onSnap(m)),
+      s.on('rshelf', (m) => this.room?.onShelf(m)),
+      s.on('rnpc', (m) => this.room?.onNpc(m)),
+      s.on('rbuy', (m) => this.room?.onBuy(m)),
       s.on('join', (m) => {
         this.addPlayer(m.p);
         this.hud.setOnline(this.players.size);
@@ -449,6 +528,12 @@ export class GameClient {
     }
     this.channel = m.channel;
     this.hud.onWelcome(m);
+    if (this.lastRoom != null) {
+      // We dropped while inside a shop: step back in.
+      const o = this.lastRoom;
+      this.lastRoom = null;
+      this.enterShop(o, { auto: true });
+    }
     this.hud.setOnline(this.players.size);
     for (const b of m.battles) this.onBattle(b);
   }
@@ -497,6 +582,11 @@ export class GameClient {
       if (pinch && ptrs.size === 2) {
         const [a, b] = [...ptrs.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (this.room) {
+          this.room.zoom(pinch.prev ? pinch.prev / d : 1);
+          pinch.prev = d;
+          return;
+        }
         this.cam.dist = Math.max(9, Math.min(34, pinch.dist * (pinch.d / d)));
         return;
       }
@@ -504,7 +594,7 @@ export class GameClient {
         const dx = e.clientX - down.x;
         const dy = e.clientY - down.y;
         if (Math.hypot(dx, dy) > 10) down.moved = true;
-        if (down.moved && !this.battle) {
+        if (down.moved && !this.battle && !this.room) {
           this.cam.yaw = down.yaw - dx * 0.008;
           this.cam.pitch = Math.max(0.45, Math.min(1.3, down.pitch + dy * 0.004));
         }
@@ -520,6 +610,7 @@ export class GameClient {
     c.addEventListener('pointercancel', up);
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
+      if (this.room) return this.room.zoom(1 + Math.sign(e.deltaY) * 0.08);
       this.cam.dist = Math.max(9, Math.min(34, this.cam.dist * (1 + Math.sign(e.deltaY) * 0.1)));
     }, { passive: false });
     c.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -560,6 +651,7 @@ export class GameClient {
   }
 
   tap(x, y) {
+    if (this.room) return this.room.tap(x, y);
     if (this.battle) return;
     // While fishing or gathering, taps are the action itself.
     if (this.fishing) {
@@ -600,6 +692,7 @@ export class GameClient {
   }
 
   actionKey() {
+    if (this.room) return this.room.actionKey();
     if (this.fishing) return this.reel();
     if (this.gather) return this.swing();
     // Not busy: work the nearest tree / rock / herb / fishing spot in reach.
@@ -934,7 +1027,7 @@ export class GameClient {
     const b = BUILDINGS.find((x) => x.id === id);
     const [dx, dz] = doorPoint(b);
     const L = this.me.local;
-    const open = () => this.hud.openBuilding(b.action);
+    const open = () => (b.action === 'shop' ? this.enterShop(this.myId) : this.hud.openBuilding(b.action));
     if (Math.hypot(L.x - dx, L.z - dz) < 2.5) return open();
     this.stopGather();
     this.walkTo(dx, dz, true, open);
@@ -1082,6 +1175,7 @@ export class GameClient {
   }
 
   onEmote(m) {
+    if (this.room) return this.room.onEmote(m);
     const pv = this.players.get(m.id);
     if (!pv) return;
     if (m.e === 'sit') pv.av.setState('sit');
@@ -1093,6 +1187,7 @@ export class GameClient {
   onChat(m) {
     this.hud.chatLine(m);
     if (!m.from) return;
+    if (this.room?.bubble(m.from, m.text)) return;
     const pv = this.players.get(m.from);
     if (!pv) return;
     const wrap = pv.tag.querySelector('.bubbles');
@@ -1112,8 +1207,15 @@ export class GameClient {
     const dt = Math.min(0.1, raw);
     this.moveDt = Math.min(0.25, raw);
     this.t += dt;
-    this.update(dt);
     const r = this.renderer;
+    if (this.room) {
+      // Inside a shop: the town is paused for us (the server keeps it running).
+      this.#keyboardMove();
+      this.room.update(dt);
+      this.room.render(r);
+      return;
+    }
+    this.update(dt);
     r.shadowMap.needsUpdate = true;
     r.clear();
     // 1) world  2) heroes hidden behind the world, as silhouettes  3) heroes
@@ -1265,6 +1367,7 @@ export class GameClient {
 
   #keyboardMove() {
     const k = this.keys;
+    if (this.room) return this.room.keyboard(k);
     if (this.battle || !k.size) return;
     let fx = 0;
     let fz = 0;
@@ -1333,7 +1436,7 @@ export class GameClient {
       v.copy(pv.av.root.position).setY(2.85);
       this.project(v, tmp);
       const far = v.distanceTo(cam) > 70;
-      pv.tag.style.display = tmp.vis && !far ? '' : 'none';
+      pv.tag.style.display = tmp.vis && !far && !pv.hidden ? '' : 'none';
       if (tmp.vis) pv.tag.style.transform = `translate3d(${tmp.x}px, ${tmp.y}px, 0) translate(-50%, -100%)`;
     }
     for (const mv of this.mobs.values()) {

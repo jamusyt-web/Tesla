@@ -79,8 +79,10 @@ export class Socket {
       }, 10000);
     });
   }
-  rpc(m, a = {}) {
-    return this.req('rpc', { m, a });
+  // auto: sent by the game itself (not the player), so it doesn't count as
+  // "being here" for shop presence.
+  rpc(m, a = {}, { auto = false } = {}) {
+    return this.req('rpc', auto ? { m, a, auto: true } : { m, a });
   }
 
   close() {

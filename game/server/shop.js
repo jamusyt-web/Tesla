@@ -79,7 +79,8 @@ export class Shops {
     const info = this.info(owner);
     if (!info) fail('No such shop.');
     const slots = this.slots(owner);
-    const out = { owner, name: this.displayName(info), open: !!info.open, slots, demand: this.demandMap(slots.map((s) => s.item)) };
+    // The owner gets town demand for everything (to price new stock); visitors just what's shown.
+    const out = { owner, name: this.displayName(info), open: !!info.open, slots, demand: this.demandMap(viewerId === owner ? Object.keys(ITEMS) : slots.map((s) => s.item)) };
     if (viewerId === owner) Object.assign(out, { till: info.till, stats: { sales: info.sales, earned: info.earned } });
     return out;
   }

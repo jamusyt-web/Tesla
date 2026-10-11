@@ -52,17 +52,25 @@ export function portrait(cfg, { full = false } = {}) {
 }
 
 // ── Item icons rendered from 3D models (slot "icon:<itemId>" in the manifest)
+// A fresh 3D model of an item in its icon pose (about 1 m tall), or null.
+// Also used to put real goods on shop shelves.
+export function itemObject(itemId, { castShadow = false } = {}) {
+  const proc = !assets.has(`icon:${itemId}`) && PROC_ICONS[itemId]; // a manifest model wins
+  if (!proc && !assets.has(`icon:${itemId}`)) return null;
+  const obj = proc ? new THREE.Group().add(proc()) : assets.make(`icon:${itemId}`, { outline: true, castShadow }).object;
+  const pose = MODELS[`icon:${itemId}`]?.pose;
+  if (pose) obj.rotation.set(...pose.map((d) => (d * Math.PI) / 180));
+  return obj;
+}
+
 const iconCache = new Map();
 export function itemIcon(itemId) {
   if (iconCache.has(itemId)) return iconCache.get(itemId);
   let url = null;
-  const proc = !assets.has(`icon:${itemId}`) && PROC_ICONS[itemId]; // a manifest model wins
-  if (proc || assets.has(`icon:${itemId}`)) {
+  const obj = itemObject(itemId);
+  if (obj) {
     const { r, scene, cam } = renderer();
-    const obj = proc ? new THREE.Group().add(proc()) : assets.make(`icon:${itemId}`, { outline: true, castShadow: false }).object;
     scene.add(obj);
-    const pose = MODELS[`icon:${itemId}`]?.pose;
-    if (pose) obj.rotation.set(...pose.map((d) => (d * Math.PI) / 180));
     obj.rotation.y -= 0.5;
     obj.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(obj);
