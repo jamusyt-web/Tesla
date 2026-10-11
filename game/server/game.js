@@ -13,6 +13,7 @@ import { Heroes } from './heroes.js';
 import { Market } from './market.js';
 import { Shops } from './shop.js';
 import { ShopRoom } from './rooms.js';
+import { Crafting } from './crafting.js';
 import { SHOP } from '../shared/shop.js';
 import { Auth } from './auth.js';
 
@@ -111,6 +112,7 @@ class Channel {
     e.path = null;
     this.players.set(c.hero.id, c);
     c.ch = this;
+    this.game.crafting.attach(c);
     c.send({
       t: 'welcome',
       channel: this.id,
@@ -125,6 +127,8 @@ class Channel {
 
   remove(c) {
     if (c.battle) c.battle.leave(c, 'left');
+    this.game.crafting.releaseSpot(c);
+    if (c.craft) c.craft.spot = null;
     this.players.delete(c.hero.id);
     this.broadcast({ t: 'leave', id: c.hero.id });
   }
@@ -143,6 +147,10 @@ class Channel {
       }
       if (!c.battle && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + 4 * dt);
       if (GATHER_ACTS.has(e.act) && now - e.lastSwing > 2500) e.act = 'idle'; // stopped swinging
+      if (c.craft) {
+        this.game.crafting.expire(c, now);
+        if (c.craft?.spot && !e.path) e.rot = c.craft.spot.rot; // face the station while working
+      }
       const f = e.fishing;
       if (f && f.state === 'wait' && now >= f.biteAt) {
         // Decide what bit now; the client needs the fight parameters to play it.
@@ -150,7 +158,7 @@ class Channel {
         const rod = ITEMS[c.hero.equip.rod];
         const lvl = levelFromXp(c.hero.skills.fishing || 0);
         f.fish = rollFish(Math.random, rod?.tier || 1, lvl, isDeepSpot(this.nodes.get(f.node)));
-        f.gear = fishingGear(rod?.tier || 1, lvl);
+        f.gear = fishingGear(rod?.tier || 1, lvl, rod?.rodZone || 0);
         const { d, behavior, seed } = f.fish;
         c.send({ t: 'bite', window: f.window, fish: { d, behavior, seed }, gear: f.gear, rating: fightRating(d, f.gear) });
       }
@@ -476,7 +484,7 @@ class Client {
 
   publicInfo() {
     const e = this.ent;
-    return { id: this.hero.id, name: this.hero.name, avatar: this.hero.avatar, level: this.hero.level, equip: this.hero.equip, x: q2(e.x), z: q2(e.z), rot: q2(e.rot), act: e.act, inside: this.room?.owner ?? null };
+    return { id: this.hero.id, name: this.hero.name, avatar: this.hero.avatar, level: this.hero.level, equip: this.hero.equip, x: q2(e.x), z: q2(e.z), rot: q2(e.rot), act: e.act, inside: this.room?.owner ?? null, craft: this.craft?.spot ? { station: this.craft.station, spot: this.craft.spot, item: RECIPE_BY_ID[this.craft.recipe]?.out } : null };
   }
   roomInfo() {
     const e = this.rent;
@@ -484,7 +492,7 @@ class Client {
   }
   publicSelf() {
     const shop = this.game.shops.info(this.hero.id);
-    return { ...this.publicInfo(), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, shop: { till: shop?.till || 0, open: shop ? !!shop.open : true } };
+    return { ...this.publicInfo(), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
   }
 
   pushInventory() {
@@ -514,6 +522,7 @@ export class Game {
     this.heroes = new Heroes(db);
     this.market = new Market(db, this.heroes);
     this.shops = new Shops(db, this.heroes);
+    this.crafting = new Crafting(this);
     this.auth = new Auth(db);
     this.channels = [];
     this.online = new Map(); // accountId → Client
@@ -604,6 +613,7 @@ export class Game {
     const info = this.shops.info(owner);
     if (!info) fail('No such shop.');
     if (c.battle) fail("You're in a battle!");
+    if (c.craft) fail('Finish your craft first.');
     if (c.room?.owner === owner) return c.room.payload(c); // already here (e.g. reconnecting)
     if (now - c.roomAt < SHOP.ENTER_COOLDOWN_MS) fail('Slow down a little!');
     const isOwner = owner === c.hero.id;
@@ -674,7 +684,12 @@ export class Game {
     }
     const c = new Client(this, ws, hero);
     this.online.set(accountId, c);
+    const leftover = this.crafting.onConnect(c);
     this.pickChannel().add(c);
+    if (leftover) {
+      c.send({ t: 'craftResult', ...leftover });
+      c.pushInventory();
+    }
     const away = this.shops.awaySummary(accountId, Date.now(), this.lastActive.get(accountId));
     if (away) c.send({ t: 'awaySales', ...away });
     this.shops.prune(accountId);
@@ -727,6 +742,7 @@ export class Game {
     const t = NODE_TYPES[n.type];
     if (t.kind === 'fish') fail('Cast your rod to fish here.');
     if (c.room) fail("You're inside a shop.");
+    if (c.craft) fail('Finish your craft first.');
     if (!n.alive) {
       // A swing that was already in flight when it fell (yours or a co-op
       // partner's) isn't an error, just too late.
@@ -807,6 +823,7 @@ export class Game {
     if (!n || NODE_TYPES[n.type].kind !== 'fish') fail('Not a fishing spot.');
     if (c.battle) fail("You're in a battle!");
     if (c.room) fail("You're inside a shop.");
+    if (c.craft) fail('Finish your craft first.');
     const rod = ITEMS[c.hero.equip.rod];
     if (!rod || this.heroes.count(c.hero.id, c.hero.equip.rod) < 1) fail('You need a fishing rod.');
     const e = c.ent;
@@ -879,29 +896,6 @@ export class Game {
   }
 
   // ── Crafting / NPC merchant / gear ─────────────────────────────────
-  craft(c, recipeId, times = 1) {
-    const r = RECIPE_BY_ID[recipeId];
-    if (!r) fail('Unknown recipe.');
-    times = Math.max(1, Math.min(50, Number(times) || 1));
-    const lvl = levelFromXp(c.hero.skills.crafting || 0);
-    if (lvl < r.lvl) fail(`Requires Crafting level ${r.lvl}.`);
-    const H = this.heroes;
-    for (const [id, n] of Object.entries(r.in)) if (H.count(c.hero.id, id) < n * times) fail(`Not enough ${ITEMS[id].name}.`);
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      for (const [id, n] of Object.entries(r.in)) H.takeItem(c.hero.id, id, n * times);
-      H.addItem(c.hero.id, r.out, r.qty * times);
-      this.db.exec('COMMIT');
-    } catch (e) {
-      this.db.exec('ROLLBACK');
-      throw e;
-    }
-    const xp = H.addXp(c.hero, 'crafting', r.xp * times);
-    c.pushInventory();
-    if (r.out === 'oak_plank') c.advanceTutorial('craft');
-    return { item: r.out, qty: r.qty * times, xp };
-  }
-
   npcSell(c, item, qty) {
     qty = Number(qty);
     if (!isItem(item) || !Number.isInteger(qty) || qty < 1) fail('Bad sale.');
@@ -941,7 +935,7 @@ const HANDLERS = {
   ping: (g, c, m) => c.send({ t: 'pong', c: m.c, s: Date.now() }),
 
   move(g, c, m, now) {
-    if (c.battle) return;
+    if (c.battle || c.craft) return;
     if ((m.v === 'room') !== !!c.room) return; // a stale move from the other view
     if (now - (c.lastMove || 0) < 80) return; // pathfinding is the expensive bit; cap it
     c.lastMove = now;
@@ -964,6 +958,7 @@ const HANDLERS = {
 
   engage(g, c, m) {
     if (c.room) fail("You're inside a shop.");
+    if (c.craft) fail('Finish your craft first.');
     const mob = c.ch.mobs.get(String(m.mob));
     if (!mob || mob.state === 'dead') fail('It ran off.');
     if (c.battle) fail('Already fighting!');
@@ -1009,7 +1004,12 @@ const HANDLERS = {
 };
 
 const RPC = {
-  craft: (g, c, a) => g.craft(c, a.recipe, a.times),
+  craft: () => fail('Crafting is hands-on now — pick a recipe and head to its station!'),
+  'craft.info': (g, c) => g.crafting.info(c),
+  'craft.start': (g, c, a) => g.crafting.start(c, a),
+  'craft.finish': (g, c, a) => g.crafting.finish(c, a),
+  'craft.cancel': (g, c, a) => g.crafting.cancel(c, a),
+  'craft.quick': (g, c, a) => g.crafting.quick(c, a),
   npcSell: (g, c, a) => g.npcSell(c, a.item, a.qty),
   equip: (g, c, a) => g.equip(c, a.item),
   avatar(g, c, a) {
@@ -1140,6 +1140,7 @@ const RPC = {
     if (target.size >= CHANNEL_CAP) fail('That channel is full.');
     if (c.battle) fail('Finish your battle first.');
     if (c.room) fail('Leave the shop first.');
+    if (c.craft) fail('Finish your craft first.');
     c.ch.remove(c);
     target.add(c);
   },

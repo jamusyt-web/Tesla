@@ -137,6 +137,45 @@ const MIGRATIONS = [
     db.prepare('UPDATE heroes SET last_active = ?').run(now);
     db.prepare("INSERT INTO meta (key, value) VALUES ('shop_sim_at', ?)").run(String(now));
   },
+  // 2: hands-on crafting (materials held in escrow during a craft, results log, mastery).
+  (db) => {
+    db.exec(`
+      CREATE TABLE craft_sessions (
+        account_id INTEGER PRIMARY KEY REFERENCES accounts(id),
+        sid TEXT NOT NULL,
+        recipe TEXT NOT NULL,
+        batch INTEGER NOT NULL CHECK (batch > 0),
+        station TEXT NOT NULL,
+        spec TEXT NOT NULL,
+        escrow TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE TABLE craft_mastery (
+        account_id INTEGER NOT NULL REFERENCES accounts(id),
+        recipe TEXT NOT NULL,
+        n INTEGER NOT NULL DEFAULT 0,
+        best INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, recipe)
+      );
+      CREATE TABLE craft_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        sid TEXT NOT NULL,
+        recipe TEXT NOT NULL,
+        batch INTEGER NOT NULL,
+        score INTEGER NOT NULL,
+        grade TEXT NOT NULL,
+        item TEXT NOT NULL,
+        qty INTEGER NOT NULL,
+        via TEXT NOT NULL,
+        result TEXT NOT NULL,
+        ts INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX idx_craftlog_sid ON craft_log(account_id, sid);
+      CREATE INDEX idx_craftlog_ts ON craft_log(ts);
+    `);
+  },
 ];
 
 export function migrate(db) {

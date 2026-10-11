@@ -58,10 +58,11 @@ export function rollFish(rng, rodTier, fishingLvl, deep) {
 }
 
 // Gear → how forgiving the fight is.
-export function fishingGear(rodTier, fishingLvl) {
+// zoneBonus: a Fine/Masterwork rod's slightly bigger catch zone.
+export function fishingGear(rodTier, fishingLvl, zoneBonus = 0) {
   const t = Math.max(1, Math.min(3, rodTier));
   return {
-    zone: Math.min(0.4, 0.22 + (t - 1) * 0.045 + Math.min(fishingLvl, 20) * 0.003),
+    zone: Math.min(0.42, Math.min(0.4, 0.22 + (t - 1) * 0.045 + Math.min(fishingLvl, 20) * 0.003) + zoneBonus),
     gain: 0.26 + (t - 1) * 0.04,
     drain: 0.17 - (t - 1) * 0.02,
   };

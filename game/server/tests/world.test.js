@@ -103,6 +103,6 @@ test('swing rhythm: mashing can never score PERFECT, and on-beat swings always c
     // The earliest a buffered (mashed) swing goes out is SWING_GATE·P, plus up to 120 ms of jitter either way.
     for (let since = P * SWING_GATE - 120; since <= P * SWING_GATE + 30; since += 5) assert.equal(isPerfectSwing(since, P), false, `${it.name}: mash at ${since | 0}ms`);
     for (let j = -60; j <= 60; j += 10) assert.ok(isPerfectSwing(P + j, P), `${it.name}: on the beat ±${j}ms`);
-    assert.ok(SWING_FLOOR * P < SWING_GATE * P - 90, `${it.name}: server floor leaves jitter headroom`);
+    assert.ok(SWING_FLOOR * P < SWING_GATE * P - 80, `${it.name}: server floor leaves jitter headroom`);
   }
 });

@@ -18,7 +18,7 @@ export const FISH_RANGE = 7.5;
 //   double damage; the window starts after the gate, so mashing never scores it.
 export const SWING_GATE = 0.74;
 export const SWING_FLOOR = 0.55;
-export const isPerfectSwing = (since, P) => since >= P * 0.88 && since <= P * 1.3;
+export const isPerfectSwing = (since, P) => since >= Math.min(P * 0.88, P - 60) && since <= P * 1.3;
 
 export function mulberry32(seed) {
   let a = seed >>> 0;

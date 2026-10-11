@@ -25,15 +25,18 @@ add('signpost_directions', 12.6, -3.8, deg(-90), 0.4);
 // ── Workshop yard (north of the workshop) ─────────────────────────────
 {
   const w = b.workshop; // x -21.5..-12.5, z -9.5..-2.5, door east
-  add('workshop_anvil', w.x - 2.5, w.z - 5.6, deg(10), 0.7);
-  add('workshop_workbench', w.x + 0.8, w.z - 5.9, deg(0), 0.8);
-  add('workshop_grindstone', w.x + 3.6, w.z - 5.5, deg(-20), 0.6);
+  // The five crafting stations (station: see shared/stations.js).
+  add('workshop_forge', w.x - 5.3, w.z - 5.8, 0, 0.8, { station: 'forge' });
+  add('workshop_anvil', w.x - 2.5, w.z - 5.6, deg(10), 0.7, { station: 'anvil' });
+  add('workshop_workbench', w.x + 0.8, w.z - 5.9, deg(0), 0.8, { station: 'workbench' });
+  add('workshop_grindstone', w.x + 3.6, w.z - 5.5, deg(-20), 0.6, { station: 'grindstone' });
+  add('workshop_cookpot', w.x + 6.3, w.z - 6.3, 0, 0.7, { station: 'cookpot' });
   add('workshop_chopping_block', w.x - 6.3, w.z + 2.2, 0, 0.55);
   add('workshop_lumber_pile', w.x - 6.6, w.z - 2.2, deg(90), 1.0);
   add('prop_barrel', w.x + 5.0, w.z - 4.6, 0, 0.55);
   add('prop_barrel_alt', w.x + 5.6, w.z - 3.5, 0, 0.55);
-  add('prop_crate', w.x - 4.6, w.z - 5.4, deg(15), 0.65);
-  add('prop_crate', w.x - 5.4, w.z - 4.2, deg(-10), 0.65, { v: 1 });
+  add('prop_crate', w.x - 7.4, w.z - 6.6, deg(15), 0.65);
+  add('prop_crate', w.x - 7.9, w.z - 5.3, deg(-10), 0.65, { v: 1 });
 }
 
 // ── Grand Market: canopy stalls along the north side, cargo out back ──

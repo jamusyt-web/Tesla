@@ -89,6 +89,32 @@ export const ITEMS = {
   amulet_sapphire: { name: 'Sapphire Amulet', icon: '📿', cat: 'gear', slot: 'trinket', atk: 5, def: 5, hp: 40, value: 520, rarity: 'epic' },
 };
 
+// ── Crafted quality: Fine and Masterwork versions of tools and gear ──
+// (made at the Anvil/Workbench/Grindstone by crafting well; see shared/crafting.js).
+// Stored as their own item ids, e.g. "sword_iron~fine", so inventory, the
+// market and shops treat them like any other item.
+export const QUALITY = [
+  { key: '', label: 'Standard', stat: 1, speed: 1, zone: 0, value: 1 },
+  { key: 'fine', label: 'Fine', stat: 1.15, speed: 0.95, zone: 0.015, value: 1.4 },
+  { key: 'master', label: 'Masterwork', stat: 1.3, speed: 0.9, zone: 0.03, value: 2.2 },
+];
+export const QUALITY_BASES = ['axe_copper', 'axe_iron', 'axe_gold', 'pick_copper', 'pick_iron', 'pick_gold', 'rod_fine', 'rod_master', 'sword_copper', 'sword_iron', 'sword_gold', 'armor_leather', 'armor_iron', 'amulet_sapphire'];
+export const qualityId = (base, q) => (q ? `${base}~${QUALITY[q].key}` : base);
+for (const base of QUALITY_BASES) {
+  const it = ITEMS[base];
+  for (const q of [1, 2]) {
+    const Q = QUALITY[q];
+    const v = { ...it, base, q, name: `${Q.label} ${it.name}`, value: Math.round(it.value * Q.value) };
+    for (const k of ['atk', 'def', 'hp']) if (it[k]) v[k] = Math.max(Math.round(it[k] * Q.stat), it[k] + q);
+    if (it.speed) v.speed = Math.round(it.speed * Q.speed);
+    if (it.tool === 'rod') v.rodZone = Q.zone;
+    if (q === 2 && it.skin) v.skin = { ...it.skin, glow: it.skin.glow ?? '#ffd84a' };
+    ITEMS[qualityId(base, q)] = v;
+  }
+}
+export const baseOf = (id) => ITEMS[id]?.base ?? id;
+export const qOf = (id) => ITEMS[id]?.q ?? 0;
+
 export const ITEM_IDS = Object.keys(ITEMS);
 export const item = (id) => ITEMS[id];
 export const isItem = (id) => Object.prototype.hasOwnProperty.call(ITEMS, id);

@@ -122,13 +122,13 @@ test('an old save upgrades in place: shelves kept, old history counts as seen', 
   old.prepare("INSERT INTO shop_log (account_id, item, qty, price, buyer, ts) VALUES (1, 'oak_plank', 1, 11, 'Bram', 1)").run();
   old.close();
   const db = openDb(file);
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 1);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
   const shops = new Shops(db, new Heroes(db));
   assert.deepEqual({ ...shops.slots(1)[0] }, { slot: 3, item: 'oak_plank', qty: 7, price: 11 });
   assert.equal(shops.awaySummary(1, Date.now(), 0), null);
   assert.equal(shops.info(1).open, 1);
   db.close();
-  assert.equal(openDb(file).prepare('PRAGMA user_version').get().user_version, 1, 'migrations run once');
+  assert.equal(openDb(file).prepare('PRAGMA user_version').get().user_version, 2, 'migrations run once');
 });
 
 test('shop constants stay sane', () => {
