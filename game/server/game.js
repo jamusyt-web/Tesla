@@ -41,7 +41,7 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 // Tutorial: the core loop in one session.
 export const TUTORIAL = [
   { id: 'chop', text: 'Chop a tree in Whisperwood (west)', reward: 20 },
-  { id: 'craft', text: 'Craft Oak Planks at the Workshop', reward: 30 },
+  { id: 'craft', text: 'Saw Oak Planks at the Workshop', reward: 30 },
   { id: 'fight', text: 'Defeat a Meadow Slime beyond the Wilds Gate (north)', reward: 50 },
   { id: 'stock', text: 'Put something on a display in Your Shop', reward: 60 },
 ];

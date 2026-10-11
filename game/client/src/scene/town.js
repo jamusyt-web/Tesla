@@ -672,6 +672,56 @@ export function buildTown(scene, fx, { low = false } = {}) {
     }
   }
 
+  // ── Crafting stations: a stone forge and a cookpot (the anvil, workbench
+  // and grindstone are props), plus an invisible tap target on each.
+  for (const pr of PROPS.filter((x) => x.station)) {
+    if (pr.station === 'forge') {
+      const g = new THREE.Group();
+      const at = (m, x, y, z) => (m.position.set(x, y, z), m);
+      g.add(at(mesh(box(1.5, 0.75, 1.2), '#8f8a82', { outline: OL }), 0, 0.375, 0));
+      const coals = new THREE.Mesh(box(1.1, 0.08, 0.8), toon('#ff7a2a', { emissive: '#ff5a1a', emissiveIntensity: 0.9 }));
+      coals.position.y = 0.78;
+      g.add(coals);
+      g.add(at(mesh(box(0.7, 2.2, 0.6), '#7d776e', { outline: OL }), 0, 1.6, -0.35));
+      g.add(at(mesh(box(0.85, 0.2, 0.75), '#5f5a54', { outline: OL }), 0, 2.75, -0.35));
+      g.position.set(pr.x, 0, pr.z);
+      g.traverse((o) => o.isMesh && (o.castShadow = true));
+      scene.add(g);
+      animated.push((dt, t) => {
+        coals.material.emissiveIntensity = 0.75 + Math.sin(t * 5) * 0.15 + Math.sin(t * 13) * 0.05;
+        if (Math.random() < dt * 1.5) fx.puff.burst(new THREE.Vector3(pr.x, 3.0, pr.z - 0.35), { n: 1, color: ['#e8e2d8', '#cfc8bc'], speed: 0.2, up: 0.8, gravity: -0.4, size: 0.5, life: 2.2, drag: 0.6, jitter: 0.12, spin: 0 });
+      });
+    } else if (pr.station === 'cookpot') {
+      const g = new THREE.Group();
+      for (const a of [0, 2.1, 4.2]) {
+        const leg = mesh(cyl(0.05, 0.05, 1.3, 5), '#3b2a1a');
+        leg.position.set(Math.cos(a) * 0.55, 0.62, Math.sin(a) * 0.55);
+        leg.rotation.z = Math.cos(a) * 0.35;
+        leg.rotation.x = -Math.sin(a) * 0.35;
+        g.add(leg);
+      }
+      const pot = mesh(new THREE.SphereGeometry(0.45, 14, 10, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.7), '#3a3a42', { outline: OL });
+      pot.position.y = 0.62;
+      const soup = new THREE.Mesh(cyl(0.36, 0.36, 0.04, 16), toon('#d88a3a', { emissive: '#a0501a', emissiveIntensity: 0.3 }));
+      soup.position.y = 0.88;
+      const fire = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.35, 6), toon('#ffb347', { emissive: '#ff7a1a', emissiveIntensity: 1 }));
+      fire.position.y = 0.18;
+      g.add(pot, soup, fire);
+      g.position.set(pr.x, 0, pr.z);
+      scene.add(g);
+      animated.push((dt, t) => {
+        fire.scale.set(1 + Math.sin(t * 11) * 0.1, 1 + Math.sin(t * 7) * 0.2, 1);
+        if (Math.random() < dt * 1.2) fx.puff.burst(new THREE.Vector3(pr.x, 1.0, pr.z), { n: 1, color: ['#ffffff', '#eef6ff'], speed: 0.15, up: 0.6, gravity: -0.3, size: 0.35, life: 1.6, drag: 0.6, jitter: 0.1, spin: 0 });
+      });
+    }
+    const pickVol = new THREE.Mesh(cyl(pr.r + 0.35, pr.r + 0.35, 1.8, 10), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
+    pickVol.position.set(pr.x, 0.9, pr.z);
+    pickVol.layers.set(2); // never drawn; the tap raycaster checks every layer
+    pickVol.userData.station = pr.station;
+    scene.add(pickVol);
+    pickables.push(pickVol);
+  }
+
   // ── Buildings
   // Anything that can hide the hero fades out while it's between them and the camera.
   const fadeable = (grp) => {

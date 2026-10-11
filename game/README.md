@@ -30,7 +30,11 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
   - **Fishing**: cast, wait for the bite, tap to hook, then win a **reel fight**. Hold to lift a green catch bar and keep the darting fish inside it until the meter fills. Big fish (pike, golden koi, and Old Whiskers, the legendary lake king that only bites in deep water) are faster and more erratic. Better rods give a bigger bar and faster reeling, so the biggest catches need upgraded gear. The server replays your exact button presses through the same deterministic simulation to confirm every catch, so it can't be faked.
   - **Skills and rare drops**: Foraging, Mining, Herbalism and Fishing level up and increase your double-drop chance. Rare drops (Golden Acorn, Sapphire, Golden Koi) are announced to the whole server.
   - **Tools change in your hand**: the axe, pickaxe, rod or sword shows in your hero's hand depending on what you're doing. Each tier has its own 3D model (wood → copper → iron → gold, with gold glowing). New skins are just data in `shared/items.js`.
-- **Crafting**: 23 recipes at the Workshop: refined materials, potions and food, tool upgrades, weapons, armor and a trinket. Crafted goods are worth much more than raw resources.
+- **Hands-on crafting**: you make things yourself at five stations in the Workshop yard: **Forge** (smelt bars), **Anvil** (hammer tools, blades and plate), **Workbench** (saw planks, stitch leather, assemble rods), **Grindstone** and **Cookpot** (food and potions).
+  - **The minigame**: each step is a timing beat with one button. Tap as a ring closes (hammer, saw), tap as a marker crosses the mark (pour, quench), or hold and let go in the band (heat, bellows, simmer). A good heat makes the hammering that follows more forgiving.
+  - **Results are graded S to D**: never worse than the plain recipe. Refining and food get up to +20% bonus yield. Tools and gear can come out **Fine** (+15% stats) or, rarely, **Masterwork** (+30%, announced to the town).
+  - **Anti-cheat**: the server replays your recorded timing, the same way it checks fishing.
+  - **Quick craft**: once you've made a refining or cooking recipe well 3 times, you can batch it without the minigame for a small fee and half XP.
 - **Player-driven market (Albion-style order book)**:
   - **Orders**: place buy or sell orders, or **buy/sell instantly** against the book.
   - **Matching**: price-time priority with partial fills. Your goods or gold are held in escrow, and cancelling refunds exactly what's left.

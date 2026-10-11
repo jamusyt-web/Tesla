@@ -1,8 +1,9 @@
 import { h, clear, fmt } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
 import { portrait, itemIcon } from './portrait.js';
-import { ITEMS, RARITY, CATEGORIES } from '../../../shared/items.js';
+import { ITEMS, RARITY, CATEGORIES, baseOf, qOf } from '../../../shared/items.js';
 import { RECIPES } from '../../../shared/recipes.js';
+import { STATIONS, batchCap, isStackable } from '../../../shared/crafting.js';
 import { SKILLS, SKILL_IDS, levelProgress, levelFromXp } from '../../../shared/skills.js';
 import { MARKET_TAX as TAX } from '../../../shared/economy.js';
 import { SHOP_PANELS } from './shop-panels.js';
@@ -10,13 +11,16 @@ import { SHOP_PANELS } from './shop-panels.js';
 const NPC_RATE = 0.6;
 
 // 3D-rendered icon when the item has a model, emoji otherwise.
+// Fine / Masterwork versions use their base item's picture plus a star.
 export const iconEl = (id, size = null) => {
-  const src = itemIcon(id);
-  return src ? h('img.icon3d', { src, alt: ITEMS[id]?.name || id, style: size ? { width: size, height: size } : null }) : ITEMS[id]?.icon || '❔';
+  const q = qOf(id);
+  const src = itemIcon(baseOf(id));
+  const pic = src ? h('img.icon3d', { src, alt: ITEMS[id]?.name || id, style: size ? { width: size, height: size } : null }) : ITEMS[id]?.icon || '❔';
+  return q ? h('span.qicon', pic, h('i.qbadge.q' + q, q === 2 ? '✦' : '★')) : pic;
 };
 
 const itemSlot = (id, qty, { sel = false, eq = false, on } = {}) =>
-  h('div.slot' + (sel ? '.sel' : ''), { 'data-r': ITEMS[id]?.rarity, title: ITEMS[id]?.name, on: on ? { click: on } : null }, iconEl(id), qty != null ? h('span.q', fmt(qty)) : null, eq ? h('span.eq', 'E') : null);
+  h('div.slot' + (sel ? '.sel' : ''), { 'data-r': ITEMS[id]?.rarity, 'data-q': qOf(id) || null, title: ITEMS[id]?.name, on: on ? { click: on } : null }, iconEl(id), qty != null ? h('span.q', fmt(qty)) : null, eq ? h('span.eq', 'E') : null);
 
 const qtyInput = (value, max) => {
   const inp = h('input', { type: 'number', min: 1, max, value, inputMode: 'numeric' });
@@ -189,54 +193,78 @@ export class Panels {
   }
 
   // ── Workshop ───────────────────────────────────────────────────────
-  p_craft(c) {
+  // The Workshop: pick a recipe at one of the five stations, then go and
+  // make it by hand (client/src/ui/craftgame.js). Mastered refining/cooking
+  // recipes can be Quick-crafted.
+  p_craft(c, args = {}) {
     this.title(c, '🔨 Workshop');
-    let tab = 'material';
-    const groups = { material: 'Refining', consumable: 'Supplies', tool: 'Tools', gear: 'Gear' };
+    let tab = args.station || 'workbench';
+    let info = null;
+    let pick = null;
+    const batches = {};
     const render = () => {
       clear(c.body);
       const lvl = levelFromXp(this.me.skills.crafting || 0);
       c.body.append(
-        h('div.muted', { style: { marginBottom: '8px' } }, `🔨 Crafting level ${lvl}. Crafted goods sell for much more than raw resources!`),
-        h('div.tabs', ...Object.entries(groups).map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render()) } }, l))),
+        h('div.muted', { style: { marginBottom: '8px' } }, `🔨 Crafting level ${lvl}. Pick a recipe, walk to its station and make it yourself — good timing gives bonus materials or Fine and Masterwork gear.`),
+        h('div.tabs', { style: { flexWrap: 'wrap' } }, ...Object.entries(STATIONS).map(([k, st]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), (pick = null), render()) } }, `${st.icon} ${st.label}`))),
       );
-      for (const r of RECIPES.filter((x) => ITEMS[x.out].cat === tab)) {
+      for (const r of RECIPES.filter((x) => x.station === tab)) {
         const out = ITEMS[r.out];
         const locked = lvl < r.lvl;
-        const max = Math.min(50, ...Object.entries(r.in).map(([id, n]) => Math.floor((this.me.inv[id] || 0) / n)));
-        const craft = async (times) => {
-          try {
-            const res = await this.sock.rpc('craft', { recipe: r.id, times });
-            sfx.loot();
-            this.hud.toast(`${out.icon} Crafted ${res.qty}× ${out.name}!`, 'good');
-            this.hud.onXp(res.xp);
-          } catch (e) {
-            this.hud.toast(e.message, 'err');
-          }
+        const cap = batchCap(r, lvl);
+        const afford = Math.min(cap, ...Object.entries(r.in).map(([id, n]) => Math.floor((this.me.inv[id] || 0) / n)));
+        const m = info?.mastery?.[r.id];
+        const open = pick === r.id;
+        const row = h(
+          'div.rowcard' + (locked ? '.locked' : '') + (open ? '.open' : ''),
+          { on: { click: () => !locked && ((pick = open ? null : r.id), render()) } },
+          h('div.ic', iconEl(r.out, '44px')),
+          h(
+            'div.grow',
+            h('div.t', out.name, h('span.muted', `  · worth ${out.value} 🪙`)),
+            h('div', ...Object.entries(r.in).map(([id, n]) => h('span.need' + ((this.me.inv[id] || 0) < n ? '.short' : ''), `${ITEMS[id].icon} ${this.me.inv[id] || 0}/${n}`))),
+            out.cat === 'tool' || out.cat === 'gear' ? h('div.s', itemDesc(out)) : null,
+            locked ? h('div.s', `🔒 Requires Crafting ${r.lvl}`) : m ? h('div.s', `Best ${m.best} · made well ${m.n}×${m.quick ? ' · ⚡ Quick' : ''}`) : null,
+          ),
+        );
+        c.body.append(row);
+        if (!open) continue;
+        const stackable = isStackable(r);
+        let n = Math.max(1, Math.min(batches[r.id] || afford || 1, cap));
+        const qtyEl = h('b', String(n));
+        const yieldEl = h('span.muted');
+        const upd = () => {
+          batches[r.id] = n;
+          qtyEl.textContent = String(n);
+          yieldEl.textContent = stackable ? `→ ${n * r.qty}, up to ${Math.ceil(n * r.qty * 1.2)} with great timing` : 'Great timing can make it Fine or even Masterwork';
         };
+        upd();
+        const step = (d) => (e) => (e.stopPropagation(), (n = Math.max(1, Math.min(cap, n + d))), upd());
         c.body.append(
           h(
-            'div.rowcard' + (locked ? '.locked' : ''),
-            h('div.ic', iconEl(r.out, '44px')),
+            'div.detail',
+            stackable && cap > 1 ? h('div.row', h('button.btn.small', { on: { click: step(-1) } }, '−'), qtyEl, h('button.btn.small', { on: { click: step(1) } }, '+'), h('button.chip', { on: { click: (e) => (e.stopPropagation(), (n = Math.max(1, afford)), upd()) } }, `Max (${Math.max(1, afford)})`)) : null,
+            yieldEl,
             h(
-              'div.grow',
-              h('div.t', out.name, h('span.muted', `  · worth ${out.value} 🪙`)),
-              h('div', ...Object.entries(r.in).map(([id, n]) => h('span.need' + ((this.me.inv[id] || 0) < n ? '.short' : ''), `${ITEMS[id].icon} ${this.me.inv[id] || 0}/${n}`))),
-              out.cat === 'tool' || out.cat === 'gear' ? h('div.s', itemDesc(out)) : null,
-              locked ? h('div.s', `🔒 Requires Crafting ${r.lvl}`) : null,
-            ),
-            h(
-              'div',
-              { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
-              h('button.btn.green.small', { disabled: locked || max < 1, on: { click: () => craft(1) } }, 'Craft'),
-              max > 1 && !locked ? h('button.btn.plain.small', { on: { click: () => craft(max) } }, `×${max}`) : null,
+              'div.row.wrap',
+              h('button.btn.green', { disabled: afford < 1, on: { click: (e) => (e.stopPropagation(), this.close(), this.hud.game?.goCraft(r.id, n)) } }, `${STATIONS[r.station].icon} ${STATIONS[r.station].verb} it`),
+              stackable && m?.quick
+                ? h('button.btn.blue.small', { disabled: afford < 1, on: { click: (e) => (e.stopPropagation(), this.rpc('craft.quick', { recipe: r.id, times: n }).then((res) => (this.hud.toast(`⚡ ${res.qty}× ${out.name} (fee ${res.fee} 🪙)`, 'good'), this.hud.onXp(res.xp), load()))) } }, `⚡ Quick ×${n}`)
+                : null,
             ),
           ),
         );
       }
     };
+    const load = () =>
+      this.sock
+        .rpc('craft.info')
+        .then((r) => ((info = r), render()))
+        .catch(() => {});
     c.refresh = render;
     render();
+    load();
   }
 
   // ── Grand Market ───────────────────────────────────────────────────
@@ -264,7 +292,9 @@ export class Panels {
       const listEl = h('div');
       const list = () => {
         clear(listEl);
-        const ids = Object.keys(ITEMS).filter((id) => (st.cat === 'all' || ITEMS[id].cat === st.cat) && ITEMS[id].name.toLowerCase().includes(st.q.toLowerCase()));
+        // Fine/Masterwork versions only show up once someone's trading them, you own one, or you search for them.
+        const listed = (id) => !ITEMS[id].q || st.summary[id] || this.me.inv[id] > 0 || st.q;
+        const ids = Object.keys(ITEMS).filter((id) => listed(id) && (st.cat === 'all' || ITEMS[id].cat === st.cat) && ITEMS[id].name.toLowerCase().includes(st.q.toLowerCase()));
         ids.sort((a, b) => (st.summary[b]?.vol || 0) + (st.summary[b] ? 1 : 0) - ((st.summary[a]?.vol || 0) + (st.summary[a] ? 1 : 0)) || ITEMS[a].value - ITEMS[b].value);
         for (const id of ids) {
           const s = st.summary[id] || {};

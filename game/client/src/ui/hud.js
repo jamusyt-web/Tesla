@@ -16,7 +16,7 @@ const isTouchDevice = () => matchMedia('(pointer: coarse)').matches;
 
 const TUTORIAL_TEXT = [
   { text: 'Chop a tree in Whisperwood', hint: 'Tap a tree, then tap again in rhythm to swing your axe!', target: 'tree' },
-  { text: 'Craft Oak Planks at the Workshop', hint: 'Bring your logs to the 🔨 Workshop.', target: 'workshop' },
+  { text: 'Saw Oak Planks at the Workshop', hint: 'Tap 🔨 Craft, pick Oak Plank at the Workbench, then tap in time to saw it yourself.', target: 'workshop' },
   { text: 'Defeat a Meadow Slime', hint: 'Head through the ⚔️ Wilds Gate to the north.', target: 'slime' },
   { text: 'Put something on a display in Your Shop', hint: 'Tap 🏪 Shop, then tap an empty display.', target: 'shop' },
 ];

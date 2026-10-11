@@ -6,6 +6,10 @@ import { buildTown } from './scene/town.js';
 import { Particles, Rings } from './scene/fx.js';
 import { Townsfolk } from './scene/townsfolk.js';
 import { RoomView } from './room.js';
+import { CraftGame } from './ui/craftgame.js';
+import { RECIPE_BY_ID } from '../../shared/recipes.js';
+import { spotsOf, stationPos } from '../../shared/stations.js';
+import { STATIONS } from '../../shared/crafting.js';
 import { h } from './util/dom.js';
 import { sfx } from './util/sfx.js';
 import { ITEMS } from '../../shared/items.js';
@@ -80,6 +84,7 @@ export class GameClient {
     this.t = 0;
     this.keys = new Set();
     this.lastKeyMove = 0;
+    this.craft = null; // the craft in progress (we're at a station)
     this.room = null; // RoomView while inside a shop
     this.lastRoom = null; // shop to step back into after a reconnect
 
@@ -150,6 +155,110 @@ export class GameClient {
     this.camera.fov = w < hh ? 55 : 45;
     this.camera.updateProjectionMatrix();
     this.room?.resize();
+  }
+
+  // ── Crafting ─────────────────────────────────────────────────────────
+  // Walk to the recipe's station, then make it by hand.
+  goCraft(recipe, batch = 1) {
+    const r = RECIPE_BY_ID[recipe];
+    if (!r || !this.me) return;
+    if (this.battle || this.room) return this.hud.toast('Not right now!', 'err');
+    if (this.craft) return this.hud.toast("You're already crafting.", 'err');
+    if (this.fishing) this.endFishing();
+    this.stopGather();
+    const L = this.me.local;
+    const sp = spotsOf(r.station)
+      .slice(0, 2)
+      .sort((a, b) => Math.hypot(a.x - L.x, a.z - L.z) - Math.hypot(b.x - L.x, b.z - L.z))[0];
+    const start = () => this.#startCraft(recipe, batch);
+    if (Math.hypot(L.x - sp.x, L.z - sp.z) < 1.5) return start();
+    this.hud.toast(`🚶 Off to the ${STATIONS[r.station].label}…`);
+    if (!this.walkTo(sp.x, sp.z, true, start)) this.hud.toast("Can't reach the station.", 'err');
+  }
+  async #startCraft(recipe, batch) {
+    try {
+      const st = await this.sock.rpc('craft.start', { recipe, batch });
+      this.#beginCraft(st, recipe, batch);
+    } catch (e) {
+      this.hud.toast(e.message, 'err');
+    }
+  }
+  #beginCraft(st, recipe, batch) {
+    this.craft = { ...st, recipe, batch };
+    const L = this.me.local;
+    L.path = [[st.spot.x, st.spot.z]];
+    this.intent = null;
+    this.me.av.hold(st.station === 'anvil' ? 'pick' : null);
+    this.me.av.setState('gather');
+    const station = st.station;
+    this.hud.craftGame = new CraftGame(this.hud, st, {
+      onDone: (fin) => this.#finishCraft(fin),
+      onStop: (fin) => this.#finishCraft(fin),
+      onStep: (step, q) => {
+        if (step.k === 'strike') this.me.av.play('swing', 0.32);
+        else if (step.k === 'sweep') this.me.av.play('pick', 0.4);
+        else this.me.av.play('cast', 0.45);
+        const p = stationPos(station);
+        if (p && q !== 'M') this.fx.burst(new THREE.Vector3(p.x, 1.1, p.z), { n: q === 'P' ? 14 : 6, color: station === 'cookpot' ? ['#ffffff', '#d9f3ff'] : station === 'forge' || station === 'anvil' ? ['#ffd84a', '#ff9a3c', '#fff1a8'] : ['#e0bd8a', '#c89a62'], speed: 4, up: 3, size: 0.12, life: 0.5, gravity: 6 });
+      },
+    });
+  }
+  async #finishCraft(fin) {
+    const cr = this.craft;
+    try {
+      const res = await this.sock.rpc('craft.finish', fin);
+      this.#craftDone(res, cr);
+    } catch (e) {
+      if (/Disconnected|Not connected|too long/.test(e.message)) {
+        this.pendingFinish = fin; // send it again once we're back
+        return;
+      }
+      this.hud.toast(e.message, 'err');
+      this.hud.craftGame?.close();
+      this.#endCraftLocal();
+    }
+  }
+  #craftDone(res, cr) {
+    this.#endCraftLocal();
+    if (res.refunded) {
+      this.hud.craftGame?.close();
+      return this.hud.toast('That craft was interrupted — your materials are back in your bag.');
+    }
+    if (res.xp) this.hud.onXp(res.xp);
+    const g = this.hud.craftGame;
+    if (!g) return this.hud.toast(`🔨 ${res.out.qty}× ${ITEMS[res.out.item].name} (grade ${res.grade})`, 'good');
+    g.showResult(res, {
+      onAgain: cr ? () => (g.close(), this.goCraft(cr.recipe, cr.batch)) : null,
+      onEquip: (id) => this.sock.rpc('equip', { item: id }).then(() => this.hud.toast(`Equipped ${ITEMS[id].name}!`, 'good')).catch((e) => this.hud.toast(e.message, 'err')),
+    });
+  }
+  #endCraftLocal() {
+    this.craft = null;
+    this.pendingFinish = null;
+    if (this.me) {
+      this.me.av.hold(null);
+      this.me.av.setState('idle');
+    }
+  }
+  // After (re)connecting: carry on, finish as-is, or report what happened.
+  #resumeCraft(you) {
+    const c = you.craft;
+    if (this.pendingFinish && c?.sid === this.pendingFinish.sid) {
+      const fin = this.pendingFinish;
+      this.pendingFinish = null;
+      return this.#finishCraft(fin);
+    }
+    if (c && this.craft?.sid === c.sid) return; // still playing it here
+    if (c) {
+      // Reloaded or another device: it can only be finished as it is.
+      this.sock
+        .rpc('craft.finish', { sid: c.sid, toggles: [], end: 0, off: [0, 0], stop: true })
+        .then((res) => this.hud.toast(`🔨 Your ${ITEMS[res.out?.item]?.name || 'craft'} was finished as it was (grade ${res.grade}).`))
+        .catch(() => {});
+    } else if (this.craft) {
+      this.hud.craftGame?.close();
+      this.#endCraftLocal();
+    }
   }
 
   // ── Shops ────────────────────────────────────────────────────────────
@@ -372,7 +481,7 @@ export class GameClient {
   }
   #applyAct(pv, act) {
     pv.act = act;
-    const hold = { chop: 'axe', mine: 'pick', fish: 'rod', battle: 'weapon' }[act] ?? null;
+    const hold = { chop: 'axe', mine: 'pick', fish: 'rod', battle: 'weapon', craft: 'pick' }[act] ?? null;
     if (pv.isMe && this.gather) pv.av.hold(this.gather.tool);
     else if (pv.isMe && this.fishing) pv.av.hold('rod');
     else if (pv.isMe && this.battle) pv.av.hold('weapon');
@@ -436,6 +545,18 @@ export class GameClient {
         pv.body.buf = [];
         pv.body.push(m.p.x, m.p.z, m.p.rot, m.p.act);
         this.#setHidden(pv, false);
+      }),
+      s.on('craftResult', (m) => {
+        this.#craftDone(m, null);
+        if (m.reason === 'timeout') this.hud.toast('Your craft ran out of time and was finished as it was.');
+        else if (m.reason === 'offline') this.hud.toast(`🔨 While you were away your ${ITEMS[m.out?.item]?.name || 'craft'} was finished as it was.`);
+      }),
+      s.on('crafted', (m) => {
+        const pv = this.players.get(m.by);
+        const p = stationPos(m.station);
+        if (!pv || pv.isMe || !p) return;
+        pv.av.play('cheer');
+        this.floatText(new THREE.Vector3(p.x, 2.6, p.z), `${m.grade} · ${m.qty}× ${ITEMS[m.item]?.name}`, m.mw || m.grade === 'S' ? 'loot rare' : 'loot');
       }),
       s.on('rjoin', (m) => this.room?.onJoin(m)),
       s.on('rleave', (m) => this.room?.onLeave(m)),
@@ -528,6 +649,7 @@ export class GameClient {
     }
     this.channel = m.channel;
     this.hud.onWelcome(m);
+    this.#resumeCraft(m.you);
     if (this.lastRoom != null) {
       // We dropped while inside a shop: step back in.
       const o = this.lastRoom;
@@ -644,6 +766,7 @@ export class GameClient {
       if (u.npc) return { kind: 'npc', npc: u.npc, point: hit.point };
       if (u.player) return { kind: 'player', id: u.player, point: hit.point };
       if (u.node) return { kind: 'node', id: u.node, point: hit.point };
+      if (u.station) return { kind: 'station', id: u.station, point: hit.point };
       if (u.building) return { kind: 'building', id: u.building, point: hit.point };
       if ((u.ground || u.water) && !ground) ground = { kind: 'ground', point: hit.point };
     }
@@ -652,7 +775,7 @@ export class GameClient {
 
   tap(x, y) {
     if (this.room) return this.room.tap(x, y);
-    if (this.battle) return;
+    if (this.battle || this.craft) return;
     // While fishing or gathering, taps are the action itself.
     if (this.fishing) {
       this.reel();
@@ -677,6 +800,7 @@ export class GameClient {
     if (hit.kind === 'node') return this.goNode(hit.id);
     if (hit.kind === 'mob') return this.goMob(hit.id);
     if (hit.kind === 'player') return this.hud.openProfile(hit.id);
+    if (hit.kind === 'station') return this.hud.panels.open('craft', { station: hit.id });
     if (hit.kind === 'npc') {
       const info = hit.npc.info;
       const line = info.lines[Math.floor(Math.random() * info.lines.length)];
@@ -710,6 +834,7 @@ export class GameClient {
 
   walkTo(x, z, marker = false, onArrive = null) {
     if (this.hud.fight) return false; // mid reel-fight: stay put
+    if (this.craft) return false; // working at a station
     if (this.fishing) this.endFishing(); // the server cancels too when it gets the move
     const L = this.me.local;
     const path = STATIC.nav.findPath(L.x, L.z, x, z);
@@ -1257,7 +1382,12 @@ export class GameClient {
       }
       me.av.root.position.set(L.x, 0, L.z);
       me.av.root.rotation.y = lerpAngle(me.av.root.rotation.y, this.battle ? this.#faceMob(me) : L.rot, Math.min(1, dt * 14));
-      if (!this.gather && !this.fishing && !this.battle && me.av.state !== 'ko' && !(me.av.state === 'sit' && !moving)) me.av.setState(moving ? 'walk' : 'idle');
+      if (!this.gather && !this.fishing && !this.battle && !(this.craft && !moving) && me.av.state !== 'ko' && !(me.av.state === 'sit' && !moving)) me.av.setState(moving ? 'walk' : 'idle');
+      if (this.craft && !moving) {
+        const sp = this.craft.spot;
+        if (sp) L.rot = sp.rot;
+        me.av.setState('gather');
+      }
       if (moving && me.av.state === 'sit') me.av.setState('walk');
       me.av.update(dt, moving ? 6 : 0);
       if (this.marker.visible) {
@@ -1308,7 +1438,9 @@ export class GameClient {
         pv.av.root.position.set(s.x, 0, s.z);
         pv.av.root.rotation.y = lerpAngle(pv.av.root.rotation.y, s.rot, Math.min(1, dt * 12));
         const st = pv.av.state;
-        if (st !== 'ko' && !(st === 'sit' && s.act === 'idle')) pv.av.setState(s.act === 'walk' ? 'walk' : s.act === 'battle' ? 'battle' : s.act === 'fish' ? 'fish' : s.act === 'chop' || s.act === 'mine' ? 'gather' : 'idle');
+        if (st !== 'ko' && !(st === 'sit' && s.act === 'idle')) pv.av.setState(s.act === 'walk' ? 'walk' : s.act === 'battle' ? 'battle' : s.act === 'fish' ? 'fish' : s.act === 'chop' || s.act === 'mine' || s.act === 'craft' ? 'gather' : 'idle');
+        // Others at a crafting station: working away.
+        if (s.act === 'craft' && !pv.av.oneShot && Math.random() < dt * 1.4) pv.av.play('swing', 0.35);
       }
       pv.av.update(dt, 6);
     }
@@ -1368,7 +1500,7 @@ export class GameClient {
   #keyboardMove() {
     const k = this.keys;
     if (this.room) return this.room.keyboard(k);
-    if (this.battle || !k.size) return;
+    if (this.battle || this.craft || !k.size) return;
     let fx = 0;
     let fz = 0;
     if (k.has('w') || k.has('arrowup')) fz -= 1;
