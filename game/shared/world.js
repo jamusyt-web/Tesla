@@ -208,38 +208,45 @@ export function isWalkable(x, z, col) {
 // ── Navigation grid + A* ───────────────────────────────────────────────
 const CELL = 1;
 const HALF = WORLD_RADIUS + 2;
-const N = Math.ceil((HALF * 2) / CELL);
 
+// The town uses the defaults; a shop interior passes its own small grid and
+// walkable test (shared/shop.js).
 export class NavGrid {
-  constructor(col) {
+  constructor(col, { half = HALF, cell = CELL, walkable = isWalkable, margin = 0.2 } = {}) {
     this.col = col;
-    this.n = N;
+    this.half = half;
+    this.cs = cell;
+    this.walk = walkable;
+    const N = (this.n = Math.ceil((half * 2) / cell));
     this.block = new Uint8Array(N * N);
+    const w = (x, z) => walkable(x, z, col);
+    const m = margin;
     for (let j = 0; j < N; j++)
       for (let i = 0; i < N; i++) {
         // A cell is open only if its centre and the area around it are
         // walkable, so paths never squeeze through gaps narrower than a hero.
         const [x, z] = this.center(i, j);
-        const ok = isWalkable(x, z, col) && isWalkable(x - 0.2, z - 0.2, col) && isWalkable(x + 0.2, z - 0.2, col) && isWalkable(x - 0.2, z + 0.2, col) && isWalkable(x + 0.2, z + 0.2, col);
+        const ok = w(x, z) && w(x - m, z - m) && w(x + m, z - m) && w(x - m, z + m) && w(x + m, z + m);
         this.block[j * N + i] = ok ? 0 : 1;
       }
   }
   center(i, j) {
-    return [-HALF + (i + 0.5) * CELL, -HALF + (j + 0.5) * CELL];
+    return [-this.half + (i + 0.5) * this.cs, -this.half + (j + 0.5) * this.cs];
   }
   cell(x, z) {
-    return [Math.floor((x + HALF) / CELL), Math.floor((z + HALF) / CELL)];
+    return [Math.floor((x + this.half) / this.cs), Math.floor((z + this.half) / this.cs)];
   }
   open(i, j) {
+    const N = this.n;
     return i >= 0 && j >= 0 && i < N && j < N && !this.block[j * N + i];
   }
   // Straight line clear? (fine sampling against the exact colliders)
   clear(ax, az, bx, bz) {
     const d = Math.hypot(bx - ax, bz - az);
-    const steps = Math.max(1, Math.ceil(d / 0.3));
+    const steps = Math.max(1, Math.ceil(d / Math.min(0.3, this.cs * 0.4)));
     for (let s = 1; s <= steps; s++) {
       const t = s / steps;
-      if (!isWalkable(ax + (bx - ax) * t, az + (bz - az) * t, this.col)) return false;
+      if (!this.walk(ax + (bx - ax) * t, az + (bz - az) * t, this.col)) return false;
     }
     return true;
   }
@@ -256,9 +263,10 @@ export class NavGrid {
   }
   // Returns a list of waypoints [[x,z],...] excluding start, or null.
   findPath(sx, sz, tx, tz) {
-    if (isWalkable(tx, tz, this.col) && this.clear(sx, sz, tx, tz)) return [[tx, tz]];
+    const N = this.n;
+    if (this.walk(tx, tz, this.col) && this.clear(sx, sz, tx, tz)) return [[tx, tz]];
     let goal = [tx, tz];
-    if (!isWalkable(tx, tz, this.col)) {
+    if (!this.walk(tx, tz, this.col)) {
       const g = this.nearestOpen(tx, tz);
       if (!g) return null;
       goal = g;

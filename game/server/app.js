@@ -11,8 +11,8 @@ const DIST = path.join(ROOT, 'dist');
 
 // Builds the HTTP + WebSocket server around a Game. Kept separate from
 // index.js so tests can spin up a real server on a random port.
-export function createServer(db) {
-  const game = new Game(db);
+export function createServer(db, opts = {}) {
+  const game = new Game(db, opts);
   const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.jpg': 'image/jpeg', '.webp': 'image/webp' };
 
   function readBody(req) {

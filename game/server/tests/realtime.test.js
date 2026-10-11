@@ -53,7 +53,7 @@ async function player(name) {
       if (hit) return resolve(hit);
       const w = { pred, resolve };
       waiters.push(w);
-      setTimeout(() => reject(new Error(`timeout waiting in ${name}'s inbox`)), ms);
+      setTimeout(() => reject(new Error(`timeout waiting in ${name}'s inbox (got: ${inbox.filter((m) => m.t !== 's').slice(-14).map((m) => m.t + (m.t === 'res' ? ':' + m.rid + ':' + (m.ok ? 'ok' : m.err) : '')).join(', ')})`)), ms);
     });
   let rid = 0;
   const rpc = (t, payload) => {
@@ -61,8 +61,10 @@ async function player(name) {
     ws.send(JSON.stringify({ ...payload, t, rid: id }));
     return next((m) => m.t === 'res' && m.rid === id);
   };
+  // Actions that go through the server's RPC table (t: 'rpc').
+  const call = (m, a = {}) => rpc('rpc', { m, a });
   const welcome = await next((m) => m.t === 'welcome');
-  return { ws, inbox, next, rpc, welcome, id: welcome.you.id, token: body.token };
+  return { ws, inbox, next, rpc, call, welcome, id: welcome.you.id, token: body.token };
 }
 
 test('players see each other join, move, chat and leave in real time', async () => {
@@ -197,5 +199,49 @@ test('fishing: hook, fight, and the server replays the fight to confirm the catc
   assert.ok(honest.res.kg > 0);
   } finally {
     a.ws.close();
+  }
+});
+
+test('walk-in shops: owner stocks, a friend walks in, sees the shelves and buys; town hides them both', async () => {
+  const a = await player('Shopkeep');
+  const b = await player('Browser');
+  try {
+    game.heroes.addItem(a.id, 'oak_plank', 10);
+    game.heroes.addGold(b.id, 500);
+    const st = await a.call('shop.stock', { slot: 2, item: 'oak_plank', qty: 10, price: 12 });
+    assert.equal(st.ok, true, st.err);
+    const inA = await a.call('shop.enter', { owner: a.id });
+    assert.equal(inA.ok, true, inA.err);
+    assert.equal(inA.data.slots[0].item, 'oak_plank');
+    await b.next((m) => m.t === 'hide' && m.id === a.id);
+    // While inside, the town doesn't hear your chopping (and you can't).
+    const chop = await a.rpc('hit', { node: generateNodes()[0].id });
+    assert.equal(chop.ok, false);
+    assert.match(chop.err, /inside a shop/);
+    // Buying needs you to be in the shop.
+    const remote = await b.call('shop.buy', { owner: a.id, slot: 2, qty: 1, price: 12, item: 'oak_plank', nonce: 'x1' });
+    assert.match(remote.err, /Walk into that shop first/);
+    const inB = await b.call('shop.enter', { owner: a.id });
+    assert.equal(inB.ok, true, inB.err);
+    assert.ok(inB.data.occ.some((p) => p.id === a.id), 'Browser sees the owner inside');
+    await a.next((m) => m.t === 'rjoin' && m.p.id === b.id);
+    // A purchase retried with the same nonce only happens once.
+    const buy1 = await b.call('shop.buy', { owner: a.id, slot: 2, qty: 3, price: 12, item: 'oak_plank', nonce: 'n1' });
+    const buy2 = await b.call('shop.buy', { owner: a.id, slot: 2, qty: 3, price: 12, item: 'oak_plank', nonce: 'n1' });
+    assert.equal(buy1.ok, true, buy1.err);
+    assert.deepEqual(buy2.data, buy1.data);
+    assert.equal(game.heroes.count(b.id, 'oak_plank'), 3);
+    const sale = await a.next((m) => m.t === 'shopSale');
+    assert.equal(sale.sales[0].qty, 3);
+    await a.next((m) => m.t === 'rshelf' && m.slot === 2 && m.s.qty === 7);
+    // Walking around inside is server-checked like in town.
+    b.ws.send(JSON.stringify({ t: 'move', x: -2, z: 1.5, v: 'room' }));
+    await a.next((m) => m.t === 'rs' && m.p.some((r) => r[0] === b.id && r[4] === 'walk'));
+    const out = await b.call('shop.exit', {});
+    assert.equal(out.ok, true, out.err);
+    await a.next((m) => m.t === 'rleave' && m.id === b.id);
+  } finally {
+    a.ws.close();
+    b.ws.close();
   }
 });

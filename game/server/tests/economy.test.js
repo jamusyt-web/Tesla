@@ -115,32 +115,3 @@ test('instant buy (ioc) refunds unfilled part and never rests', () => {
   assert.throws(() => market.place(b, { side: 'buy', item: 'oak_log', price: 5, qty: 1, ioc: true }), /Nobody is selling/);
   assert.equal(heroes.gold(b), STARTER_GOLD - 10);
 });
-
-test('player shop: stock, buy from another player, unstock', () => {
-  const { db, heroes, shops, a, b } = setup();
-  heroes.addItem(a, 'oak_plank', 5);
-  shops.stock(a, { slot: 0, item: 'oak_plank', qty: 5, price: 12 });
-  assert.equal(heroes.count(a, 'oak_plank'), 0);
-  const sale = shops.buyFromPlayer(b, 'Bob', a, 0, 2);
-  assert.equal(sale.gold, 24);
-  assert.equal(heroes.gold(a), STARTER_GOLD + 24);
-  assert.equal(heroes.gold(b), STARTER_GOLD - 24);
-  assert.throws(() => shops.buyFromPlayer(b, 'Bob', a, 0, 4), /Only 3 left/);
-  assert.throws(() => shops.buyFromPlayer(a, 'Alice', a, 0, 1), /own shop/);
-  shops.unstock(a, 0);
-  assert.equal(heroes.count(a, 'oak_plank'), 3);
-  assert.equal(itemsInSystem(db, 'oak_plank'), 5);
-});
-
-test('idle NPC shoppers buy fairly priced goods, ignore greedy ones', () => {
-  const { heroes, shops, a } = setup();
-  heroes.addItem(a, 'oak_plank', 200);
-  shops.stock(a, { slot: 0, item: 'oak_plank', qty: 100, price: 10 });
-  shops.stock(a, { slot: 1, item: 'oak_plank', qty: 100, price: 100 });
-  let fair = 0;
-  let greedy = 0;
-  for (let i = 0; i < 400; i++)
-    for (const { sale } of shops.idleTick()) sale.gold === 10 ? fair++ : greedy++;
-  assert.ok(fair > 10, `fair sales ${fair}`);
-  assert.equal(greedy, 0);
-});

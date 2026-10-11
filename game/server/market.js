@@ -1,7 +1,8 @@
 import { ITEMS, isItem } from '../shared/items.js';
 import { tx, fail } from './db.js';
+import { MARKET_TAX } from '../shared/economy.js';
 
-export const MARKET_TAX = 0.04; // paid by the seller on every fill — the economy's main gold sink
+export { MARKET_TAX }; // paid by the seller on every fill — the economy's main gold sink
 export const MAX_OPEN_ORDERS = 25;
 const MAX_PRICE = 10_000_000;
 const MAX_QTY = 9_999;
@@ -53,7 +54,7 @@ export class Market {
       const fills = [];
       let remaining = qty;
       if (side === 'sell') {
-        H.takeItem(accountId, item, qty); // escrow goods
+        H.takeItem(accountId, item, qty, { keepEquipped: true }); // escrow goods
         for (;;) {
           if (!remaining) break;
           const o = this.q.bestBuy.get(item, price, accountId);

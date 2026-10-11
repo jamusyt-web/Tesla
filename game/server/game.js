@@ -11,7 +11,9 @@ import { rollFish, fishingGear, fightRating, replayFight, FISH, FISH_MAX_TICKS }
 import { GameError, fail } from './db.js';
 import { Heroes } from './heroes.js';
 import { Market } from './market.js';
-import { Shops, CUSTOMERS, npcAppetite } from './shop.js';
+import { Shops } from './shop.js';
+import { ShopRoom } from './rooms.js';
+import { SHOP } from '../shared/shop.js';
 import { Auth } from './auth.js';
 
 const GATHER_ACTS = new Set(['chop', 'mine', 'pick']);
@@ -40,7 +42,7 @@ export const TUTORIAL = [
   { id: 'chop', text: 'Chop a tree in Whisperwood (west)', reward: 20 },
   { id: 'craft', text: 'Craft Oak Planks at the Workshop', reward: 30 },
   { id: 'fight', text: 'Defeat a Meadow Slime beyond the Wilds Gate (north)', reward: 50 },
-  { id: 'stock', text: 'Put something on a shelf in Your Shop', reward: 60 },
+  { id: 'stock', text: 'Put something on a display in Your Shop', reward: 60 },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -95,7 +97,7 @@ class Channel {
   add(c) {
     // Don't materialise inside another hero.
     const e = c.ent;
-    const crowded = (x, z) => [...this.players.values()].some((o) => Math.hypot(o.ent.x - x, o.ent.z - z) < 1.3);
+    const crowded = (x, z) => [...this.players.values()].some((o) => !o.room && Math.hypot(o.ent.x - x, o.ent.z - z) < 1.3);
     for (let k = 0; k < 40 && crowded(e.x, e.z); k++) {
       const a = Math.random() * Math.PI * 2;
       const d = 1.5 + Math.random() * 3.5;
@@ -162,7 +164,6 @@ class Channel {
         e.act = 'idle';
         c.send({ t: 'fishResult', ok: false, reason: 'The line went slack — it got away.' });
       }
-      if (c.shopLive) c.tickShop(now);
     }
     for (const n of this.nodes.values()) {
       if (!n.alive && now >= n.respawnAt) {
@@ -203,6 +204,7 @@ class Channel {
     const full = this.tickNo % 60 === 0;
     const p = [];
     for (const c of this.players.values()) {
+      if (c.room) continue; // inside a shop: not in the town
       const e = c.ent;
       const row = [c.hero.id, q2(e.x), q2(e.z), q2(e.rot), e.act];
       const key = row.join(',');
@@ -220,7 +222,19 @@ class Channel {
         m.push(row);
       }
     }
-    if (p.length || m.length) this.broadcast({ t: 's', p, m });
+    if (p.length || m.length) this.#townOnly({ t: 's', p, m });
+  }
+
+  // Everything about the town, for someone stepping back out of a shop.
+  fullSnapshot() {
+    const p = [...this.players.values()].filter((c) => !c.room).map((c) => [c.hero.id, q2(c.ent.x), q2(c.ent.z), q2(c.ent.rot), c.ent.act]);
+    const m = [...this.mobs.values()].map((mob) => [mob.id, q2(mob.x), q2(mob.z), q2(mob.rot), mob.state]);
+    return { t: 's', p, m, full: true };
+  }
+
+  #townOnly(msg) {
+    const data = JSON.stringify(msg);
+    for (const c of this.players.values()) if (!c.room) c.sendRaw(data);
   }
 }
 
@@ -436,9 +450,10 @@ class Client {
     this.hero = hero;
     this.ch = null;
     this.battle = null;
-    this.shopLive = false;
-    this.customers = [];
-    this.nextCustomer = 0;
+    this.room = null; // the ShopRoom we're inside, if any
+    this.rent = null; // our body inside it
+    this.roomAt = 0;
+    this.lastInput = Date.now(); // real player input (shop presence)
     this.lastChat = 0;
     this.bucket = { t: Date.now(), n: 0 };
     const st = this.stats();
@@ -461,10 +476,15 @@ class Client {
 
   publicInfo() {
     const e = this.ent;
+    return { id: this.hero.id, name: this.hero.name, avatar: this.hero.avatar, level: this.hero.level, equip: this.hero.equip, x: q2(e.x), z: q2(e.z), rot: q2(e.rot), act: e.act, inside: this.room?.owner ?? null };
+  }
+  roomInfo() {
+    const e = this.rent;
     return { id: this.hero.id, name: this.hero.name, avatar: this.hero.avatar, level: this.hero.level, equip: this.hero.equip, x: q2(e.x), z: q2(e.z), rot: q2(e.rot), act: e.act };
   }
   publicSelf() {
-    return { ...this.publicInfo(), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial };
+    const shop = this.game.shops.info(this.hero.id);
+    return { ...this.publicInfo(), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, shop: { till: shop?.till || 0, open: shop ? !!shop.open : true } };
   }
 
   pushInventory() {
@@ -483,54 +503,38 @@ class Client {
     this.send({ t: 'tutorial', step: i + 1, done: step.id, reward: step.reward });
     this.pushInventory();
   }
-
-  // Live NPC customers while you're standing in your shop (the tapping game).
-  tickShop(now) {
-    this.customers = this.customers.filter((cu) => {
-      if (now < cu.leaveAt) return true;
-      this.send({ t: 'customerLeft', id: cu.id, why: 'impatient' });
-      return false;
-    });
-    if (now < this.nextCustomer || this.customers.length >= 3) return;
-    this.nextCustomer = now + 4500 + Math.random() * 5000;
-    const slots = this.game.shops.slots(this.hero.id);
-    if (!slots.length) return;
-    const s = slots[Math.floor(Math.random() * slots.length)];
-    const value = ITEMS[s.item].value;
-    const app = npcAppetite(s.price, value);
-    // Customers either accept your price or offer what they think it's worth.
-    const offer = app > 0.35 ? s.price : Math.max(1, Math.round(value * (1 + Math.random() * 0.3)));
-    const who = CUSTOMERS[Math.floor(Math.random() * CUSTOMERS.length)];
-    const cu = { id: `c${++this.game.seq}`, ...who, slot: s.slot, item: s.item, offer, listed: s.price, leaveAt: now + 22000, haggled: false };
-    this.customers.push(cu);
-    this.send({ t: 'customer', c: { ...cu, leaveIn: 22000 } });
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 export class Game {
-  constructor(db) {
+  // opts.shopSim = false turns off the shop simulation timer (tests drive it by hand).
+  constructor(db, opts = {}) {
     this.db = db;
+    this.opts = { shopSim: true, ...opts };
     this.heroes = new Heroes(db);
     this.market = new Market(db, this.heroes);
     this.shops = new Shops(db, this.heroes);
     this.auth = new Auth(db);
     this.channels = [];
     this.online = new Map(); // accountId → Client
+    this.rooms = new Map(); // shop owner → ShopRoom (only while someone is inside)
+    this.lastActive = this.heroes.loadActive();
+    this.buyNonces = new Map(); // buyer → Map(nonce → result): a retried purchase can't buy twice
     this.seq = 0;
     this.last = Date.now();
     this.timer = null;
-    this.idleTimer = null;
+    this.shopTimer = null;
   }
 
   start() {
     this.timer = setInterval(() => this.tick(), TICK_MS);
-    this.idleTimer = setInterval(() => this.idleShops(), 15000);
+    this.tickShops(); // catch up on sales made while the server was down
+    if (this.opts.shopSim) this.shopTimer = setInterval(() => this.tickShops(), SHOP.SIM_STEP_MS);
     this.saveTimer = setInterval(() => this.savePositions(), 30000);
   }
   stop() {
     clearInterval(this.timer);
-    clearInterval(this.idleTimer);
+    clearInterval(this.shopTimer);
     clearInterval(this.saveTimer);
     this.savePositions();
   }
@@ -546,20 +550,95 @@ export class Game {
         console.error('channel tick error', e);
       }
     }
+    for (const r of [...this.rooms.values()]) {
+      try {
+        r.tick(now, dt);
+      } catch (e) {
+        console.error('room tick error', e);
+      }
+    }
   }
 
   savePositions() {
-    for (const c of this.online.values()) this.heroes.savePos(c.hero.id, c.ent.x, c.ent.z);
+    for (const c of this.online.values()) {
+      this.heroes.savePos(c.hero.id, c.ent.x, c.ent.z);
+      this.heroes.saveActive(c.hero.id, c.lastInput);
+    }
   }
 
-  idleShops() {
-    for (const { owner, sale } of this.shops.idleTick()) {
-      const c = this.online.get(owner);
-      if (c) {
-        c.send({ t: 'shopSale', sale });
-        c.pushInventory();
+  // ── Shops ──────────────────────────────────────────────────────────
+  // How present a shop owner is, for NPC footfall: here (input in the last
+  // 10 min) and inside, online, offline, or away (no input for 12 h).
+  presenceOf(owner, t) {
+    const c = this.online.get(owner);
+    if (c && t - c.lastInput < SHOP.ACTIVE_MS) return c.room?.owner === owner ? 'inside' : 'online';
+    const last = c ? c.lastInput : (this.lastActive.get(owner) ?? 0);
+    return t - last > SHOP.AWAY_MS ? 'away' : 'offline';
+  }
+
+  tickShops(now = Date.now(), rng = Math.random) {
+    let r;
+    try {
+      r = this.shops.simulate(now, (o, t) => this.presenceOf(o, t), rng);
+    } catch (e) {
+      console.error('shop sim error', e);
+      return null;
+    }
+    const byOwner = new Map();
+    for (const ev of r.events) {
+      this.rooms.get(ev.owner)?.npcVisit(ev);
+      if (ev.sale) {
+        if (!byOwner.has(ev.owner)) byOwner.set(ev.owner, []);
+        byOwner.get(ev.owner).push(ev.sale);
       }
     }
+    for (const [owner, sales] of byOwner) this.online.get(owner)?.send({ t: 'shopSale', sales, till: this.shops.till(owner), upto: Math.max(...sales.map((x) => x.id)) });
+    if (r.skipped > 0) console.log(`shop sim: skipped ${Math.round(r.skipped / 60000)} min of downtime`);
+    return r;
+  }
+
+  enterShop(c, owner, now = Date.now()) {
+    owner = Number(owner);
+    if (!Number.isInteger(owner)) fail('No such shop.');
+    if (owner === c.hero.id) this.shops.ensure(owner);
+    const info = this.shops.info(owner);
+    if (!info) fail('No such shop.');
+    if (c.battle) fail("You're in a battle!");
+    if (c.room?.owner === owner) return c.room.payload(c); // already here (e.g. reconnecting)
+    if (now - c.roomAt < SHOP.ENTER_COOLDOWN_MS) fail('Slow down a little!');
+    const isOwner = owner === c.hero.id;
+    if (!info.open && !isOwner) fail('That shop is closed right now.');
+    const existing = this.rooms.get(owner);
+    if (existing && existing.visitors >= SHOP.ROOM_CAP && !isOwner) fail('This shop is full right now.');
+    // Your town body waits where you stood; you come back out there.
+    c.cancelFishing();
+    c.ent.path = null;
+    c.ent.act = 'idle';
+    if (c.room) c.room.remove(c, 'hop');
+    else c.ch.broadcast({ t: 'hide', id: c.hero.id }, c);
+    let room = this.rooms.get(owner);
+    if (!room) this.rooms.set(owner, (room = new ShopRoom(this, owner)));
+    c.roomAt = now;
+    return room.add(c);
+  }
+
+  exitShop(c, why = 'left') {
+    if (!c.room) fail("You're not in a shop.");
+    c.room.remove(c, why);
+    c.ch.broadcast({ t: 'show', p: c.publicInfo() }, c);
+    c.send(c.ch.fullSnapshot());
+    return { x: q2(c.ent.x), z: q2(c.ent.z) };
+  }
+
+  // Everyone who can see/hear c: their channel plus whoever is in their shop room.
+  audience(c) {
+    const out = new Set(c.ch ? c.ch.players.values() : []);
+    if (c.room) for (const o of c.room.occ.values()) out.add(o);
+    return out;
+  }
+  tellAudience(c, msg) {
+    const data = JSON.stringify(msg);
+    for (const o of this.audience(c)) o.sendRaw(data);
   }
 
   // Fill-first: join the busiest channel that still has room, so the town
@@ -567,7 +646,8 @@ export class Game {
   pickChannel(preferId) {
     const pref = this.channels.find((c) => c.id === preferId && c.size < CHANNEL_CAP);
     if (pref) return pref;
-    const open = this.channels.filter((c) => c.size < CHANNEL_CAP).sort((a, b) => b.size - a.size);
+    const visible = (ch) => [...ch.players.values()].filter((c) => !c.room).length;
+    const open = this.channels.filter((c) => c.size < CHANNEL_CAP).sort((a, b) => visible(b) - visible(a));
     if (open.length) return open[0];
     const ch = new Channel(this, this.channels.length + 1);
     this.channels.push(ch);
@@ -595,8 +675,9 @@ export class Game {
     const c = new Client(this, ws, hero);
     this.online.set(accountId, c);
     this.pickChannel().add(c);
-    const sales = this.shops.unseenSales(accountId);
-    if (sales.length) c.send({ t: 'awaySales', sales });
+    const away = this.shops.awaySummary(accountId, Date.now(), this.lastActive.get(accountId));
+    if (away) c.send({ t: 'awaySales', ...away });
+    this.shops.prune(accountId);
     ws.on('message', (buf) => this.onMessage(c, buf));
     ws.on('close', () => this.disconnect(c));
     return c;
@@ -605,7 +686,10 @@ export class Game {
   disconnect(c) {
     if (this.online.get(c.hero.id) !== c) return;
     this.online.delete(c.hero.id);
+    c.room?.remove(c, 'left');
     this.heroes.savePos(c.hero.id, c.ent.x, c.ent.z);
+    this.heroes.saveActive(c.hero.id, c.lastInput);
+    this.lastActive.set(c.hero.id, c.lastInput);
     c.ch?.remove(c);
   }
 
@@ -621,6 +705,7 @@ export class Game {
       return;
     }
     if (!m || typeof m.t !== 'string') return;
+    if (m.t !== 'ping' && !m.auto) c.lastInput = now; // automatic messages don't count as being here
     try {
       const h = HANDLERS[m.t];
       if (!h) return;
@@ -641,6 +726,7 @@ export class Game {
     if (!n) fail('Nothing there.');
     const t = NODE_TYPES[n.type];
     if (t.kind === 'fish') fail('Cast your rod to fish here.');
+    if (c.room) fail("You're inside a shop.");
     if (!n.alive) {
       // A swing that was already in flight when it fell (yours or a co-op
       // partner's) isn't an error, just too late.
@@ -720,6 +806,7 @@ export class Game {
     const n = c.ch.nodes.get(nodeId);
     if (!n || NODE_TYPES[n.type].kind !== 'fish') fail('Not a fishing spot.');
     if (c.battle) fail("You're in a battle!");
+    if (c.room) fail("You're inside a shop.");
     const rod = ITEMS[c.hero.equip.rod];
     if (!rod || this.heroes.count(c.hero.id, c.hero.equip.rod) < 1) fail('You need a fishing rod.');
     const e = c.ent;
@@ -819,7 +906,7 @@ export class Game {
     qty = Number(qty);
     if (!isItem(item) || !Number.isInteger(qty) || qty < 1) fail('Bad sale.');
     const equipped = Object.values(c.hero.equip).includes(item);
-    if (equipped && this.heroes.count(c.hero.id, item) - qty < 1) fail('Unequip that first (you need to keep one).');
+    if (equipped && this.heroes.count(c.hero.id, item) - qty < 1) fail("Keep one — it's equipped.");
     const gold = Math.max(1, Math.floor(ITEMS[item].value * NPC_SELL_RATE)) * qty;
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -842,7 +929,7 @@ export class Game {
     if (!slot) fail("That can't be equipped.");
     this.heroes.setEquip(c.hero, slot, item);
     c.pushInventory();
-    c.ch.broadcast({ t: 'equip', id: c.hero.id, equip: c.hero.equip });
+    this.tellAudience(c, { t: 'equip', id: c.hero.id, equip: c.hero.equip });
     return { slot };
   }
 }
@@ -855,10 +942,12 @@ const HANDLERS = {
 
   move(g, c, m, now) {
     if (c.battle) return;
+    if ((m.v === 'room') !== !!c.room) return; // a stale move from the other view
     if (now - (c.lastMove || 0) < 80) return; // pathfinding is the expensive bit; cap it
     c.lastMove = now;
     const x = num(m.x);
     const z = num(m.z);
+    if (c.room) return c.room.move(c, x, z);
     if (Math.hypot(x, z) > WORLD_RADIUS + 10) return;
     const path = STATIC.nav.findPath(c.ent.x, c.ent.z, x, z);
     c.cancelFishing();
@@ -874,6 +963,7 @@ const HANDLERS = {
   land: (g, c, m, now) => g.land(c, m.toggles, m.end, now),
 
   engage(g, c, m) {
+    if (c.room) fail("You're inside a shop.");
     const mob = c.ch.mobs.get(String(m.mob));
     if (!mob || mob.state === 'dead') fail('It ran off.');
     if (c.battle) fail('Already fighting!');
@@ -896,13 +986,17 @@ const HANDLERS = {
     if (!text) return;
     if (now - c.lastChat < 700) fail('Slow down a little!');
     c.lastChat = now;
-    c.ch.broadcast({ t: 'chat', from: c.hero.id, name: c.hero.name, text });
+    g.tellAudience(c, { t: 'chat', from: c.hero.id, name: c.hero.name, text, room: c.room?.owner ?? null });
   },
 
   emote(g, c, m) {
     const e = String(m.e);
     if (!['wave', 'dance', 'cheer', 'sit', 'heart'].includes(e)) return;
     if (c.battle) return;
+    if (c.room) {
+      c.rent.path = null;
+      return c.room.broadcast({ t: 'emote', id: c.hero.id, e });
+    }
     c.ent.path = null;
     c.ch.broadcast({ t: 'emote', id: c.hero.id, e });
   },
@@ -920,13 +1014,14 @@ const RPC = {
   equip: (g, c, a) => g.equip(c, a.item),
   avatar(g, c, a) {
     g.heroes.setAvatar(c.hero, a.avatar);
-    c.ch.broadcast({ t: 'avatar', id: c.hero.id, avatar: c.hero.avatar });
+    g.tellAudience(c, { t: 'avatar', id: c.hero.id, avatar: c.hero.avatar });
   },
   profile(g, c, a) {
     const h = g.heroes.load(Number(a.id));
     if (!h) fail('No such hero.');
     const on = g.online.get(h.id);
-    return { id: h.id, name: h.name, avatar: h.avatar, level: h.level, skills: h.skills, equip: h.equip, online: !!on, channel: on?.ch?.id ?? null, shop: g.shops.slots(h.id).length };
+    const shop = g.shops.info(h.id);
+    return { id: h.id, name: h.name, avatar: h.avatar, level: h.level, skills: h.skills, equip: h.equip, online: !!on, channel: on?.ch?.id ?? null, shop: g.shops.slots(h.id).length, shopOpen: shop ? !!shop.open : false, inside: on?.room?.owner ?? null };
   },
 
   // Market
@@ -948,62 +1043,73 @@ const RPC = {
     c.pushInventory();
   },
 
-  // Personal shop
-  'shop.get': (g, c, a) => ({ slots: g.shops.slots(a.owner ? Number(a.owner) : c.hero.id) }),
+  // Player shops (see server/shop.js and shared/shop.js)
+  'shop.enter': (g, c, a) => g.enterShop(c, a.owner),
+  'shop.exit': (g, c) => g.exitShop(c, 'left'),
+  'shop.state'(g, c, a) {
+    const owner = a.owner == null ? c.hero.id : Number(a.owner);
+    const st = g.shops.state(owner, c.hero.id);
+    if (owner === c.hero.id) st.presence = g.presenceOf(owner, Date.now());
+    return st;
+  },
   'shop.stock'(g, c, a) {
-    g.shops.stock(c.hero.id, a);
+    const s = g.shops.stock(c.hero.id, a);
     c.pushInventory();
     c.advanceTutorial('stock');
-    return { slots: g.shops.slots(c.hero.id) };
+    g.rooms.get(c.hero.id)?.shelf(s.slot, 'owner');
+    return { s };
   },
   'shop.unstock'(g, c, a) {
-    g.shops.unstock(c.hero.id, a.slot);
+    const slot = Number(a.slot);
+    const s = g.shops.unstock(c.hero.id, slot, a.qty ?? null);
     c.pushInventory();
-    return { slots: g.shops.slots(c.hero.id) };
+    g.rooms.get(c.hero.id)?.shelf(slot, 'owner');
+    return { s };
   },
   'shop.price'(g, c, a) {
-    g.shops.setPrice(c.hero.id, a.slot, a.price);
-    return { slots: g.shops.slots(c.hero.id) };
+    const s = g.shops.setPrice(c.hero.id, a.slot, a.price);
+    g.rooms.get(c.hero.id)?.shelf(s.slot, 'owner');
+    return { s };
   },
-  'shop.live'(g, c, a) {
-    c.shopLive = !!a.on;
-    c.customers = [];
-    c.nextCustomer = Date.now() + 1500;
+  'shop.setup'(g, c, a) {
+    const info = g.shops.setup(c.hero.id, { name: a.name, open: a.open });
+    const room = g.rooms.get(c.hero.id);
+    if (room && !info.open)
+      for (const o of [...room.occ.values()])
+        if (o !== c) {
+          g.exitShop(o, 'closed');
+          o.send({ t: 'rexit', why: 'closed', name: g.shops.displayName(info) });
+        }
+    return g.shops.state(c.hero.id, c.hero.id);
   },
-  'shop.serve'(g, c, a) {
-    const i = c.customers.findIndex((x) => x.id === a.id);
-    if (i < 0) fail('That customer left.');
-    const cu = c.customers[i];
-    if (a.action === 'decline') {
-      c.customers.splice(i, 1);
-      return { gone: true };
-    }
-    if (a.action === 'haggle') {
-      if (cu.haggled) fail('They won’t budge again.');
-      cu.haggled = true;
-      if (Math.random() < 0.55) {
-        cu.offer = Math.round(Math.max(cu.offer, cu.listed) * 1.25);
-        return { haggle: 'up', offer: cu.offer };
-      }
-      c.customers.splice(i, 1);
-      return { haggle: 'left' };
-    }
-    const sale = g.shops.serveCustomer(c.hero.id, cu.slot, cu.offer, cu.name);
-    c.customers.splice(i, 1);
+  'shop.collect'(g, c) {
+    const r = g.shops.collect(c.hero.id);
     c.pushInventory();
-    return { sale };
+    return r;
   },
+  'shop.ledger': (g, c, a) => g.shops.ledger(c.hero.id, a.before),
+  'shop.ack': (g, c, a) => g.shops.ack(c.hero.id, a.upto),
   'shop.buy'(g, c, a) {
-    const sale = g.shops.buyFromPlayer(c.hero.id, c.hero.name, Number(a.owner), a.slot, a.qty);
-    c.pushInventory();
-    const o = g.online.get(Number(a.owner));
-    if (o) {
-      o.send({ t: 'shopSale', sale });
-      o.pushInventory();
+    const owner = Number(a.owner);
+    if (c.room?.owner !== owner) fail('Walk into that shop first.');
+    const nonce = typeof a.nonce === 'string' ? a.nonce.slice(0, 32) : null;
+    const mine = g.buyNonces.get(c.hero.id) || new Map();
+    if (nonce && mine.has(nonce)) return mine.get(nonce); // a retry of a purchase that already went through
+    const { sale, s } = g.shops.buy(c.hero.id, c.hero.name, owner, a);
+    const res = { sale: { item: sale.item, qty: sale.qty, gross: sale.gross }, s };
+    if (nonce) {
+      mine.set(nonce, res);
+      while (mine.size > 20) mine.delete(mine.keys().next().value);
+      g.buyNonces.set(c.hero.id, mine);
     }
-    return { sale, slots: g.shops.slots(Number(a.owner)) };
+    c.pushInventory();
+    c.room.broadcast({ t: 'rshelf', slot: sale.slot, s, by: 'player' });
+    c.room.broadcast({ t: 'rbuy', by: c.hero.id, name: c.hero.name, slot: sale.slot, qty: sale.qty });
+    g.online.get(owner)?.send({ t: 'shopSale', sales: [sale], till: g.shops.till(owner), upto: sale.id });
+    return res;
   },
-  'shop.directory': (g) => g.shops.directory(),
+  'shop.directory': (g, c) =>
+    g.shops.directory(c.hero.id, (owner) => ({ online: g.online.has(owner), visitors: g.rooms.get(owner)?.visitors || 0 })).sort((x, y) => y.online - x.online || (y.lastSaleAt || 0) - (x.lastSaleAt || 0)),
 
   // Town hall
   'town.info'(g, c) {
@@ -1033,6 +1139,7 @@ const RPC = {
     if (target === c.ch) fail("You're already here.");
     if (target.size >= CHANNEL_CAP) fail('That channel is full.');
     if (c.battle) fail('Finish your battle first.');
+    if (c.room) fail('Leave the shop first.');
     c.ch.remove(c);
     target.add(c);
   },

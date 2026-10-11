@@ -24,6 +24,11 @@ export class Heroes {
       avatar: db.prepare('UPDATE heroes SET avatar = ? WHERE account_id = ?'),
       pos: db.prepare('UPDATE heroes SET x = ?, z = ? WHERE account_id = ?'),
       tutorial: db.prepare('UPDATE heroes SET tutorial = ? WHERE account_id = ?'),
+      equipOf: db.prepare('SELECT equip FROM heroes WHERE account_id = ?'),
+      feeMilli: db.prepare('SELECT fee_milli FROM heroes WHERE account_id = ?'),
+      setFeeMilli: db.prepare('UPDATE heroes SET fee_milli = ? WHERE account_id = ?'),
+      active: db.prepare('UPDATE heroes SET last_active = ? WHERE account_id = ?'),
+      allActive: db.prepare('SELECT account_id, COALESCE(last_active, created_at) AS t FROM heroes'),
     };
   }
 
@@ -79,11 +84,31 @@ export class Heroes {
     if (!isItem(item) || !Number.isInteger(n) || n <= 0) fail('Bad item');
     this.q.invAdd.run(id, item, n);
   }
-  takeItem(id, item, n) {
+  // keepEquipped: refuse to take the last copy of something equipped (selling
+  // or shelving your only axe would leave you unable to chop).
+  takeItem(id, item, n, { keepEquipped = false } = {}) {
     if (!isItem(item) || !Number.isInteger(n) || n <= 0) fail('Bad item');
     const have = this.count(id, item);
     if (have < n) fail(`Not enough ${ITEMS[item].name}.`);
+    if (keepEquipped && have - n < 1 && Object.values(JSON.parse(this.q.equipOf.get(id)?.equip || '{}')).includes(item)) fail("Keep one — it's equipped.");
     this.q.invSet.run(have - n, id, item);
+  }
+
+  // A seller's fee on `gross` gold at ratePm per mille. The fractional part
+  // carries over to the next sale, so splitting a sale into tiny pieces can't
+  // round the fee away. Call inside a transaction.
+  takeFee(id, gross, ratePm) {
+    const owed = gross * ratePm + (this.q.feeMilli.get(id)?.fee_milli || 0);
+    const fee = Math.floor(owed / 1000);
+    this.q.setFeeMilli.run(owed - fee * 1000, id);
+    return fee;
+  }
+
+  saveActive(id, t) {
+    this.q.active.run(t, id);
+  }
+  loadActive() {
+    return new Map(this.q.allActive.all().map((r) => [r.account_id, r.t]));
   }
 
   // Returns { leveled: bool, level } for UI feedback.

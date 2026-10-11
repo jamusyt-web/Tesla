@@ -12,7 +12,15 @@ export function openDb(file = process.env.DB_FILE || path.join(DATA_DIR, 'hearth
     PRAGMA synchronous = NORMAL;
     PRAGMA foreign_keys = ON;
     PRAGMA busy_timeout = 3000;
+  `);
+  db.exec(SCHEMA_V0);
+  migrate(db);
+  return db;
+}
 
+// The original schema. Never edit it: change the database with a new entry
+// in MIGRATIONS instead, so existing saves upgrade in place.
+export const SCHEMA_V0 = `
     CREATE TABLE IF NOT EXISTS accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -92,8 +100,52 @@ export function openDb(file = process.env.DB_FILE || path.join(DATA_DIR, 'hearth
       seen INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_shoplog ON shop_log(account_id, seen);
-  `);
-  return db;
+`;
+
+// Each migration runs once, in order, inside a transaction; PRAGMA
+// user_version records how far a database has got.
+const MIGRATIONS = [
+  // 1: walk-in shops with passive selling (till, open/closed, NPC demand pools, fees).
+  (db, now) => {
+    db.exec(`
+      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE shops (
+        account_id INTEGER PRIMARY KEY REFERENCES accounts(id),
+        name TEXT,
+        open INTEGER NOT NULL DEFAULT 1,
+        till INTEGER NOT NULL DEFAULT 0 CHECK (till >= 0),
+        seen_upto INTEGER NOT NULL DEFAULT 0,
+        sales INTEGER NOT NULL DEFAULT 0,
+        earned INTEGER NOT NULL DEFAULT 0,
+        last_sale_at INTEGER,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE npc_demand (item TEXT PRIMARY KEY, fill REAL NOT NULL, at INTEGER NOT NULL);
+      ALTER TABLE heroes ADD COLUMN last_active INTEGER;
+      ALTER TABLE heroes ADD COLUMN fee_milli INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE shop_log ADD COLUMN kind TEXT NOT NULL DEFAULT 'npc';
+      ALTER TABLE shop_log ADD COLUMN buyer_id INTEGER;
+      ALTER TABLE shop_log ADD COLUMN fee INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE shop_log ADD COLUMN slot INTEGER;
+      CREATE INDEX idx_shoplog_owner ON shop_log(account_id, id);
+    `);
+    // Old sales were already paid out, so all existing history counts as seen.
+    db.prepare(
+      `INSERT INTO shops (account_id, name, seen_upto, created_at)
+       SELECT h.account_id, h.shop_name, COALESCE((SELECT MAX(id) FROM shop_log l WHERE l.account_id = h.account_id), 0), ? FROM heroes h`,
+    ).run(now);
+    db.prepare('UPDATE heroes SET last_active = ?').run(now);
+    db.prepare("INSERT INTO meta (key, value) VALUES ('shop_sim_at', ?)").run(String(now));
+  },
+];
+
+export function migrate(db) {
+  let v = db.prepare('PRAGMA user_version').get().user_version;
+  for (; v < MIGRATIONS.length; v++)
+    tx(db, () => {
+      MIGRATIONS[v](db, Date.now());
+      db.exec(`PRAGMA user_version = ${v + 1}`);
+    });
 }
 
 // Run fn inside a transaction; rolls back on throw. node:sqlite is synchronous
