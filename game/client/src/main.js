@@ -10,10 +10,13 @@ import { coinify } from './ui/glyphs.js';
 const app = document.getElementById('app');
 coinify(app);
 
+const wantsEditor = new URLSearchParams(location.search).has('editor');
+
 async function boot() {
   if (!getToken()) return openAuth(app, afterAuth);
   try {
-    const { hero } = await api('me');
+    const { hero, admin } = await api('me');
+    if (wantsEditor) return admin ? openWorldEditor() : location.replace('/');
     hero ? enterGame() : createHero();
   } catch (e) {
     if (e.status === 401) {
@@ -25,7 +28,18 @@ async function boot() {
   }
 }
 
+// The world editor (server owners): its own screen, no hero in the world.
+async function openWorldEditor() {
+  const bar = h('i', { style: { width: '0%' } });
+  const loading = h('div.loading', h('div', h('span.spin'), 'Opening the world editor…', h('div.loadbar', bar)));
+  app.append(loading);
+  const { openEditor } = await import('./editor/editor.js');
+  await openEditor(app, { onProgress: (p) => (bar.style.width = `${Math.round(p * 100)}%`) });
+  loading.remove();
+}
+
 function afterAuth(r) {
+  if (wantsEditor) return boot();
   r.hasHero ? enterGame() : createHero();
 }
 
@@ -67,6 +81,12 @@ async function enterGame() {
       game.destroy();
       hud.el.remove();
       return createHero();
+    }
+    if (ev.code === 4003) {
+      // The server owner saved a new version of the world: load it.
+      app.append(h('div.loading', h('div', h('span.spin'), 'The world was updated. Rejoining…')));
+      setTimeout(() => location.reload(), 1200);
+      return;
     }
     if (ev.code === 4002) {
       app.append(h('div.loading', h('div', h('span.spin'), 'You logged in on another device.', h('br'), h('button.btn', { style: { marginTop: '14px' }, on: { click: () => location.reload() } }, 'Play here instead'))));

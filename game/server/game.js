@@ -27,10 +27,12 @@ const MOB_SPEED = 2.2;
 const NPC_SELL_RATE = 0.6; // instant-sell to the town merchant pays 60% of value
 const CHAT_MAX = 140;
 
-const STATIC = (() => {
+// Collision and navigation for the current map (rebuilt when the map changes).
+const buildStatic = () => {
   const col = buildColliders();
   return { nodes: NODES, col, nav: new NavGrid(col) };
-})();
+};
+let STATIC = buildStatic();
 
 const rint = (a, b, rng = Math.random) => a + Math.floor(rng() * (b - a + 1));
 const q2 = (v) => Math.round(v * 100) / 100;
@@ -491,7 +493,7 @@ class Client {
   }
   publicSelf() {
     const shop = this.game.shops.info(this.hero.id);
-    return { ...this.publicInfo(), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
+    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
   }
 
   pushInventory() {
@@ -661,6 +663,19 @@ export class Game {
     const ch = new Channel(this, this.channels.length + 1);
     this.channels.push(ch);
     return ch;
+  }
+
+  // A new world map is in place (saved from the editor). Rebuild collision and
+  // navigation, then send everyone back in: their clients reload to build the
+  // new world, and they rejoin fresh channels (nodes and monsters reset).
+  reloadWorld() {
+    STATIC = buildStatic();
+    for (const c of [...this.online.values()]) {
+      c.send({ t: 'kicked', reason: 'The world was updated.' });
+      this.disconnect(c);
+      c.ws.close(4003, 'world updated');
+    }
+    this.channels = [];
   }
 
   announce(text) {

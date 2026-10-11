@@ -158,6 +158,7 @@ function hullGeometry(geo, skinned = false) {
   if (geo.index) g.setIndex(geo.index.clone());
   const merged = mergeVertices(g, 1e-3);
   merged.computeVertexNormals();
+  merged.userData.shared = true; // cached: reused by every copy, never disposed
   hullCache.set(geo, merged);
   return merged;
 }
@@ -212,6 +213,7 @@ export async function loadAssets(onProgress = () => {}) {
 function prepare(gltf, def) {
   def._pack = [].concat(def.url)[0].split('/')[2];
   const root = gltf.scene;
+  root.traverse((o) => o.geometry && (o.geometry.userData.shared = true)); // copies share these
   root.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(root);
   const size = box.getSize(new THREE.Vector3());

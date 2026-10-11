@@ -351,7 +351,11 @@ export class NodeView {
 }
 
 // ── Town builder ─────────────────────────────────────────────────────────
+// Everything goes into one group (`root`), so the world editor can throw a
+// whole town away and build it again after an edit (see disposeTown).
 export function buildTown(scene, fx, { low = false } = {}) {
+  const root = new THREE.Group();
+  scene.add(root);
   const pickables = [];
   const animated = [];
   const labels = [];
@@ -375,14 +379,14 @@ export function buildTown(scene, fx, { low = false } = {}) {
       fragmentShader: 'uniform vec3 top; uniform vec3 mid; uniform vec3 bot; varying vec3 vp; void main(){ float h = vp.y; vec3 c = h > 0.15 ? mix(mid, top, smoothstep(0.15, 0.7, h)) : mix(bot, mid, smoothstep(-0.05, 0.15, h)); gl_FragColor = vec4(c, 1.0); }',
     }),
   );
-  scene.add(sky);
+  root.add(sky);
   animated.push((dt, t, cam) => sky.position.copy(cam.position));
 
   // Ocean
   const ocean = new THREE.Mesh(new THREE.RingGeometry(WORLD_RADIUS - 2, 420, 160, 6), waterMaterial({ radius: 420, coast: WORLD_RADIUS + 5.2, shallow: '#58a8bc', deep: '#1b4f74', fog: scene.fog, opacity: 1 }));
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = -2.2;
-  scene.add(ocean);
+  root.add(ocean);
   animated.push((dt, t) => {
     const u = ocean.material.uniforms;
     u.time.value = t;
@@ -447,7 +451,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
   const ground = new THREE.Mesh(g, new THREE.MeshToonMaterial({ vertexColors: true, map: groundTexture(), gradientMap: toon('#fff').gradientMap }));
   ground.receiveShadow = true;
   ground.userData.ground = true;
-  scene.add(ground);
+  root.add(ground);
   pickables.push(ground);
 
   // Plazas: concentric paving rings and spokes (sized to the plaza).
@@ -459,7 +463,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
       m.rotation.x = -Math.PI / 2;
       m.position.set(p.x, 0.02 + i * 0.004, p.z);
       m.receiveShadow = true;
-      scene.add(m);
+      root.add(m);
     });
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
@@ -468,7 +472,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
       spoke.rotation.z = -a;
       spoke.position.set(p.x + Math.cos(a) * 8.6 * k, 0.035, p.z + Math.sin(a) * 8.6 * k);
       spoke.receiveShadow = true;
-      scene.add(spoke);
+      root.add(spoke);
     }
   }
   // Sparse stepping stones along the paths.
@@ -502,7 +506,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
       im.setColorAt(i, col.set(['#b8ac96', '#a89c86', '#c4b8a2'][i % 3]));
     });
     im.receiveShadow = true;
-    scene.add(im);
+    root.add(im);
   }
 
   // Grass tufts (instanced cones) everywhere that isn't paved, built on or wet.
@@ -534,7 +538,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
         im.setColorAt(k++, col.set(wild ? ['#4e6e38', '#43602f', '#5b7a42'][j] : ['#6b9a48', '#5a8a3d', '#7caa55'][j]));
       }
     }
-    scene.add(im);
+    root.add(im);
   }
 
   // Props: every placed object in the map. Models are instanced per slot and
@@ -550,7 +554,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
         obj.position.set(pr.x, pr.y || 0, pr.z);
         obj.rotation.y = pr.rot;
         obj.traverse((o) => o.isMesh && o.material.side !== THREE.BackSide && (o.castShadow = true));
-        scene.add(obj);
+        root.add(obj);
         continue;
       }
       if (!assets.has(pr.slot)) continue;
@@ -559,7 +563,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
         m.object.position.set(pr.x, pr.y || 0, pr.z);
         m.object.rotation.y = pr.rot;
         if (pr.s) m.object.scale.multiplyScalar(pr.s);
-        scene.add(m.object);
+        root.add(m.object);
         const ph = pr.x * 0.7;
         animated.push((dt, t) => {
           m.object.position.y = (pr.y || 0) + Math.sin(t * 1.6 + ph) * 0.08;
@@ -574,7 +578,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     }
     for (const g of groups.values()) {
       const inst = assets.instanced(g.slot, g.list, { variant: g.v, outline: !NO_OUTLINE.has(g.slot), castShadow: !NO_SHADOW.has(g.slot) });
-      if (inst) scene.add(inst);
+      if (inst) root.add(inst);
     }
   }
 
@@ -584,7 +588,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     pickVol.position.set(pr.x, 0.9, pr.z);
     pickVol.layers.set(2); // never drawn; the tap raycaster checks every layer
     pickVol.userData.station = pr.station;
-    scene.add(pickVol);
+    root.add(pickVol);
     pickables.push(pickVol);
   }
 
@@ -606,7 +610,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
   };
   for (const [i, b] of BUILDINGS.entries()) {
     const grp = buildModular(b, i) || buildHouse(b, rng);
-    scene.add(grp);
+    root.add(grp);
     fadeable(grp);
     grp.traverse((o) => {
       if (o.isMesh) o.userData.building = b.id;
@@ -625,7 +629,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     const castle = buildGate(gt);
     const k = gt.scale / 4.5;
     if (castle) {
-      scene.add(castle);
+      root.add(castle);
       fadeable(castle);
       for (const sx of [-1, 1]) {
         const flame = new THREE.Mesh(sph(0.16, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffb340' }));
@@ -634,7 +638,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
         torch.position.set(gt.x + sx * 1.75 * k, 2.75 * k, gt.z + 2.35 * k);
         torch.rotation.x = 0.35;
         animated.push((dt, t) => flame.scale.setScalar(1 + Math.sin(t * 13 + sx) * 0.18));
-        scene.add(torch, flame);
+        root.add(torch, flame);
       }
       labels.push({ kind: 'place', id: gt.id, text: gt.label, icon: gt.icon, glyph: gt.glyph, pos: new THREE.Vector3(gt.x, castle.userData.top + 1.2, gt.z) });
     } else {
@@ -661,7 +665,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
       const banner = mesh(box(1.8, 1.4, 0.08), '#c4534a', { outline: 0.02 });
       banner.position.set(0, 4.8, 0.55);
       grp.add(beam, roof, banner);
-      scene.add(grp);
+      root.add(grp);
       labels.push({ kind: 'place', id: gt.id, text: gt.label, icon: gt.icon, glyph: gt.glyph, pos: new THREE.Vector3(gt.x, 8.3, gt.z) });
     }
   }
@@ -681,7 +685,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     const top = mesh(sph(0.35), '#ffd84a', { outline: OL });
     top.position.y = 3.0;
     grp.add(rim, water, pillar, bowl, top);
-    scene.add(grp);
+    root.add(grp);
     const spout = new THREE.Vector3(f.x, 3.1, f.z);
     animated.push((dt) => {
       if (Math.random() < dt * 30) fx.puff.burst(spout, { n: 1, color: ['#bfeaff', '#ffffff', '#8fd8ff'], speed: 1.6, up: 3, gravity: 9, size: 0.16, life: 0.75, jitter: 0.1 });
@@ -694,7 +698,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     water.rotation.x = -Math.PI / 2;
     water.position.set(l.x, -0.12, l.z);
     water.userData.water = true;
-    scene.add(water);
+    root.add(water);
     pickables.push(water);
     animated.push((dt, t) => {
       const u = water.material.uniforms;
@@ -717,10 +721,10 @@ export function buildTown(scene, fx, { low = false } = {}) {
       reed.position.set(x, 0.5, z);
       const cat = mesh(new THREE.CapsuleGeometry(0.07, 0.25, 3, 6), '#7c4a2c');
       cat.position.set(x, 1.25, z);
-      scene.add(reed, cat);
+      root.add(reed, cat);
     }
     const pads = ring(Math.round(14 * (l.r / 14)), 3, l.r - 2).map((p) => ({ ...p, y: -0.06, rot: rng() * 6.28, s: 0.8 + rng() * 0.6 }));
-    scatterModels(scene, 'deco_lily_pad', pads, { outline: false, castShadow: false });
+    scatterModels(root, 'deco_lily_pad', pads, { outline: false, castShadow: false });
   }
   // Docks: planks on posts.
   for (const d of DOCKS) {
@@ -737,7 +741,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
         post.position.set(d.x + (d.w / 2 + 0.15) * sx, 0.2, d.z - d.d / 2 + 1 + i * (d.d / 3.3));
         dock.add(post);
       }
-    scene.add(dock);
+    root.add(dock);
   }
 
   // Zone names floating over each zone.
@@ -760,7 +764,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     const home = homes[i < 6 ? 0 : i % homes.length];
     const ph = rng() * 10;
     const r = 4 + rng() * 5;
-    scene.add(bf);
+    root.add(bf);
     animated.push((dt, t) => {
       const a = t * 0.3 + ph;
       bf.position.set(home.x + Math.cos(a) * r, 1.2 + Math.sin(t * 2 + ph) * 0.4, home.z + Math.sin(a * 1.3) * r);
@@ -775,11 +779,12 @@ export function buildTown(scene, fx, { low = false } = {}) {
   for (const n of NODES) {
     const v = new NodeView(n, fx);
     nodes.set(n.id, v);
-    scene.add(v.root);
+    root.add(v.root);
     pickables.push(v.root);
   }
 
   return {
+    root,
     pickables,
     nodes,
     labels,
@@ -789,6 +794,21 @@ export function buildTown(scene, fx, { low = false } = {}) {
       for (const n of nodes.values()) n.update(dt);
     },
   };
+}
+
+// Remove a town built by buildTown and free what it alone owns. Model
+// geometry shared with other copies (flagged by assets.js) is left alone.
+export function disposeTown(town) {
+  town.root.parent?.remove(town.root);
+  const seen = new Set();
+  town.root.traverse((o) => {
+    if (o.isInstancedMesh) o.dispose();
+    const g = o.geometry;
+    if (g && !g.userData.shared && !seen.has(g)) {
+      seen.add(g);
+      g.dispose();
+    }
+  });
 }
 
 // Place many copies of a model slot (instanced), spreading them across the

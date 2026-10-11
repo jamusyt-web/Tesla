@@ -54,7 +54,7 @@ export class Socket {
       for (const p of this.pending.values()) p.reject(new Error('Disconnected'));
       this.pending.clear();
       this.emit('_close', ev);
-      if (this.closedByUs || ev.code === 4002 || ev.code === 4001) return;
+      if (this.closedByUs || ev.code === 4001 || ev.code === 4002 || ev.code === 4003) return; // 4003: world updated, the page reloads
       const wait = Math.min(8000, 500 * 2 ** this.retry++);
       setTimeout(() => this.connect(), wait);
     };

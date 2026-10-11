@@ -9,7 +9,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { setWorld, mapProblems } from '../shared/world.js';
+import { setWorld, mapProblems, formatMap } from '../shared/world.js';
 import { MONSTERS } from '../shared/monsters.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,6 +45,39 @@ export function useMap(map, file = null) {
   const body = JSON.stringify(map);
   Object.assign(current, { file, map, body, gzip: zlib.gzipSync(body), etag: `"${crypto.createHash('sha1').update(body).digest('hex').slice(0, 16)}"` });
   return map;
+}
+
+// Save an edited map as this server's own copy and start using it. The
+// previous copy is kept in data/maps/backups (the newest 30 are kept).
+// `base` is the ETag the editor started from: if the map changed meanwhile
+// (another owner saved), refuse rather than silently overwrite their work.
+export function saveMap(map, base) {
+  if (base && base !== current.etag) {
+    const e = new Error('The world was changed by someone else since you opened the editor. Reload the editor to get their changes (export yours first if you want to keep them).');
+    e.conflict = true;
+    throw e;
+  }
+  const shippedRev = read(SHIPPED_MAP)?.rev ?? 0;
+  const next = { ...map, rev: Math.max(current.map?.rev ?? 0, shippedRev) + 1 };
+  const bad = serverMapProblems(next);
+  if (bad.length) {
+    const e = new Error(`The map has problems:\n- ${bad.join('\n- ')}`);
+    e.problems = bad;
+    throw e;
+  }
+  const dir = path.dirname(LOCAL_MAP);
+  const backups = path.join(dir, 'backups');
+  fs.mkdirSync(backups, { recursive: true });
+  if (fs.existsSync(LOCAL_MAP)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.copyFileSync(LOCAL_MAP, path.join(backups, `world-rev${current.map?.rev ?? 0}-${stamp}.json`));
+    const old = fs.readdirSync(backups).filter((f) => f.endsWith('.json')).sort();
+    for (const f of old.slice(0, Math.max(0, old.length - 30))) fs.rmSync(path.join(backups, f));
+  }
+  const tmp = `${LOCAL_MAP}.tmp`;
+  fs.writeFileSync(tmp, formatMap(next));
+  fs.renameSync(tmp, LOCAL_MAP);
+  return useMap(next, LOCAL_MAP);
 }
 
 export function loadMap() {

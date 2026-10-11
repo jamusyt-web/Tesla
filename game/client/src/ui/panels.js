@@ -508,6 +508,8 @@ export class Panels {
     const tabs = [['online', 'Online'], ['shops', 'Shops'], ['leaders', 'Leaders'], ['channels', 'Channels'], ['invites', 'Invites']];
     const render = () => {
       clear(c.body);
+      if (this.hud.me.admin)
+        c.body.append(h('div.rowcard', h('div.grow', h('div.t', 'Server owner'), h('div.s', 'Change the world map: place, move and remove anything.')), h('button.btn.small', { on: { click: () => (location.href = '/?editor') } }, 'Edit the world')));
       c.body.append(h('div.tabs', { style: { flexWrap: 'wrap' } }, ...tabs.map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render()) } }, l))));
       if (!info) return c.body.append(h('div.empty', 'Loading…'));
       if (tab === 'online') {

@@ -131,6 +131,23 @@ export function setWorld(m) {
   return m;
 }
 
+// A map as text, one entity per line: readable, and diffs show exactly what moved.
+export function formatMap(m) {
+  const keys = Object.keys(m);
+  const lines = ['{'];
+  keys.forEach((k, ki) => {
+    const v = m[k];
+    const comma = ki < keys.length - 1 ? ',' : '';
+    if (Array.isArray(v)) {
+      lines.push(`  ${JSON.stringify(k)}: [`);
+      v.forEach((e, i) => lines.push(`    ${JSON.stringify(e)}${i < v.length - 1 ? ',' : ''}`));
+      lines.push(`  ]${comma}`);
+    } else lines.push(`  ${JSON.stringify(k)}: ${JSON.stringify(v)}${comma}`);
+  });
+  lines.push('}');
+  return lines.join('\n') + '\n';
+}
+
 export const zoneById = (id) => ZONES.find((z) => z.id === id) ?? null;
 export const zonesOfKind = (kind) => ZONES.filter((z) => (z.kind ?? z.id) === kind);
 

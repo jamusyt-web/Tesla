@@ -176,6 +176,13 @@ const MIGRATIONS = [
       CREATE INDEX idx_craftlog_ts ON craft_log(ts);
     `);
   },
+  // 3: server owners (can use the world editor). The first account ever made is one.
+  (db) => {
+    db.exec(`
+      ALTER TABLE accounts ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;
+      UPDATE accounts SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM accounts);
+    `);
+  },
 ];
 
 export function migrate(db) {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { GameError } from './db.js';
 import { Game } from './game.js';
-import { current as currentMap } from './map.js';
+import { current as currentMap, saveMap } from './map.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
@@ -16,12 +16,12 @@ export function createServer(db, opts = {}) {
   const game = new Game(db, opts);
   const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.jpg': 'image/jpeg', '.webp': 'image/webp' };
 
-  function readBody(req) {
+  function readBody(req, limit = 1e5) {
     return new Promise((resolve, reject) => {
       let s = '';
       req.on('data', (d) => {
         s += d;
-        if (s.length > 1e5) reject(new Error('too big'));
+        if (s.length > limit) reject(new Error('too big'));
       });
       req.on('end', () => {
         try {
@@ -75,7 +75,19 @@ export function createServer(db, opts = {}) {
       const accountId = game.auth.verify(token);
       if (!accountId) return json(res, 401, { error: 'Please log in.' });
       if (req.method === 'GET' && url.pathname === '/api/me') {
-        return json(res, 200, { hero: game.heroes.load(accountId) });
+        return json(res, 200, { hero: game.heroes.load(accountId), admin: game.auth.isAdmin(accountId) });
+      }
+      // The world editor saves here (server owners only).
+      if (req.method === 'POST' && url.pathname === '/api/map') {
+        if (!game.auth.isAdmin(accountId)) return json(res, 403, { error: 'Only the server owner can edit the world.' });
+        const body = await readBody(req, 8e6);
+        try {
+          const m = saveMap(body.map, body.base);
+          game.reloadWorld();
+          return json(res, 200, { ok: true, rev: m.rev, etag: currentMap.etag });
+        } catch (e) {
+          return json(res, e.conflict ? 409 : 400, { error: e.message, problems: e.problems });
+        }
       }
       if (req.method === 'POST' && url.pathname === '/api/hero') {
         const body = await readBody(req);

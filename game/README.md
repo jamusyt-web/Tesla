@@ -100,12 +100,13 @@ server/   game.js   channels, 20Hz tick, movement, gathering, fishing, battles, 
           shop.js   player shops: displays, till, NPC customer simulation
           rooms.js  shop interiors (who's inside, movement)
           heroes.js inventory/gold/xp persistence      auth.js  invites + sessions
-          map.js    loads the world map, serves it at /api/map
+          map.js    loads the world map, serves it at /api/map, saves edits
           app.js    HTTP API + WebSocket upgrade        index.js entry point
 client/   src/game.js       renderer, camera, input, prediction, interpolation
+          src/editor/       the world editor (owners only): editor.js, kinds.js
           src/scene/        town, avatar, tools, monsters, particles (three.js, toon-shaded)
           src/ui/           HUD, menus (bag, workshop, market, shop, town hall), creator
-scripts/  bots.js (populate the lobby), dev.js
+scripts/  bots.js (populate the lobby), dev.js, invite.js, admin.js (server owners)
 ```
 
 ## The world map
@@ -117,12 +118,28 @@ Everything placed in the world lives in **`maps/world.json`**: buildings, the ga
 - **Checks:** a broken map stops the server with a list of exactly what's wrong (duplicate ids, unknown node types or monsters, missing coordinates).
 - **Your own copy:** a map saved to `data/maps/world.json` (next to your saves) is used instead, unless the game ships a map with a higher `rev`.
 
+## The world editor (server owners)
+
+The first account made on a server is its **owner**. Owners get an **Edit the world** button in the Town Hall, which opens the editor: the real world seen from above, where you can change anything.
+
+- **Look around:** drag empty ground to pan, right-drag to turn the view, scroll (or pinch) to zoom. WASD and the arrow keys also pan.
+- **Select and move:** click something to select it; its details appear in the panel on the right, where you can type exact values. Drag it to move it. Big areas (zones, monster camps, regions, lakes) need a click first, so you can still pan across them. Clicking the same spot again picks the next thing underneath.
+- **Place:** open **Place**, pick something (plants, town props, resource nodes, monster camps, cottages, docks, fountains, plazas, lakes, zones, regions), then click the world. Plants and nodes keep placing until you press Esc. *Natural variety* gives plants a random turn and size.
+- **Paths:** **Path**, click points, then double-click the last point (or press Enter). Select a path to drag its points, add more, or change its width.
+- **Keys:** Q / E turn the selection, Delete removes it, Ctrl+D copies it, Ctrl+Z / Ctrl+Y undo and redo, G turns grid snapping on and off, Ctrl+S saves.
+- **Saving:** **Save** checks the map, then checks that every resource node, door and monster camp can still be walked to from the spawn point, and tells you if something is cut off. Saving makes the change live straight away: anyone playing sees "The world was updated" and rejoins the new version a second later. The previous version is kept in `data/maps/backups/` (the last 30 saves).
+- **Drafts:** unsaved edits are kept in your browser; if you close the editor without saving, it offers them back next time.
+- **Export / Import:** **Export** downloads the map as a file, to keep a copy or send it over. **Import** loads one back in (then Save to make it live).
+- **More owners:** `npm run admin -- <username>` (Windows: `npm.cmd run admin -- <username>`) makes someone an owner, `npm run admin -- <username> off` removes them, and `npm run admin` lists the owners.
+
+The Workshop's five crafting stations and the four main buildings (Workshop, Market, Your Shop, Town Hall) can be moved but not deleted, because the game needs them.
+
 ## Roadmap (next phases)
 
 The big plan, one step at a time:
 
 1. **Map as data** (done): the world lives in `maps/world.json` instead of code.
-2. **In-game map editor**, for the server owner: fly around, place, move and delete buildings, props, trees, nodes and monster camps, paint paths, save.
+2. **In-game map editor** (done): owners place, move and delete anything, draw paths, set monster camps, and save it live.
 3. **A much bigger world**: load and draw only what's near you, split the world into regions, travel between them.
 4. **Four or five major towns**, from the starter town up through harder ones, each with its own biome, resources, monsters and market (prices differ between towns, so hauling goods pays).
 5. **Personal land and building** (Skyblock-style): your own plot with buildings that make money over time, using the editor's placement tools.

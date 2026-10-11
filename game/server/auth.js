@@ -55,7 +55,16 @@ export class Auth {
       .run(username, hash(password, salt), salt, inv?.created_by ?? null, Date.now());
     const id = Number(r.lastInsertRowid);
     if (inv) this.db.prepare('UPDATE invites SET used_by = ? WHERE code = ?').run(id, code);
+    if (this.accountCount() === 1) this.setAdmin(id, true); // whoever starts the server owns it
     return this.issue(id);
+  }
+
+  // Server owners can edit the world. The first account is one; `npm run admin` adds more.
+  isAdmin(accountId) {
+    return !!this.db.prepare('SELECT is_admin FROM accounts WHERE id = ?').get(accountId)?.is_admin;
+  }
+  setAdmin(accountId, on) {
+    this.db.prepare('UPDATE accounts SET is_admin = ? WHERE id = ?').run(on ? 1 : 0, accountId);
   }
 
   login({ username, password }) {
