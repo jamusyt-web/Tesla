@@ -9,9 +9,10 @@ import { h } from './util/dom.js';
 import { sfx } from './util/sfx.js';
 import { ITEMS } from '../../shared/items.js';
 import { MONSTERS } from '../../shared/monsters.js';
+import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
   generateNodes, generateScenery, buildColliders, NavGrid, stepPath, approachPoint, doorPoint,
-  BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, GATE, ZONES,
+  BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, GATE, ZONES, SWING_GATE,
 } from '../../shared/world.js';
 
 const INTERP_DELAY = 130; // ms behind real time we render other players
@@ -212,7 +213,8 @@ export class GameClient {
   #updateGuide(dt) {
     const G = this.guide;
     const tg = G.target;
-    G.group.visible = !!tg;
+    // Out of the way while you're working the target (it drew through the tree).
+    G.group.visible = !!tg && !this.gather;
     if (!tg || !this.me) {
       G.dots.count = 0;
       return;
@@ -431,7 +433,10 @@ export class GameClient {
     this.addPlayer(m.you, true);
     for (const p of m.players) this.addPlayer(p);
     for (const mob of m.mobs) this.addMob(mob);
-    for (const n of this.town.nodes.values()) if (!n.alive) n.respawn();
+    for (const n of this.town.nodes.values()) {
+      if (!n.alive) n.respawn();
+      else n.setHp(n.maxHp); // a different channel's damage must not linger
+    }
     for (const ns of m.nodes) {
       const v = this.town.nodes.get(ns.id);
       if (!v) continue;
@@ -540,7 +545,9 @@ export class GameClient {
     const objs = [...this.town.pickables, ...this.folk.objects, ...[...this.players.values()].filter((p) => !p.isMe).map((p) => p.av.root), ...[...this.mobs.values()].filter((m) => m.mob.root.visible).map((m) => m.mob.root)];
     const hits = this.raycaster.intersectObjects(objs, true);
     let ground = null;
-    for (const hit of hits) {
+    outer: for (const hit of hits) {
+      // three.js raycasts hidden meshes too: a felled tree must not catch taps.
+      for (let o = hit.object; o; o = o.parent) if (!o.visible) continue outer;
       const u = hit.object.userData;
       if (u.mob) return { kind: 'mob', id: u.mob, point: hit.point };
       if (u.npc) return { kind: 'npc', npc: u.npc, point: hit.point };
@@ -559,18 +566,20 @@ export class GameClient {
       this.reel();
       return;
     }
-    // Gathering: a tap anywhere on/inside the timing ring (or on the node) is a swing.
-    if (this.gather) {
-      const n = STATIC.nodes.get(this.gather.node);
-      const c = this.project(new THREE.Vector3(n.x, NODE_TYPES[n.type].kind === 'tree' ? 2.2 : 1.3, n.z));
-      if (Math.hypot(x - c.x, y - c.y) <= 110) return this.swing();
-    }
     const hit = this.pick(x, y);
-    if (!hit) return;
-    if (this.gather && hit.kind === 'node' && hit.id === this.gather.node) {
-      this.swing();
-      return;
+    // Gathering: a tap on the node, or anywhere on/inside its timing ring, is
+    // a swing — unless you clearly tapped something else (another tree, a
+    // monster, a person).
+    if (this.gather) {
+      if (hit?.kind === 'node' && hit.id === this.gather.node) return this.swing();
+      const other = hit && (hit.kind === 'node' || hit.kind === 'mob' || hit.kind === 'npc' || hit.kind === 'player');
+      if (!other) {
+        const n = STATIC.nodes.get(this.gather.node);
+        const c = this.project(new THREE.Vector3(n.x, NODE_TYPES[n.type].kind === 'tree' ? 2.2 : 1.3, n.z));
+        if (Math.hypot(x - c.x, y - c.y) <= 110) return this.swing();
+      }
     }
+    if (!hit) return;
     this.stopGather();
     if (hit.kind === 'ground') return this.walkTo(hit.point.x, hit.point.z, true);
     if (hit.kind === 'node') return this.goNode(hit.id);
@@ -593,6 +602,17 @@ export class GameClient {
   actionKey() {
     if (this.fishing) return this.reel();
     if (this.gather) return this.swing();
+    // Not busy: work the nearest tree / rock / herb / fishing spot in reach.
+    const L = this.me?.local;
+    if (!L || this.battle) return;
+    let best = null;
+    for (const n of STATIC.nodes.values()) {
+      const t = NODE_TYPES[n.type];
+      const reach = t.kind === 'fish' ? FISH_RANGE - 0.5 : INTERACT_RANGE + t.r * n.s + 0.6;
+      const d = Math.hypot(n.x - L.x, n.z - L.z);
+      if (d <= reach && this.town.nodes.get(n.id)?.alive && (!best || d < best.d)) best = { id: n.id, d };
+    }
+    if (best) this.goNode(best.id);
   }
 
   walkTo(x, z, marker = false, onArrive = null) {
@@ -623,30 +643,62 @@ export class GameClient {
       this.hud.toast(`This ${t.name} is regrowing…`);
       return;
     }
+    // Say what's needed now, rather than after the walk over.
+    const need = this.#gatherBlocker(t);
+    if (need) {
+      this.hud.toast(need, 'err');
+      this.hud.ring?.(view);
+      return;
+    }
     const L = this.me.local;
     const range = t.kind === 'fish' ? FISH_RANGE - 0.5 : INTERACT_RANGE + t.r * node.s;
     const arrive = () => this.startNodeAction(id);
-    if (Math.hypot(L.x - node.x, L.z - node.z) <= range && STATIC.nav.clear(L.x, L.z, node.x + (L.x - node.x) * 0.5, node.z + (L.z - node.z) * 0.5)) return arrive();
+    // Already in reach and standing still: start right away. (While walking,
+    // finish at the stand-point instead, so client and server stop together.)
+    if (!L.path && Math.hypot(L.x - node.x, L.z - node.z) <= range && STATIC.nav.clear(L.x, L.z, node.x + (L.x - node.x) * 0.5, node.z + (L.z - node.z) * 0.5)) return arrive();
     const ap = approachPoint(node, L.x, L.z, STATIC.col, STATIC.nav);
     if (!ap || !this.walkTo(ap[0], ap[1], false, arrive)) this.hud.toast("Can't reach that.");
     this.hud.ring?.(view);
+  }
+
+  // Why you can't work this node yet (level / tool), or null.
+  #gatherBlocker(t) {
+    const me = this.hud.me;
+    if (!me || t.kind === 'fish') return null;
+    const lvl = levelFromXp(me.skills?.[t.skill] || 0);
+    if (lvl < t.lvl) return `🔒 ${t.name} needs ${SKILLS[t.skill].name} level ${t.lvl} (you're ${lvl}).`;
+    if (t.tool) {
+      const tool = ITEMS[me.equip?.[t.tool]];
+      const name = t.tool === 'axe' ? 'axe' : 'pickaxe';
+      if (!tool || !(me.inv?.[me.equip[t.tool]] > 0)) return `You need ${t.tool === 'axe' ? 'an axe' : 'a pickaxe'}. Craft one at the Workshop!`;
+      if (tool.tier < t.tier) return `🔒 ${t.name} needs a better ${name} (tier ${t.tier}).`;
+    }
+    return null;
   }
 
   startNodeAction(id) {
     const node = STATIC.nodes.get(id);
     const t = NODE_TYPES[node.type];
     const L = this.me.local;
+    // The server stops you where you are when you start working, so do the same.
+    L.path = null;
+    this.intent = null;
     L.rot = Math.atan2(node.x - L.x, node.z - L.z);
+    if (!this.town.nodes.get(id)?.alive) return this.hud.toast(`This ${t.name} is regrowing…`);
     if (t.kind === 'herb') {
       this.me.av.play('pick');
-      this.sock.req('hit', { node: id }).then(() => sfx.pick()).catch((e) => this.hud.toast(e.message, 'err'));
+      this.sock
+        .req('hit', { node: id })
+        .then((r) => !r?.tooFast && !r?.gone && sfx.pick())
+        .catch((e) => this.hud.toast(e.message, 'err'));
       return;
     }
     if (t.kind === 'fish') return this.cast(id);
-    const toolId = this.hud.me.equip[t.tool];
-    const tool = ITEMS[toolId];
-    if (!tool || !(this.hud.me.inv[toolId] > 0)) return this.hud.toast(`You need ${t.tool === 'axe' ? 'an axe' : 'a pickaxe'}. Craft one at the Workshop!`, 'err');
-    this.gather = { node: id, tool: t.tool, period: tool.speed, last: 0, queued: false, kind: t.kind };
+    const need = this.#gatherBlocker(t);
+    if (need) return this.hud.toast(need, 'err');
+    const tool = ITEMS[this.hud.me.equip[t.tool]];
+    this.gather = { node: id, tool: t.tool, period: tool.speed, last: 0, queued: false, kind: t.kind, dead: false };
+    if (this.hud.questLock?.kind === 'tree' && t.kind === 'tree') this.hud.questLock = { kind: 'tree', id }; // the guide follows your choice
     this.me.av.hold(t.tool);
     this.me.av.setState('gather');
     this.hud.showRhythm(this.gather);
@@ -656,9 +708,10 @@ export class GameClient {
   swing() {
     const g = this.gather;
     if (!g) return;
+    if (g.dead || !this.town.nodes.get(g.node)?.alive) return; // it just fell
     const now = performance.now();
     const since = now - g.last;
-    if (g.last && since < g.period * 0.74) {
+    if (g.last && since < g.period * SWING_GATE) {
       // Too early: buffer one tap so mashing still swings at max speed.
       if (!g.queued) {
         g.queued = true;
@@ -667,20 +720,34 @@ export class GameClient {
             g.queued = false;
             this.swing();
           }
-        }, g.period * 0.74 - since + 5);
+        }, g.period * SWING_GATE - since + 5);
       }
       return;
     }
+    const prev = g.last;
     g.last = now;
     this.me.av.play('swing', Math.min(0.42, g.period / 1000 * 0.62));
     const node = STATIC.nodes.get(g.node);
     this.me.local.rot = Math.atan2(node.x - this.me.local.x, node.z - this.me.local.z);
     if (navigator.vibrate) navigator.vibrate(12);
     this.hud.rhythmSwing(now);
-    this.sock.req('hit', { node: g.node }).catch((e) => {
-      this.hud.toast(e.message, 'err');
-      this.stopGather();
-    });
+    this.sock
+      .req('hit', { node: g.node })
+      .then((r) => {
+        if (this.gather !== g) return;
+        if (r?.gone) return this.stopGather(); // it fell just before this swing landed
+        if (r?.tooFast) {
+          // Network jitter made two swings arrive too close together: keep the
+          // ring in step with the server and send this one again shortly.
+          g.last = prev;
+          setTimeout(() => this.gather === g && this.swing(), (r.wait || 60) + 15);
+        }
+      })
+      .catch((e) => {
+        const dead = !this.town.nodes.get(g.node)?.alive;
+        if (!dead) this.hud.toast(e.message, 'err');
+        if (this.gather === g) this.stopGather();
+      });
   }
 
   stopGather() {
@@ -705,7 +772,7 @@ export class GameClient {
         if (view.type.kind === 'tree') sfx.chop(m.perfect);
         else if (view.type.kind === 'rock') sfx.mine(m.perfect);
       }
-      if (pv?.isMe) {
+      if (pv?.isMe && view.type.kind !== 'herb') {
         this.shakeAmt = Math.max(this.shakeAmt, m.perfect ? 0.35 : 0.14);
         this.floatText(top, m.perfect ? `PERFECT! -${m.dmg}` : `-${m.dmg}`, m.perfect ? 'perfect' : 'dmg');
         if (this.gather?.node === m.id) this.hud.rhythmResult(m.perfect);
@@ -735,7 +802,11 @@ export class GameClient {
       if (near) view.type.kind === 'tree' ? sfx.timber() : view.type.kind === 'rock' ? sfx.crumble() : null;
       if (view.type.kind === 'tree') view.onLand = () => near && (this.shakeAmt = Math.max(this.shakeAmt, 0.5));
     }, 120);
-    if (this.gather?.node === m.id) setTimeout(() => this.stopGather(), 300);
+    if (this.gather?.node === m.id) {
+      const g = this.gather;
+      g.dead = true; // no more swings at it; the ring lingers a moment for the fall
+      setTimeout(() => this.gather === g && this.stopGather(), 300);
+    }
   }
 
   onLoot(m) {
@@ -1073,10 +1144,10 @@ export class GameClient {
         // Way off (lag spike / tab was asleep): snap, but keep heading to the same place.
         L.x = s.x;
         L.z = s.z;
-        if (L.path) {
+        if (L.path && s.act === 'walk') {
           const [gx, gz] = L.path[L.path.length - 1];
           L.path = STATIC.nav.findPath(L.x, L.z, gx, gz);
-        }
+        } else L.path = null; // the server isn't walking: neither are we
       } else if (!moving && s.act !== 'walk' && err > 0.05) {
         const k = Math.min(1, dt * 6);
         L.x += (s.x - L.x) * k;

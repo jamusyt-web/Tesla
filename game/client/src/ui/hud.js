@@ -4,7 +4,7 @@ import { sfx } from '../util/sfx.js';
 import { portrait } from './portrait.js';
 import { ITEMS } from '../../../shared/items.js';
 import { SKILLS, levelProgress } from '../../../shared/skills.js';
-import { BUILDINGS, ZONES, LAKE, DOCK, WORLD_RADIUS, doorPoint, GATE, NODE_TYPES } from '../../../shared/world.js';
+import { BUILDINGS, ZONES, LAKE, DOCK, WORLD_RADIUS, doorPoint, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import { Panels } from './panels.js';
 import { newFight, stepFight, FISH_TICK } from '../../../shared/fishing.js';
@@ -338,8 +338,8 @@ export class Hud {
       const ring = this.rhythm.querySelector('.ring');
       const size = 64 + (1 - k) * 110;
       ring.style.width = ring.style.height = size + 'px';
-      ring.style.opacity = g.last ? (since > g.period + 230 ? 0.35 : 1) : 0.35;
-      this.rhythm.classList.toggle('now', !!g.last && since >= g.period - 170 && since <= g.period + 230);
+      ring.style.opacity = g.last ? (since > g.period * 1.3 ? 0.35 : 1) : 0.35;
+      this.rhythm.classList.toggle('now', !!g.last && isPerfectSwing(since, g.period));
       this.nodebar.style.transform = `translate(${s.x}px, ${s.y - 70}px) translate(-50%, -100%)`;
     }
   }

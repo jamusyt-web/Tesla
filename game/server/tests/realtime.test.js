@@ -124,6 +124,10 @@ test('gathering is validated by the server and shared between players', async ()
     const r = await who.rpc('hit', { node: oak.id });
     if (r.data?.broke || (!r.ok && /regrowing/.test(r.err))) break;
   }
+  // A swing that lands just after the fall is "too late", not an error toast.
+  const late = await a.rpc('hit', { node: oak.id });
+  assert.equal(late.ok, true, late.err);
+  assert.equal(late.data.gone, true);
   const lootA = await a.next((m) => m.t === 'loot');
   const lootB = await b.next((m) => m.t === 'loot');
   assert.ok(lootA.loot.oak_log >= 2 && lootB.loot.oak_log >= 2, 'co-op chopping rewards everyone who helped');

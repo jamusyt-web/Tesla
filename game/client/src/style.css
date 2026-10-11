@@ -157,6 +157,8 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 /* ── HUD ─────────────────────────────────────────────────── */
 .hud { position: absolute; inset: 0; pointer-events: none; }
 .hud > * { pointer-events: auto; }
+/* World-tracking overlays are look-only: taps must reach the canvas (the ring is where you tap to swing). */
+.hud > .rhythm, .hud > .rhythm *, .hud > .nodebar { pointer-events: none; }
 .topbar { position: absolute; top: calc(8px + var(--safe-top)); left: 8px; right: 8px; display: flex; gap: 8px; align-items: flex-start; pointer-events: none; }
 .topbar > * { pointer-events: auto; }
 .hero-chip { display: flex; align-items: center; gap: 8px; background: rgba(255, 253, 247, 0.96); border: 3px solid #f2d7a8; border-radius: 18px; padding: 5px 12px 5px 5px; box-shadow: var(--shadow); cursor: pointer; }

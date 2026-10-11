@@ -5,7 +5,7 @@ import { levelFromXp, doubleChance } from '../shared/skills.js';
 import { MONSTERS, heroStats, damage } from '../shared/monsters.js';
 import {
   generateNodes, generateScenery, buildColliders, NavGrid, NODE_TYPES, stepPath,
-  INTERACT_RANGE, FISH_RANGE, SPAWN, isWalkable, WORLD_RADIUS, isDeepSpot,
+  INTERACT_RANGE, FISH_RANGE, SPAWN, isWalkable, WORLD_RADIUS, isDeepSpot, SWING_FLOOR, isPerfectSwing,
 } from '../shared/world.js';
 import { rollFish, fishingGear, fightRating, replayFight, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
 import { GameError, fail } from './db.js';
@@ -13,6 +13,8 @@ import { Heroes } from './heroes.js';
 import { Market } from './market.js';
 import { Shops, CUSTOMERS, npcAppetite } from './shop.js';
 import { Auth } from './auth.js';
+
+const GATHER_ACTS = new Set(['chop', 'mine', 'pick']);
 
 export const CHANNEL_CAP = Number(process.env.CHANNEL_CAP || 40);
 const TICK_MS = 50; // 20 Hz simulation
@@ -138,6 +140,7 @@ class Channel {
         if (!e.path && e.act === 'walk') e.act = 'idle';
       }
       if (!c.battle && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + 4 * dt);
+      if (GATHER_ACTS.has(e.act) && now - e.lastSwing > 2500) e.act = 'idle'; // stopped swinging
       const f = e.fishing;
       if (f && f.state === 'wait' && now >= f.biteAt) {
         // Decide what bit now; the client needs the fight parameters to play it.
@@ -638,7 +641,12 @@ export class Game {
     if (!n) fail('Nothing there.');
     const t = NODE_TYPES[n.type];
     if (t.kind === 'fish') fail('Cast your rod to fish here.');
-    if (!n.alive) fail(`This ${t.name} is regrowing.`);
+    if (!n.alive) {
+      // A swing that was already in flight when it fell (yours or a co-op
+      // partner's) isn't an error, just too late.
+      if (now - (n.brokeAt || 0) < 2000) return { gone: true };
+      fail(`This ${t.name} is regrowing.`);
+    }
     if (c.battle) fail("You're in a battle!");
     const e = c.ent;
     if (Math.hypot(e.x - n.x, e.z - n.z) > INTERACT_RANGE + t.r * n.s + 0.4) fail('Get closer first.');
@@ -654,9 +662,9 @@ export class Game {
       period = tool.speed;
     }
     const since = now - e.lastSwing;
-    if (since < period * 0.72) return { tooFast: true }; // swing still in progress
+    if (since < period * SWING_FLOOR) return { tooFast: true, wait: Math.ceil(period * SWING_FLOOR - since) }; // swing still in progress
     // Rhythm bonus: swing again right as the timing ring closes = PERFECT (2x).
-    const perfect = !!t.tool && e.lastNode === n.id && since >= period - 170 && since <= period + 230;
+    const perfect = !!t.tool && e.lastNode === n.id && isPerfectSwing(since, period);
     e.lastSwing = now;
     e.lastNode = n.id;
     e.act = t.kind === 'tree' ? 'chop' : t.kind === 'rock' ? 'mine' : 'pick';
@@ -670,7 +678,13 @@ export class Game {
 
     // Broken! Everyone who helped gets a full roll (co-op friendly).
     n.alive = false;
+    n.brokeAt = now;
     n.respawnAt = now + t.respawn * 1000;
+    // Everyone working it puts their tool away (others saw them frozen mid-chop).
+    for (const pid of n.hitters) {
+      const pe = ch.players.get(pid)?.ent;
+      if (pe && pe.lastNode === n.id && GATHER_ACTS.has(pe.act)) pe.act = 'idle';
+    }
     ch.broadcast({ t: 'node', id: n.id, alive: false, hp: 0, by: c.hero.id, respawnIn: t.respawn * 1000 });
     for (const pid of n.hitters) {
       const pc = ch.players.get(pid);

@@ -280,6 +280,7 @@ export class NodeView {
   // Node broke: tree topples away from the finisher, rocks shatter, herbs pop.
   break(from) {
     this.alive = false;
+    this.shake = 0; // a leftover hit-shake would twist the hidden model
     const p = this.root.position;
     const kind = this.type.kind;
     if (kind === 'tree') {
@@ -335,6 +336,7 @@ export class NodeView {
       }
       return;
     }
+    if (!F.visible) return; // felled / broken: nothing to animate until it regrows
     if (this.grow > 0) {
       this.grow = Math.min(1, this.grow + dt * 1.8);
       const g = this.grow;

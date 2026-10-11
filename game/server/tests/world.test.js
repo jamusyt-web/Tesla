@@ -1,7 +1,8 @@
 import { PROPS } from '../../shared/props.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateNodes, generateScenery, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKE, DOCK, GATE, gateColliders } from '../../shared/world.js';
+import { generateNodes, generateScenery, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKE, DOCK, GATE, gateColliders, SWING_GATE, SWING_FLOOR, isPerfectSwing } from '../../shared/world.js';
+import { ITEMS } from '../../shared/items.js';
 import { MONSTERS } from '../../shared/monsters.js';
 
 const nodes = generateNodes();
@@ -93,5 +94,15 @@ test('the road to the Wilds goes through the gate arch, and every monster camp i
   for (const [id, m] of Object.entries(MONSTERS)) {
     const p = nav.nearestOpen(m.spawn.x, m.spawn.z);
     assert.ok(p && nav.findPath(SPAWN.x, SPAWN.z, p[0], p[1]), `${id} camp at ${m.spawn.x},${m.spawn.z} is reachable`);
+  }
+});
+
+test('swing rhythm: mashing can never score PERFECT, and on-beat swings always can', () => {
+  for (const it of Object.values(ITEMS).filter((i) => i.speed)) {
+    const P = it.speed;
+    // The earliest a buffered (mashed) swing goes out is SWING_GATE·P, plus up to 120 ms of jitter either way.
+    for (let since = P * SWING_GATE - 120; since <= P * SWING_GATE + 30; since += 5) assert.equal(isPerfectSwing(since, P), false, `${it.name}: mash at ${since | 0}ms`);
+    for (let j = -60; j <= 60; j += 10) assert.ok(isPerfectSwing(P + j, P), `${it.name}: on the beat ±${j}ms`);
+    assert.ok(SWING_FLOOR * P < SWING_GATE * P - 90, `${it.name}: server floor leaves jitter headroom`);
   }
 });

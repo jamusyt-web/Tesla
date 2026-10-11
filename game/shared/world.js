@@ -7,6 +7,19 @@ export const MOVE_SPEED = 6.2; // units / second
 export const INTERACT_RANGE = 2.9; // how close you must stand to hit a tree/rock
 export const FISH_RANGE = 7.5;
 
+// Swing rhythm for chopping and mining, shared so the client's timing ring
+// and the server's rules agree. P is the tool's swing period in ms.
+// - The client never sends a swing sooner than SWING_GATE·P after the last
+//   one (an earlier tap waits), so mashing caps out at 1 damage per 0.74·P.
+// - The server ignores swings closer than SWING_FLOOR·P (anti-macro), which
+//   leaves ~0.19·P (95-130 ms) of headroom for network jitter, and even a
+//   macro swinging at the floor does less damage than on-beat play.
+// - A swing landing in the PERFECT window (the ring meeting the circle) does
+//   double damage; the window starts after the gate, so mashing never scores it.
+export const SWING_GATE = 0.74;
+export const SWING_FLOOR = 0.55;
+export const isPerfectSwing = (since, P) => since >= P * 0.88 && since <= P * 1.3;
+
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
