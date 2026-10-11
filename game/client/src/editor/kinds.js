@@ -116,6 +116,7 @@ export const KINDS = {
       COLOR('ground', 'Ground colour'),
     ],
   },
+  lands: { label: 'Land', prefix: 'land', order: 9, name: () => 'Land', hit: (e) => ({ r: e.r, ring: true }), fields: () => [...XZ, num('r', 'Radius', 1, { min: 5, help: 'Overlap pieces of land to shape the coast' })] },
   regions: {
     label: 'Region',
     prefix: 'region',
@@ -164,6 +165,7 @@ export const PALETTE = [
       { kind: 'lakes', label: 'Lake', make: (x, z) => ({ x, z, r: 8, deep: 3 }) },
       { kind: 'zones', label: 'Zone', make: (x, z) => ({ kind: 'meadow', label: 'New Zone', x, z, r: 12, ground: '#74a04c' }) },
       { kind: 'regions', label: 'Region (town / area)', make: (x, z) => ({ name: 'New Region', tier: 1, kind: 'town', x, z, r: 40 }) },
+      { kind: 'lands', label: 'Land', make: (x, z) => ({ x, z, r: 40 }) },
     ],
   },
 ];

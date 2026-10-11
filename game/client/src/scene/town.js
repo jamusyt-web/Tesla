@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { mesh, toon, shade } from './toon.js';
 import * as assets from './assets.js';
-import { waterMaterial, groundTexture } from './water.js';
+import { waterMaterial, seaMaterial, groundTexture } from './water.js';
 import { buildModular, buildGate } from './buildings.js';
 import { PROC_BUILDERS } from './procprops.js';
 import {
-  BUILDINGS, ZONES, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, WORLD_RADIUS, NODE_TYPES,
-  pathSegments, zonesOfKind, mulberry32,
+  BUILDINGS, ZONES, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, LANDS, EXTENT, SPAWN, NODE_TYPES,
+  pathSegments, zonesOfKind, landDistance, mulberry32,
 } from '../../../shared/world.js';
 
 // Small ground cover: no ink line and no shadow (they'd just add noise).
@@ -353,7 +353,14 @@ export class NodeView {
 // ── Town builder ─────────────────────────────────────────────────────────
 // Everything goes into one group (`root`), so the world editor can throw a
 // whole town away and build it again after an edit (see disposeTown).
-export function buildTown(scene, fx, { low = false } = {}) {
+//
+// The world can be far bigger than the screen, so the ground, grass, stepping
+// stones and props are built in CHUNK-sized squares as the camera comes near
+// them and thrown away when it's far off. Buildings, water, nodes and labels
+// are few enough to build once (three.js skips drawing what's off screen).
+const CHUNK = 96;
+
+export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   const root = new THREE.Group();
   scene.add(root);
   const pickables = [];
@@ -362,11 +369,8 @@ export function buildTown(scene, fx, { low = false } = {}) {
   const rng = mulberry32(99);
   const segs = pathSegments();
   const fades = [];
-  const nearPath = (x, z, pad) => segs.some((s) => distSeg(x, z, s) < s[4] + pad);
   const inPlaza = (x, z, pad = 0) => PLAZAS.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + pad);
-  const inLake = (x, z, pad = 0) => LAKES.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + pad);
   const inDock = (x, z, pad = 0) => DOCKS.some((d) => Math.abs(x - d.x) < d.w / 2 + pad && Math.abs(z - d.z) < d.d / 2 + pad);
-  const inBuilding = (x, z, pad = 0) => BUILDINGS.some((b) => Math.abs(x - b.x) < b.w / 2 + pad && Math.abs(z - b.z) < b.d / 2 + pad);
 
   // Sky dome
   const sky = new THREE.Mesh(
@@ -382,77 +386,78 @@ export function buildTown(scene, fx, { low = false } = {}) {
   root.add(sky);
   animated.push((dt, t, cam) => sky.position.copy(cam.position));
 
-  // Ocean
-  const ocean = new THREE.Mesh(new THREE.RingGeometry(WORLD_RADIUS - 2, 420, 160, 6), waterMaterial({ radius: 420, coast: WORLD_RADIUS + 5.2, shallow: '#58a8bc', deep: '#1b4f74', fog: scene.fog, opacity: 1 }));
-  ocean.rotation.x = -Math.PI / 2;
-  ocean.position.y = -2.2;
-  root.add(ocean);
-  animated.push((dt, t) => {
-    const u = ocean.material.uniforms;
-    u.time.value = t;
-    if (scene.fog) (u.fogNear.value = scene.fog.near), (u.fogFar.value = scene.fog.far);
-    ocean.position.y = -2.2 + Math.sin(t * 0.8) * 0.06;
-  });
+  // Sea: one big plane under everything; the shader knows the coastline.
+  {
+    const cx = (EXTENT.x0 + EXTENT.x1) / 2;
+    const cz = (EXTENT.z0 + EXTENT.z1) / 2;
+    const size = Math.max(EXTENT.x1 - EXTENT.x0, EXTENT.z1 - EXTENT.z0) + 840;
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(size, size), seaMaterial({ lands: LANDS, center: [cx, cz], shallow: '#58a8bc', deep: '#1b4f74', fog: scene.fog }));
+    sea.rotation.x = -Math.PI / 2;
+    sea.position.set(cx, -2.2, cz);
+    root.add(sea);
+    animated.push((dt, t) => {
+      const u = sea.material.uniforms;
+      u.time.value = t;
+      if (scene.fog) (u.fogNear.value = scene.fog.near), (u.fogFar.value = scene.fog.far);
+      sea.position.y = -2.2 + Math.sin(t * 0.8) * 0.06;
+    });
+  }
 
-  // Ground: vertex-coloured terrain with paths, plazas, zone tints, sandy lake
-  // shores and a cliff falling away at the island's edge.
-  const SIZE = Math.ceil((WORLD_RADIUS + 22) * 2);
-  const SEG = Math.round(SIZE / (low ? 1.57 : 1.12));
-  const g = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
-  g.rotateX(-Math.PI / 2);
-  const pos = g.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
-  const c = new THREE.Color();
+  // Ground shape and colour at any point: gentle undulation, flat plazas,
+  // lake beds, and beach then cliff falling away past the coast.
   const grass = new THREE.Color('#74a04c');
   const grass2 = new THREE.Color('#628c42');
-  const path = new THREE.Color('#b89b6e');
-  const plaza = new THREE.Color('#a89a82');
+  const pathCol = new THREE.Color('#b89b6e');
+  const plazaCol = new THREE.Color('#a89a82');
   const sand = new THREE.Color('#d6bd8a');
   const cliff = new THREE.Color('#7a5b40');
-  const zoneCols = ZONES.map((z) => new THREE.Color(z.ground || '#74a04c'));
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    const r = Math.hypot(x, z);
+  const zoneCols = new Map(ZONES.map((z) => [z, new THREE.Color(z.ground || '#74a04c')]));
+  const heightAt = (x, z, near) => {
+    const s = landDistance(x, z);
+    let y = 0;
+    if (s > 1) {
+      const k = smooth(1, 9, s);
+      y = -k * 5 + Math.sin(x * 0.3 + z * 0.2) * 0.3 * k;
+    } else if (!near.plazas.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + 2.8)) y = Math.sin(x * 0.13) * Math.cos(z * 0.11) * 0.12;
+    for (const l of near.lakes) {
+      const dl = Math.hypot(x - l.x, z - l.z);
+      if (dl < l.r) y = Math.min(y, -0.7 * (1 - dl / l.r) - 0.05);
+    }
+    return y;
+  };
+  const colourAt = (x, z, near, c) => {
     const n = Math.sin(x * 0.21) * Math.cos(z * 0.17) + Math.sin(x * 0.07 + z * 0.11) * 0.6;
     c.copy(grass).lerp(grass2, 0.5 + n * 0.25);
-    ZONES.forEach((zn, k) => {
-      const d = Math.hypot(x - zn.x, z - zn.z);
-      const w = 1 - smooth(zn.r - 4, zn.r + 3, d);
-      if (w > 0) c.lerp(zoneCols[k], w * 0.75);
-    });
-    let y = 0;
-    let lakeY = null;
-    for (const l of LAKES) {
+    for (const zn of near.zones) {
+      const w = 1 - smooth(zn.r - 4, zn.r + 3, Math.hypot(x - zn.x, z - zn.z));
+      if (w > 0) c.lerp(zoneCols.get(zn), w * 0.75);
+    }
+    for (const l of near.lakes) {
       const dl = Math.hypot(x - l.x, z - l.z);
       if (dl < l.r + 3.5) c.lerp(sand, 1 - smooth(l.r + 1, l.r + 3.5, dl));
-      if (dl < l.r) lakeY = Math.min(lakeY ?? 0, -0.7 * (1 - dl / l.r) - 0.05);
     }
     let pd = Infinity;
-    for (const s of segs) pd = Math.min(pd, distSeg(x, z, s) - s[4]);
-    if (pd < 0.6) c.lerp(path, 1 - smooth(-0.4, 0.6, pd));
-    for (const p of PLAZAS) {
+    for (const s of near.segs) pd = Math.min(pd, distSeg(x, z, s) - s[4]);
+    if (pd < 0.6) c.lerp(pathCol, 1 - smooth(-0.4, 0.6, pd));
+    for (const p of near.plazas) {
       const rp = Math.hypot(x - p.x, z - p.z);
-      if (rp < p.r + 0.8) c.lerp(plaza, 1 - smooth(p.r - 0.7, p.r + 0.8, rp));
+      if (rp < p.r + 0.8) c.lerp(plazaCol, 1 - smooth(p.r - 0.7, p.r + 0.8, rp));
     }
-    if (r > WORLD_RADIUS + 1) {
-      const k = smooth(WORLD_RADIUS + 1, WORLD_RADIUS + 9, r);
-      c.lerp(r < WORLD_RADIUS + 5 ? sand : cliff, Math.min(1, k * 2));
-      y = -k * 5 + Math.sin(x * 0.3 + z * 0.2) * 0.3 * k;
-    } else if (!inPlaza(x, z, 2.8)) y = Math.sin(x * 0.13) * Math.cos(z * 0.11) * 0.12;
-    if (lakeY !== null) y = lakeY;
-    pos.setY(i, y);
-    colors[i * 3] = c.r;
-    colors[i * 3 + 1] = c.g;
-    colors[i * 3 + 2] = c.b;
-  }
-  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  g.computeVertexNormals();
-  const ground = new THREE.Mesh(g, new THREE.MeshToonMaterial({ vertexColors: true, map: groundTexture(), gradientMap: toon('#fff').gradientMap }));
-  ground.receiveShadow = true;
-  ground.userData.ground = true;
-  root.add(ground);
-  pickables.push(ground);
+    const s = landDistance(x, z);
+    if (s > 1) c.lerp(s < 5 ? sand : cliff, Math.min(1, smooth(1, 9, s) * 2));
+    return c;
+  };
+  // What's close enough to a square to affect its ground (keeps the loops short).
+  const nearRect = (x0, z0, x1, z1, pad) => {
+    const hit = (x, z, r) => x + r > x0 - pad && x - r < x1 + pad && z + r > z0 - pad && z - r < z1 + pad;
+    return {
+      zones: ZONES.filter((zn) => hit(zn.x, zn.z, zn.r + 3)),
+      lakes: LAKES.filter((l) => hit(l.x, l.z, l.r + 3.5)),
+      plazas: PLAZAS.filter((p) => hit(p.x, p.z, p.r + 3)),
+      segs: segs.filter((s) => Math.max(s[0], s[2]) + s[4] + 1 > x0 - pad && Math.min(s[0], s[2]) - s[4] - 1 < x1 + pad && Math.max(s[1], s[3]) + s[4] + 1 > z0 - pad && Math.min(s[1], s[3]) - s[4] - 1 < z1 + pad),
+      buildings: BUILDINGS.filter((b) => hit(b.x, b.z, Math.max(b.w, b.d) / 2 + 1)),
+    };
+  };
 
   // Plazas: concentric paving rings and spokes (sized to the plaza).
   for (const p of PLAZAS) {
@@ -475,110 +480,25 @@ export function buildTown(scene, fx, { low = false } = {}) {
       root.add(spoke);
     }
   }
+
+  // Sort the chunked things into their squares once.
+  const chunkOf = (x, z) => `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
+  const bucket = (map, k, v) => (map.get(k) ?? map.set(k, []).get(k)).push(v);
+  const propsIn = new Map();
+  for (const pr of PROPS) bucket(propsIn, chunkOf(pr.x, pr.z), pr);
   // Sparse stepping stones along the paths.
-  {
-    const stones = [];
-    for (const s of segs) {
-      const len = Math.hypot(s[2] - s[0], s[3] - s[1]);
-      if (len < 4) continue;
-      for (let i = 0; i < len * (low ? 0.5 : 0.9); i++) {
-        const t = rng();
-        const off = (rng() - 0.5) * s[4] * 1.4;
-        const nx = -(s[3] - s[1]) / len;
-        const nz = (s[2] - s[0]) / len;
-        const x = s[0] + (s[2] - s[0]) * t + nx * off;
-        const z = s[1] + (s[3] - s[1]) * t + nz * off;
-        if (inPlaza(x, z, 0.3)) continue;
-        stones.push([x, z]);
-      }
-    }
-    const geo = cyl(0.36, 0.4, 0.06, 7);
-    const im = new THREE.InstancedMesh(geo, toon('#ffffff'), stones.length);
-    const o = new THREE.Object3D();
-    const col = new THREE.Color();
-    stones.forEach(([x, z], i) => {
-      o.position.set(x, 0.03, z);
-      o.rotation.y = rng() * 3;
-      const sc = 0.6 + rng() * 0.6;
-      o.scale.set(sc, 1, sc * (0.7 + rng() * 0.4));
-      o.updateMatrix();
-      im.setMatrixAt(i, o.matrix);
-      im.setColorAt(i, col.set(['#b8ac96', '#a89c86', '#c4b8a2'][i % 3]));
-    });
-    im.receiveShadow = true;
-    root.add(im);
-  }
-
-  // Grass tufts (instanced cones) everywhere that isn't paved, built on or wet.
-  {
-    const tufts = [];
-    for (let i = 0; i < (low ? 1200 : 3000); i++) {
-      const a = rng() * Math.PI * 2;
-      const d = Math.sqrt(rng()) * (WORLD_RADIUS - 1);
-      const x = Math.cos(a) * d;
-      const z = Math.sin(a) * d;
-      if (inPlaza(x, z, 0.8) || inBuilding(x, z, 1) || inLake(x, z, 2) || nearPath(x, z, 0.4)) continue;
-      tufts.push([x, z]);
-    }
-    const wilds = zonesOfKind('wilds');
-    const geo = new THREE.ConeGeometry(0.12, 0.5, 4);
-    geo.translate(0, 0.25, 0);
-    const im = new THREE.InstancedMesh(geo, toon('#ffffff'), tufts.length * 3);
-    const o = new THREE.Object3D();
-    const col = new THREE.Color();
-    let k = 0;
-    for (const [x, z] of tufts) {
-      const wild = wilds.some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 6);
-      for (let j = 0; j < 3; j++) {
-        o.position.set(x + (rng() - 0.5) * 0.4, 0, z + (rng() - 0.5) * 0.4);
-        o.rotation.set((rng() - 0.5) * 0.5, rng() * 3, (rng() - 0.5) * 0.5);
-        o.scale.setScalar(0.6 + rng() * 0.9);
-        o.updateMatrix();
-        im.setMatrixAt(k, o.matrix);
-        im.setColorAt(k++, col.set(wild ? ['#4e6e38', '#43602f', '#5b7a42'][j] : ['#6b9a48', '#5a8a3d', '#7caa55'][j]));
-      }
-    }
-    root.add(im);
-  }
-
-  // Props: every placed object in the map. Models are instanced per slot and
-  // variant; proc_* kinds are built in code (procprops.js); bobbing ones animate.
-  {
-    const ctx = { fx, animate: (fn) => animated.push(fn) };
-    const groups = new Map();
-    for (const pr of PROPS) {
-      if (pr.slot.startsWith('proc_')) {
-        const make = PROC_BUILDERS[pr.slot];
-        if (!make) continue;
-        const obj = make(pr, ctx);
-        obj.position.set(pr.x, pr.y || 0, pr.z);
-        obj.rotation.y = pr.rot;
-        obj.traverse((o) => o.isMesh && o.material.side !== THREE.BackSide && (o.castShadow = true));
-        root.add(obj);
-        continue;
-      }
-      if (!assets.has(pr.slot)) continue;
-      if (pr.bob) {
-        const m = assets.make(pr.slot, { variant: pr.v || 0 });
-        m.object.position.set(pr.x, pr.y || 0, pr.z);
-        m.object.rotation.y = pr.rot;
-        if (pr.s) m.object.scale.multiplyScalar(pr.s);
-        root.add(m.object);
-        const ph = pr.x * 0.7;
-        animated.push((dt, t) => {
-          m.object.position.y = (pr.y || 0) + Math.sin(t * 1.6 + ph) * 0.08;
-          m.object.rotation.z = Math.sin(t * 1.1 + ph) * 0.06;
-        });
-        continue;
-      }
-      const v = (pr.v || 0) % assets.variantCount(pr.slot);
-      const key = pr.slot + '|' + v;
-      if (!groups.has(key)) groups.set(key, { slot: pr.slot, v, list: [] });
-      groups.get(key).list.push({ x: pr.x, z: pr.z, y: pr.y || 0, rot: pr.rot, s: pr.s ?? 1 });
-    }
-    for (const g of groups.values()) {
-      const inst = assets.instanced(g.slot, g.list, { variant: g.v, outline: !NO_OUTLINE.has(g.slot), castShadow: !NO_SHADOW.has(g.slot) });
-      if (inst) root.add(inst);
+  const stonesIn = new Map();
+  for (const s of segs) {
+    const len = Math.hypot(s[2] - s[0], s[3] - s[1]);
+    if (len < 4) continue;
+    for (let i = 0; i < len * (low ? 0.5 : 0.9); i++) {
+      const t = rng();
+      const off = (rng() - 0.5) * s[4] * 1.4;
+      const nx = -(s[3] - s[1]) / len;
+      const nz = (s[2] - s[0]) / len;
+      const x = s[0] + (s[2] - s[0]) * t + nx * off;
+      const z = s[1] + (s[3] - s[1]) * t + nz * off;
+      if (!inPlaza(x, z, 0.3)) bucket(stonesIn, chunkOf(x, z), [x, z, rng() * 3, 0.6 + rng() * 0.6, 0.7 + rng() * 0.4]);
     }
   }
 
@@ -783,25 +703,224 @@ export function buildTown(scene, fx, { low = false } = {}) {
     pickables.push(v.root);
   }
 
-  return {
+
+  // ── Chunks: ground, grass, stepping stones and props near the camera ──
+  const chunks = new Map(); // "i,j" → { group, anim, pick }
+  const ctx = (anim) => ({ fx, animate: (fn) => anim.push(fn) });
+  const wilds = zonesOfKind('wilds');
+  function buildChunk(ci, cj) {
+    const x0 = ci * CHUNK;
+    const z0 = cj * CHUNK;
+    const group = new THREE.Group();
+    const anim = [];
+    const pick = [];
+    const crng = mulberry32(((ci * 73856093) ^ (cj * 19349663)) >>> 0);
+    const near = nearRect(x0, z0, x0 + CHUNK, z0 + CHUNK, 6);
+    // Squares far out at sea have nothing in them.
+    const onLand = landDistance(x0 + CHUNK / 2, z0 + CHUNK / 2) < CHUNK * 0.71 + 14;
+    if (onLand) {
+      // Ground tile. Normals come from the height function, so neighbouring
+      // tiles shade identically along their shared edge.
+      const SEG = Math.round(CHUNK / (low ? 1.57 : 1.12));
+      const g = new THREE.PlaneGeometry(CHUNK, CHUNK, SEG, SEG);
+      g.rotateX(-Math.PI / 2);
+      g.translate(x0 + CHUNK / 2, 0, z0 + CHUNK / 2);
+      const pos = g.attributes.position;
+      const nor = g.attributes.normal;
+      const colors = new Float32Array(pos.count * 3);
+      const c = new THREE.Color();
+      const e = 0.5;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        pos.setY(i, heightAt(x, z, near));
+        const nx = heightAt(x - e, z, near) - heightAt(x + e, z, near);
+        const nz = heightAt(x, z - e, near) - heightAt(x, z + e, near);
+        const l = Math.hypot(nx, 2 * e, nz);
+        nor.setXYZ(i, nx / l, (2 * e) / l, nz / l);
+        colourAt(x, z, near, c);
+        colors[i * 3] = c.r;
+        colors[i * 3 + 1] = c.g;
+        colors[i * 3 + 2] = c.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      const ground = new THREE.Mesh(g, groundMatFor());
+      ground.receiveShadow = true;
+      ground.userData.ground = true;
+      group.add(ground);
+      pick.push(ground);
+
+      // Grass tufts everywhere that isn't paved, built on or wet.
+      const tufts = [];
+      const tries = Math.round(CHUNK * CHUNK * (low ? 0.042 : 0.106));
+      for (let i = 0; i < tries; i++) {
+        const x = x0 + crng() * CHUNK;
+        const z = z0 + crng() * CHUNK;
+        if (landDistance(x, z) > -1 || near.plazas.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + 0.8)) continue;
+        if (near.buildings.some((b) => Math.abs(x - b.x) < b.w / 2 + 1 && Math.abs(z - b.z) < b.d / 2 + 1)) continue;
+        if (near.lakes.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + 2) || near.segs.some((s) => distSeg(x, z, s) < s[4] + 0.4)) continue;
+        tufts.push([x, z]);
+      }
+      if (tufts.length) {
+        const im = new THREE.InstancedMesh(tuftGeo, toon('#ffffff'), tufts.length * 3);
+        const o = new THREE.Object3D();
+        let k = 0;
+        for (const [x, z] of tufts) {
+          const wild = wilds.some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 6);
+          for (let j = 0; j < 3; j++) {
+            o.position.set(x + (crng() - 0.5) * 0.4, 0, z + (crng() - 0.5) * 0.4);
+            o.rotation.set((crng() - 0.5) * 0.5, crng() * 3, (crng() - 0.5) * 0.5);
+            o.scale.setScalar(0.6 + crng() * 0.9);
+            o.updateMatrix();
+            im.setMatrixAt(k, o.matrix);
+            im.setColorAt(k++, c.set(wild ? ['#4e6e38', '#43602f', '#5b7a42'][j] : ['#6b9a48', '#5a8a3d', '#7caa55'][j]));
+          }
+        }
+        group.add(im);
+      }
+    }
+
+    // Stepping stones
+    const stones = stonesIn.get(`${ci},${cj}`);
+    if (stones?.length) {
+      const im = new THREE.InstancedMesh(stoneGeo, toon('#ffffff'), stones.length);
+      const o = new THREE.Object3D();
+      const col = new THREE.Color();
+      stones.forEach(([x, z, rot, sc, sq], i) => {
+        o.position.set(x, 0.03, z);
+        o.rotation.set(0, rot, 0);
+        o.scale.set(sc, 1, sc * sq);
+        o.updateMatrix();
+        im.setMatrixAt(i, o.matrix);
+        im.setColorAt(i, col.set(['#b8ac96', '#a89c86', '#c4b8a2'][i % 3]));
+      });
+      im.receiveShadow = true;
+      group.add(im);
+    }
+
+    // Props: models instanced per slot and variant; proc_* kinds built in
+    // code (procprops.js); bobbing ones animate.
+    const groups = new Map();
+    for (const pr of propsIn.get(`${ci},${cj}`) ?? []) {
+      if (pr.slot.startsWith('proc_')) {
+        const make = PROC_BUILDERS[pr.slot];
+        if (!make) continue;
+        const obj = make(pr, ctx(anim));
+        obj.position.set(pr.x, pr.y || 0, pr.z);
+        obj.rotation.y = pr.rot;
+        obj.traverse((o) => o.isMesh && o.material.side !== THREE.BackSide && (o.castShadow = true));
+        group.add(obj);
+        continue;
+      }
+      if (!assets.has(pr.slot)) continue;
+      if (pr.bob) {
+        const m = assets.make(pr.slot, { variant: pr.v || 0 });
+        m.object.position.set(pr.x, pr.y || 0, pr.z);
+        m.object.rotation.y = pr.rot;
+        if (pr.s) m.object.scale.multiplyScalar(pr.s);
+        group.add(m.object);
+        const ph = pr.x * 0.7;
+        anim.push((dt, t) => {
+          m.object.position.y = (pr.y || 0) + Math.sin(t * 1.6 + ph) * 0.08;
+          m.object.rotation.z = Math.sin(t * 1.1 + ph) * 0.06;
+        });
+        continue;
+      }
+      const v = (pr.v || 0) % assets.variantCount(pr.slot);
+      const key = pr.slot + '|' + v;
+      if (!groups.has(key)) groups.set(key, { slot: pr.slot, v, list: [] });
+      groups.get(key).list.push({ x: pr.x, z: pr.z, y: pr.y || 0, rot: pr.rot, s: pr.s ?? 1 });
+    }
+    for (const gp of groups.values()) {
+      const inst = assets.instanced(gp.slot, gp.list, { variant: gp.v, outline: !NO_OUTLINE.has(gp.slot), castShadow: !NO_SHADOW.has(gp.slot) });
+      if (inst) group.add(inst);
+    }
+    root.add(group);
+    pickables.push(...pick);
+    return { group, anim, pick };
+  }
+  function dropChunk(k) {
+    const ch = chunks.get(k);
+    chunks.delete(k);
+    root.remove(ch.group);
+    disposeTree(ch.group);
+    for (const p of ch.pick) pickables.splice(pickables.indexOf(p), 1);
+  }
+  // Distance from a point to a chunk's square.
+  const gap = (ci, cj, x, z) => Math.hypot(Math.max(0, ci * CHUNK - x, x - (ci + 1) * CHUNK), Math.max(0, cj * CHUNK - z, z - (cj + 1) * CHUNK));
+  const town = { viewRadius: low ? 120 : 150 };
+  // Build what's within view of (x, z), nearest first, for up to `budget` ms
+  // (always at least one square); drop what's well out of view.
+  function stream(x, z, budget) {
+    const R = town.viewRadius;
+    for (const k of [...chunks.keys()]) {
+      const [ci, cj] = k.split(',').map(Number);
+      if (gap(ci, cj, x, z) > R + 70) dropChunk(k);
+    }
+    const want = [];
+    const i0 = Math.floor((x - R) / CHUNK);
+    const j0 = Math.floor((z - R) / CHUNK);
+    for (let ci = i0; ci <= Math.floor((x + R) / CHUNK); ci++)
+      for (let cj = j0; cj <= Math.floor((z + R) / CHUNK); cj++) {
+        const d = gap(ci, cj, x, z);
+        if (d <= R && !chunks.has(`${ci},${cj}`)) want.push([d, ci, cj]);
+      }
+    want.sort((a, b) => a[0] - b[0]);
+    const t0 = performance.now();
+    let built = 0;
+    for (const [, ci, cj] of want) {
+      chunks.set(`${ci},${cj}`, buildChunk(ci, cj));
+      built++;
+      if (performance.now() - t0 > budget) break;
+    }
+    return want.length - built; // still to build
+  }
+  const start = focus ?? SPAWN;
+  stream(start.x, start.z, Infinity);
+
+  const dir = new THREE.Vector3();
+  let nextStream = 0;
+  let pending = 0;
+  return Object.assign(town, {
     root,
     pickables,
     nodes,
     labels,
     fades,
+    chunks,
+    // Build/drop squares around a point (the game and editor call this with
+    // where the camera looks; update() does it on its own otherwise).
+    focus(x, z, budget = 6) {
+      pending = stream(x, z, budget);
+    },
     update(dt, t, cam) {
       for (const a of animated) a(dt, t, cam);
+      for (const ch of chunks.values()) for (const a of ch.anim) a(dt, t, cam);
       for (const n of nodes.values()) n.update(dt);
+      // Every quarter second (every frame while squares are still missing),
+      // stream around where the middle of the screen meets the ground.
+      if (cam && (pending || t >= nextStream)) {
+        nextStream = t + 0.25;
+        cam.getWorldDirection(dir);
+        const k = dir.y < -0.05 ? -cam.position.y / dir.y : 30;
+        pending = stream(cam.position.x + dir.x * k, cam.position.z + dir.z * k, 6);
+      }
     },
-  };
+  });
 }
 
-// Remove a town built by buildTown and free what it alone owns. Model
-// geometry shared with other copies (flagged by assets.js) is left alone.
-export function disposeTown(town) {
-  town.root.parent?.remove(town.root);
+const tuftGeo = new THREE.ConeGeometry(0.12, 0.5, 4).translate(0, 0.25, 0);
+tuftGeo.userData.shared = true;
+const stoneGeo = new THREE.CylinderGeometry(0.36, 0.4, 0.06, 7);
+stoneGeo.userData.shared = true;
+let groundMatCache = null;
+const groundMatFor = () => (groundMatCache ??= new THREE.MeshToonMaterial({ vertexColors: true, map: groundTexture(), gradientMap: toon('#fff').gradientMap }));
+
+// Free what a group alone owns. Model geometry shared with other copies
+// (flagged by assets.js) is left alone.
+function disposeTree(obj) {
   const seen = new Set();
-  town.root.traverse((o) => {
+  obj.traverse((o) => {
     if (o.isInstancedMesh) o.dispose();
     const g = o.geometry;
     if (g && !g.userData.shared && !seen.has(g)) {
@@ -809,6 +928,12 @@ export function disposeTown(town) {
       g.dispose();
     }
   });
+}
+
+// Remove a town built by buildTown and free what it alone owns.
+export function disposeTown(town) {
+  town.root.parent?.remove(town.root);
+  disposeTree(town.root);
 }
 
 // Place many copies of a model slot (instanced), spreading them across the

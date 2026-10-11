@@ -494,6 +494,13 @@ export class GameClient {
     else pv.av.hold(hold);
   }
 
+  removeMob(id) {
+    const mv = this.mobs.get(id);
+    if (!mv) return;
+    this.scene.remove(mv.mob.root);
+    mv.tag.remove();
+    this.mobs.delete(id);
+  }
   addMob(m) {
     let mv = this.mobs.get(m.id);
     if (mv) return mv;
@@ -632,16 +639,12 @@ export class GameClient {
 
   onWelcome(m) {
     for (const id of [...this.players.keys()]) this.removePlayer(id);
-    for (const id of [...this.mobs.keys()]) {
-      const mv = this.mobs.get(id);
-      this.scene.remove(mv.mob.root);
-      mv.tag.remove();
-      this.mobs.delete(id);
-    }
+    for (const id of [...this.mobs.keys()]) this.removeMob(id);
     this.battle = null;
     this.gather = null;
     this.endFishing();
     this.hud.hideRhythm();
+    this.town.focus(m.you.x, m.you.z, Infinity); // the world around you, before the loading screen goes
     this.addPlayer(m.you, true);
     for (const p of m.players) this.addPlayer(p);
     for (const mob of m.mobs) this.addMob(mob);
@@ -684,6 +687,14 @@ export class GameClient {
       }
       pv.body.push(x, z, rot, act);
       if (act !== pv.act) this.#applyAct(pv, act);
+    }
+    // Monsters come and go as they get near you (the server only sends those).
+    if (m.full) for (const id of [...this.mobs.keys()]) if (!m.add?.some((a) => a.id === id)) this.removeMob(id);
+    for (const id of m.rm ?? []) this.removeMob(id);
+    for (const info of m.add ?? []) {
+      const mv = this.addMob(info);
+      mv.body.push(info.x, info.z, info.rot, info.state);
+      if (info.state !== mv.state) this.#mobState(mv, info.state);
     }
     for (const [id, x, z, rot, st] of m.m) {
       const mv = this.mobs.get(id);

@@ -63,6 +63,63 @@ export function waterMaterial({ radius, shallow = '#7fe0f7', deep = '#2f9fd8', f
   });
 }
 
+// The sea around any coastline: `lands` are the map's land circles (up to 64),
+// so the shader can tell how far each point is from the nearest shore.
+// `center` is the plane's position (it's laid flat, so local y is world -z).
+export function seaMaterial({ lands, center, shallow = '#58a8bc', deep = '#1b4f74', fog = null }) {
+  const MAX = 64;
+  const arr = Array.from({ length: MAX }, (_, i) => (lands[i] ? new THREE.Vector3(lands[i].x, lands[i].z, lands[i].r) : new THREE.Vector3(0, 0, -1)));
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      time: { value: 0 },
+      lands: { value: arr },
+      nLands: { value: Math.min(MAX, lands.length) },
+      center: { value: new THREE.Vector2(center[0], center[1]) },
+      shallow: { value: new THREE.Color(shallow) },
+      deep: { value: new THREE.Color(deep) },
+      fogColor: { value: fog?.color?.isColor ? fog.color : new THREE.Color(fog?.color ?? '#cdeaf7') },
+      fogNear: { value: fog?.near ?? 1e6 },
+      fogFar: { value: fog?.far ?? 2e6 },
+    },
+    vertexShader: `
+      varying vec2 vW; varying float vDist;
+      uniform vec2 center;
+      void main() {
+        vW = center + vec2(position.x, -position.y);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vDist = -mv.z;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform float time, fogNear, fogFar;
+      uniform int nLands;
+      uniform vec3 lands[${MAX}];
+      uniform vec3 shallow, deep, fogColor;
+      varying vec2 vW; varying float vDist;
+      void main() {
+        // Distance past the beach (the walkable edge plus ~5 m of sloping shore).
+        float d = 1e6;
+        for (int i = 0; i < ${MAX}; i++) {
+          if (i >= nLands) break;
+          d = min(d, length(vW - lands[i].xy) - lands[i].z);
+        }
+        d -= 5.2;
+        vec3 c = mix(shallow, deep, smoothstep(0.0, 40.0, d));
+        float wob = sin(vW.x * 0.45 + vW.y * 0.2 + time * 1.2) * 0.35 + sin(vW.y * 0.31 - vW.x * 0.12 - time * 0.7) * 0.4;
+        float foam = (1.0 - smoothstep(0.2, 1.6, abs(d - 0.5 - wob))) * 0.85;
+        foam += (1.0 - smoothstep(0.1, 0.5, abs(d - 3.0 - wob - sin(time * 0.8) * 0.8))) * 0.35;
+        float sp = sin(vW.x * 1.7 + time * 1.3) * sin(vW.y * 1.9 - time * 1.1) * sin((vW.x + vW.y) * 0.9 + time * 0.6);
+        c += vec3(pow(max(sp, 0.0), 10.0)) * 0.55;
+        c = mix(c, vec3(1.0), clamp(foam, 0.0, 1.0) * 0.85);
+        float f = smoothstep(fogNear, fogFar, vDist);
+        gl_FragColor = vec4(c, 1.0);
+        #include <tonemapping_fragment>
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, f);
+        #include <colorspace_fragment>
+      }`,
+  });
+}
+
 // A soft tiling grass/dirt speckle texture to break up flat ground colours.
 export function groundTexture() {
   const S = 256;

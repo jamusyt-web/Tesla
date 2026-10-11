@@ -9,7 +9,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { setWorld, mapProblems, formatMap } from '../shared/world.js';
+import { setWorld, mapProblems, formatMap, upgradeMap } from '../shared/world.js';
 import { MONSTERS } from '../shared/monsters.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,6 +27,7 @@ function read(file) {
 
 // Map problems the shared check can't see (it doesn't know the monster list).
 export function serverMapProblems(m) {
+  m = upgradeMap(m);
   const out = mapProblems(m);
   for (const s of m?.spawns ?? []) {
     if (!MONSTERS[s.monster]) out.push(`spawns (${s.id}): unknown monster "${s.monster}".`);
@@ -39,6 +40,7 @@ export function serverMapProblems(m) {
 export const current = { file: null, map: null, body: null, gzip: null, etag: null };
 
 export function useMap(map, file = null) {
+  map = upgradeMap(map);
   const bad = serverMapProblems(map);
   if (bad.length) throw new Error(`Invalid map${file ? ` (${file})` : ''}:\n- ${bad.join('\n- ')}`);
   setWorld(map);
@@ -58,7 +60,7 @@ export function saveMap(map, base) {
     throw e;
   }
   const shippedRev = read(SHIPPED_MAP)?.rev ?? 0;
-  const next = { ...map, rev: Math.max(current.map?.rev ?? 0, shippedRev) + 1 };
+  const next = { ...upgradeMap(map), rev: Math.max(current.map?.rev ?? 0, shippedRev) + 1 };
   const bad = serverMapProblems(next);
   if (bad.length) {
     const e = new Error(`The map has problems:\n- ${bad.join('\n- ')}`);

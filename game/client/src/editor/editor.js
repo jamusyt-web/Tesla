@@ -6,7 +6,7 @@ import * as assets from '../scene/assets.js';
 import { buildTown, disposeTown } from '../scene/town.js';
 import { Particles } from '../scene/fx.js';
 import { PROC_BUILDERS } from '../scene/procprops.js';
-import { setWorld, mapProblems, formatMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES } from '../../../shared/world.js';
+import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES } from '../../../shared/world.js';
 import { KINDS, KIND_KEYS, PALETTE, show, store } from './kinds.js';
 
 // The world editor: a top-down view of the real world where the server owner
@@ -18,8 +18,8 @@ const GRID = 0.5;
 const ROT_STEP = Math.PI / 12; // 15°
 const SEL = '#ffd84a';
 // Big areas: click to select them first, so dragging inside one still pans.
-const AREAS = new Set(['spawns', 'zones', 'lakes', 'plazas', 'regions', 'paths']);
-const AREA_COL = { spawns: '#e0503a', zones: '#7fc06a', lakes: '#5fb3e0', plazas: '#d9c7a3', regions: '#b48cff', docks: '#c9a24a' };
+const AREAS = new Set(['spawns', 'zones', 'lakes', 'plazas', 'regions', 'paths', 'lands']);
+const AREA_COL = { lands: '#e8d9a8', spawns: '#e0503a', zones: '#7fc06a', lakes: '#5fb3e0', plazas: '#d9c7a3', regions: '#b48cff', docks: '#c9a24a' };
 const json = (o) => JSON.stringify(o);
 const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -34,7 +34,7 @@ export async function openEditor(root, { onProgress = () => {} } = {}) {
 
 class Editor {
   constructor(root, map, etag) {
-    this.map = map;
+    this.map = upgradeMap(map);
     for (const k of KIND_KEYS) this.map[k] ??= [];
     this.base = etag;
     this.savedJson = json(map);
@@ -172,7 +172,8 @@ class Editor {
       return;
     }
     if (this.town) disposeTown(this.town);
-    this.town = buildTown(this.scene, this.fx);
+    this.town = buildTown(this.scene, this.fx, { focus: { x: this.cam.x, z: this.cam.z } });
+    this.town.viewRadius = this.#viewRadius();
     this.buildMs = Math.round(performance.now() - t0);
     this.drawOverlay();
   }
@@ -260,6 +261,7 @@ class Editor {
     if (e.station) return this.say("Crafting stations can be moved but not deleted (the Workshop needs all five).", true);
     if (this.sel.kind === 'buildings' && !e.deco) return this.say(`The ${e.label} can be moved but not deleted: the game needs it.`, true);
     if (this.sel.kind === 'gates' && this.list('gates').length === 1) return this.say('The world needs at least one gatehouse.', true);
+    if (this.sel.kind === 'lands' && this.list('lands').length === 1) return this.say('The world needs some land.', true);
     const { kind, id } = this.sel;
     this.change(() => (this.map[kind] = this.list(kind).filter((x) => x.id !== id)));
     this.sel = null;
@@ -379,6 +381,7 @@ class Editor {
       } catch {
         return this.say("That file isn't a map (not valid JSON).", true);
       }
+      m = upgradeMap(m);
       const bad = mapProblems(m);
       if (bad.length) return this.dialog("Can't load that map", h('ul', ...bad.slice(0, 20).map((b) => h('li', b))), [['OK']]);
       this.change(() => {
@@ -408,7 +411,7 @@ class Editor {
     if (pick === 1) {
       this.change(() => {
         for (const k of Object.keys(this.map)) delete this.map[k];
-        Object.assign(this.map, d.map);
+        Object.assign(this.map, upgradeMap(d.map));
       });
       this.say('Draft restored.');
     } else {
@@ -439,9 +442,9 @@ class Editor {
     };
     const label = (text, x, z, cls = '') => this.labels.push({ text, x, z, cls });
     if (this.opts.areas) {
-      for (const kind of ['regions', 'zones', 'lakes', 'plazas', 'spawns']) for (const e of this.list(kind)) {
+      for (const kind of ['lands', 'regions', 'zones', 'lakes', 'plazas', 'spawns']) for (const e of this.list(kind)) {
         ring(e.x, e.z, e.r, AREA_COL[kind], kind === 'regions' ? 0.5 : 0.18, 0.6);
-        if (kind !== 'plazas' && kind !== 'lakes') label(KINDS[kind].name(e), e.x, e.z, kind);
+        if (kind !== 'plazas' && kind !== 'lakes' && kind !== 'lands') label(KINDS[kind].name(e), e.x, e.z, kind);
       }
       for (const b of this.map.buildings) label(b.label || 'Cottage', b.x, b.z, 'buildings');
     }
@@ -716,7 +719,10 @@ class Editor {
     this.camera.lookAt(c.x, 0, c.z);
     this.sun.position.set(c.x + 40, 60, c.z + 10);
     this.sun.target.position.set(c.x, 0, c.z);
-    this.town?.update(dt, now / 1000, this.camera);
+    if (this.town) {
+      this.town.viewRadius = this.#viewRadius();
+      this.town.update(dt, now / 1000, this.camera);
+    }
     this.fx.update(dt);
     this.fx.puff.update(dt);
     this.renderer.render(this.scene, this.camera);
@@ -827,21 +833,25 @@ class Editor {
     const field = (label, input) => h('label.ed-field', h('span', label), input);
     const name = h('input', { type: 'text', value: m.name || '' });
     name.onchange = () => this.change(() => (m.name = name.value), { rebuild: false });
-    const radius = h('input', { type: 'number', step: 1, value: m.bounds.r });
-    radius.onchange = () => this.change(() => (m.bounds.r = Math.max(30, Math.min(400, Number(radius.value) || m.bounds.r))));
     const counts = KIND_KEYS.map((k) => `${this.list(k).length} ${KINDS[k].label.toLowerCase()}${this.list(k).length === 1 ? '' : 's'}`).join(', ');
     body.append(
       h('div.ed-title', 'World'),
       field('Name', name),
-      field('Island radius (m)', radius),
       h('div.ed-actions', h('button.ed-btn', { on: { click: () => this.setTool('spawn') } }, 'Move the spawn point'), h('button.ed-btn', { on: { click: () => this.#jump(m.spawn) } }, 'Go to it')),
       h('p.ed-muted', `Version ${m.rev ?? 0}${this.dirty ? ' (with unsaved changes)' : ''}. ${counts}.`),
       h('div.ed-sec', 'Regions'),
       ...this.list('regions').map((r) => h('button.ed-item', { on: { click: () => (this.#jump(r), this.select({ kind: 'regions', id: r.id })) } }, KINDS.regions.name(r))),
       h('p.ed-muted', 'Regions are your towns and areas, each with a difficulty tier (1 = starter). Add one from Place → Buildings & areas.'),
+      h('div.ed-sec', 'Land'),
+      ...this.list('lands').map((l) => h('button.ed-item', { on: { click: () => (this.#jump(l), this.select({ kind: 'lands', id: l.id })) } }, `Land ${l.id} (${Math.round(l.r)} m)`)),
+      h('p.ed-muted', 'Land is made of circles: overlap them to make any coastline, or put one far out at sea for a new island. Add one from Place → Buildings & areas.'),
       h('div.ed-sec', 'Keys'),
       h('p.ed-muted', 'Drag ground: pan · Right-drag: turn the view · Wheel: zoom · WASD: move · Q/E: turn selection · Del: delete · Ctrl+D: copy · Ctrl+Z / Ctrl+Y: undo / redo · G: snap · Ctrl+S: save'),
     );
+  }
+  // Zoomed out, the editor shows more of the world than the game ever does.
+  #viewRadius() {
+    return Math.max(150, this.cam.dist * 1.6);
   }
   #jump(p) {
     this.cam.x = p.x;

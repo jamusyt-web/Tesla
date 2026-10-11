@@ -1,8 +1,10 @@
 {
-  "format": 1,
+  "format": 2,
   "name": "Hearthvale",
   "rev": 1,
-  "bounds": {"r":96},
+  "lands": [
+    {"id":"island","x":0,"z":0,"r":96}
+  ],
   "spawn": {"x":0,"z":8},
   "regions": [
     {"id":"hearthvale","name":"Hearthvale","tier":1,"kind":"town","x":0,"z":0,"r":96}

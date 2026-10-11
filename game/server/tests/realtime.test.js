@@ -77,13 +77,17 @@ test('players see each other join, move, chat and leave in real time', async () 
   const bStart = b.welcome.you;
   assert.ok(Math.hypot(bStart.x - a.welcome.you.x, bStart.z - a.welcome.you.z) >= 1.2, 'no spawning inside each other');
 
-  // Ben walks; Ann receives snapshots with his position changing.
-  b.ws.send(JSON.stringify({ t: 'move', x: bStart.x + 6, z: bStart.z + 2 }));
+  // Ben walks; Ann receives snapshots with his position changing. (Pick a spot
+  // he can walk straight to: where he spawned varies, and the plaza has benches.)
+  const col = buildColliders();
+  const nav = new NavGrid(col);
+  const [dx, dz] = [[6, 2], [-6, 2], [6, -2], [-6, -2], [2, 6], [2, -6]].find(([dx, dz]) => nav.clear(bStart.x, bStart.z, bStart.x + dx, bStart.z + dz));
+  b.ws.send(JSON.stringify({ t: 'move', x: bStart.x + dx, z: bStart.z + dz }));
   const snap = await a.next((m) => m.t === 's' && m.p.some((r) => r[0] === b.id && r[4] === 'walk'));
   assert.ok(snap);
   await new Promise((r) => setTimeout(r, 1400));
   const last = [...a.inbox].reverse().find((m) => m.t === 's' && m.p.some((r) => r[0] === b.id)).p.find((r) => r[0] === b.id);
-  assert.ok(Math.abs(last[1] - (bStart.x + 6)) < 0.6 && Math.abs(last[2] - (bStart.z + 2)) < 0.6, `Ben arrived (${last})`);
+  assert.ok(Math.abs(last[1] - (bStart.x + dx)) < 0.6 && Math.abs(last[2] - (bStart.z + dz)) < 0.6, `Ben arrived (${last})`);
 
   b.ws.send(JSON.stringify({ t: 'chat', text: '  hello   there  ' }));
   const chat = await a.next((m) => m.t === 'chat' && m.from === b.id);
@@ -287,6 +291,26 @@ test('hands-on crafting: materials held while you work, the server replays your 
     assert.deepEqual(again.data.out, fin.data.out);
     assert.equal(game.heroes.count(a.id, 'oak_plank'), planks);
     assert.equal(game.heroes.count(a.id, 'oak_log'), 8);
+  } finally {
+    a.ws.close();
+  }
+});
+
+test('heroes are only told about monsters near them', async () => {
+  const a = await player('Ivo');
+  try {
+    const all = [...game.channels.find((ch) => ch.players.has(a.id)).mobs.values()];
+    const near = (x, z) => all.filter((m) => Math.hypot(m.x - x, m.z - z) < 100).map((m) => m.id).sort();
+    assert.deepEqual(a.welcome.mobs.map((m) => m.id).sort(), near(a.welcome.you.x, a.welcome.you.z), 'welcome lists the monsters in range');
+    // Far down the south shore the Wilds' monsters drop out of sight...
+    const c = game.online.get(a.id);
+    Object.assign(c.ent, { x: 0, z: 90, path: null });
+    const gone = await a.next((m) => m.t === 's' && m.rm?.length);
+    assert.ok(gone.rm.every((id) => all.find((m) => m.id === id)), 'only real monsters are dropped');
+    // ...and come back when the hero does.
+    Object.assign(c.ent, { x: 0, z: -20, path: null });
+    const back = await a.next((m) => m.t === 's' && m.add?.length);
+    assert.ok(back.add.every((m) => m.type && Number.isFinite(m.x)), 'new arrivals come with everything needed to draw them');
   } finally {
     a.ws.close();
   }

@@ -111,7 +111,7 @@ scripts/  bots.js (populate the lobby), dev.js, invite.js, admin.js (server owne
 
 ## The world map
 
-Everything placed in the world lives in **`maps/world.json`**: buildings, the gate, plazas, fountains, lakes and docks, zones, dirt paths, gatherable nodes, monster camps (`spawns`), and every prop, tree and flower. The server loads it on start and sends it to each player's browser (`/api/map`), so both sides always build the same world. Small scatter (grass tufts, stepping stones, reeds, lily pads) is generated from it automatically.
+Everything placed in the world lives in **`maps/world.json`**: the land itself (`lands`: circles that overlap into any coastline, so you can grow the island, join islands with land bridges, or start a new island far out at sea), buildings, the gate, plazas, fountains, lakes and docks, zones, dirt paths, gatherable nodes, monster camps (`spawns`), and every prop, tree and flower. The server loads it on start and sends it to each player's browser (`/api/map`), so both sides always build the same world. Small scatter (grass tufts, stepping stones, reeds, lily pads) is generated from it automatically.
 
 - **Format:** one entity per line, each with a unique `id`. The fields are documented at the top of `shared/world.js`. A prop's `slot` is a model from `client/src/scene/manifest.js` or a code-drawn kind from `client/src/scene/procprops.js` (`proc_…`).
 - **Regions and tiers:** `regions` lists the towns and areas with a difficulty `tier` (Hearthvale is tier 1, the starter town).
@@ -140,7 +140,10 @@ The big plan, one step at a time:
 
 1. **Map as data** (done): the world lives in `maps/world.json` instead of code.
 2. **In-game map editor** (done): owners place, move and delete anything, draw paths, set monster camps, and save it live.
-3. **A much bigger world**: load and draw only what's near you, split the world into regions, travel between them.
+3. **A much bigger world**, in three parts:
+   - **3a, the engine** (done): land of any shape, collision checks that only look nearby, pathfinding that works out the map a tile at a time, the world drawn in 96 m tiles that load around the camera and drop behind, and monsters only sent to players within about 100 m.
+   - **3b, travel**: fast-travel stones between towns, a full world map, region names as you enter.
+   - **3c, editor extras** for building big: jump anywhere, place fast-travel stones.
 4. **Four or five major towns**, from the starter town up through harder ones, each with its own biome, resources, monsters and market (prices differ between towns, so hauling goods pays).
 5. **Personal land and building** (Skyblock-style): your own plot with buildings that make money over time, using the editor's placement tools.
 6. **An outlaw zone**: opt-in full-loot PvP for what you carry, bandit NPCs, and the best rewards in the game.

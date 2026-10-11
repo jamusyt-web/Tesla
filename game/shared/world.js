@@ -36,8 +36,8 @@ export function mulberry32(seed) {
 // ids and colliders always match. The exports below are live bindings: read
 // them inside functions, never copy them at module load.
 //
-// Map format 1 (all positions in metres; x east, z south; rot in radians):
-//   bounds    { r }                     walkable island radius around (0, 0)
+// Map format 2 (all positions in metres; x east, z south; rot in radians):
+//   lands     [{ id, x, z, r }]         land: overlapping circles make any coastline
 //   spawn     { x, z }                  where new heroes appear
 //   regions   [{ id, name, tier, kind, x, z, r }]   towns / areas, tier 1 = starter
 //   buildings [{ id, label, action, x, z, w, d, face, deco, ... }]
@@ -52,8 +52,12 @@ export function mulberry32(seed) {
 //   props     [{ id, slot, x, z, rot, r, s?, y?, v?, bob?, station? }]
 //             slot = model slot (client/src/scene/manifest.js) or a proc_* kind;
 //             r > 0 blocks movement; station marks a crafting station.
+// (Format 1 had `bounds: { r }`, one round island at the centre; it's
+// upgraded on load: see upgradeMap.)
 export let MAP = null;
-export let WORLD_RADIUS = 96;
+export let LANDS = [];
+export let EXTENT = { x0: -98, z0: -98, x1: 98, z1: 98 }; // everything walkable lies inside
+export let WORLD_RADIUS = 96; // furthest land from the centre
 export let SPAWN = { x: 0, z: 8 };
 export let REGIONS = [];
 export let BUILDINGS = [];
@@ -70,16 +74,15 @@ export let PATHS = [];
 export let NODES = [];
 export let SPAWNS = [];
 export let PROPS = [];
-let HALF = WORLD_RADIUS + 2;
 
-const LISTS = ['regions', 'buildings', 'gates', 'plazas', 'fountains', 'lakes', 'docks', 'zones', 'paths', 'nodes', 'spawns', 'props'];
+const LISTS = ['lands', 'regions', 'buildings', 'gates', 'plazas', 'fountains', 'lakes', 'docks', 'zones', 'paths', 'nodes', 'spawns', 'props'];
 
 // Checks a map's shape and returns a list of problems (empty = fine).
 export function mapProblems(m) {
   const out = [];
   if (!m || typeof m !== 'object') return ['The map is not a JSON object.'];
-  if (m.format !== 1) out.push(`Unknown map format ${m.format} (expected 1).`);
-  if (!(m.bounds?.r > 10)) out.push('bounds.r must be a number above 10.');
+  if (m.format !== 2) out.push(`Unknown map format ${m.format} (expected 2).`);
+  if (!m.lands?.length) out.push('The map needs at least one piece of land (lands).');
   if (!Number.isFinite(m.spawn?.x) || !Number.isFinite(m.spawn?.z)) out.push('spawn needs x and z.');
   const ids = new Set();
   for (const k of LISTS) {
@@ -100,18 +103,40 @@ export function mapProblems(m) {
       if (k === 'nodes' && !NODE_TYPES[e.type]) out.push(`${where}: unknown node type "${e.type}".`);
       if (k === 'props' && typeof e.slot !== 'string') out.push(`${where} needs a slot.`);
       if (k === 'buildings' && !(e.w > 0 && e.d > 0)) out.push(`${where} needs a positive w and d.`);
+      if (k === 'lands' && !(e.r >= 5)) out.push(`${where} needs a radius r of at least 5.`);
     });
   }
   return out;
 }
 
-// Make `m` the current world. Throws with every problem found if it's invalid.
+// Older map files, brought up to the current format (a new object; the input is untouched).
+export function upgradeMap(m) {
+  if (m?.format !== 1) return m;
+  const { bounds, ...rest } = m;
+  const out = {};
+  for (const [k, v] of Object.entries(rest)) {
+    out[k] = k === 'format' ? 2 : v;
+    if (k === 'rev') out.lands = [{ id: 'island', x: 0, z: 0, r: bounds?.r ?? 96 }];
+  }
+  out.lands ??= [{ id: 'island', x: 0, z: 0, r: bounds?.r ?? 96 }];
+  return out;
+}
+
+// Make `m` the current world (upgrading an old file first) and return it.
+// Throws with every problem found if it's invalid.
 export function setWorld(m) {
+  m = upgradeMap(m);
   const bad = mapProblems(m);
   if (bad.length) throw new Error(`Invalid map:\n- ${bad.join('\n- ')}`);
   MAP = m;
-  WORLD_RADIUS = m.bounds.r;
-  HALF = WORLD_RADIUS + 2;
+  LANDS = m.lands;
+  EXTENT = {
+    x0: Math.floor(Math.min(...LANDS.map((l) => l.x - l.r)) - 2),
+    z0: Math.floor(Math.min(...LANDS.map((l) => l.z - l.r)) - 2),
+    x1: Math.ceil(Math.max(...LANDS.map((l) => l.x + l.r)) + 2),
+    z1: Math.ceil(Math.max(...LANDS.map((l) => l.z + l.r)) + 2),
+  };
+  WORLD_RADIUS = Math.max(...LANDS.map((l) => Math.hypot(l.x, l.z) + l.r));
   SPAWN = m.spawn;
   REGIONS = m.regions ?? [];
   BUILDINGS = m.buildings ?? [];
@@ -150,6 +175,13 @@ export function formatMap(m) {
 
 export const zoneById = (id) => ZONES.find((z) => z.id === id) ?? null;
 export const zonesOfKind = (kind) => ZONES.filter((z) => (z.kind ?? z.id) === kind);
+
+// Signed distance to the coast: negative on land, positive out at sea.
+export function landDistance(x, z) {
+  let d = Infinity;
+  for (const l of LANDS) d = Math.min(d, Math.hypot(x - l.x, z - l.z) - l.r);
+  return d;
+}
 
 // Every dirt path as straight segments [ax, az, bx, bz, w].
 export function pathSegments() {
@@ -201,6 +233,8 @@ const inRect = (x, z, b, pad = 0) => Math.abs(x - b.x) < b.w / 2 + pad && Math.a
 // ── Collision ──────────────────────────────────────────────────────────
 // Everything solid in the current world: building footprints and gatehouse
 // walls as rectangles; fountains, standing nodes and solid props as circles.
+// They're indexed in a coarse grid, so a walkability test only looks at what's
+// nearby however big the world gets.
 export function buildColliders() {
   const rects = BUILDINGS.map((b) => ({ x: b.x, z: b.z, w: b.w, d: b.d })).concat(GATES.flatMap((g) => gateColliders(g)));
   const circles = FOUNTAINS.map((f) => ({ x: f.x, z: f.z, r: f.r }));
@@ -209,53 +243,90 @@ export function buildColliders() {
     if (t.r > 0) circles.push({ x: n.x, z: n.z, r: t.r * n.s });
   }
   for (const p of PROPS) if (p.r > 0) circles.push({ x: p.x, z: p.z, r: p.r });
-  return { rects, circles };
+  return indexColliders({ rects, circles });
 }
 
 const PLAYER_R = 0.45;
+const BUCKET = 8; // metres per index cell
+const bucketKey = (i, j) => (i + 32768) * 65536 + (j + 32768);
+const NONE = { rects: [], circles: [] };
+
+export function indexColliders(col) {
+  const grid = new Map();
+  const add = (kind, o, x0, z0, x1, z1) => {
+    for (let i = Math.floor((x0 - PLAYER_R) / BUCKET); i <= Math.floor((x1 + PLAYER_R) / BUCKET); i++)
+      for (let j = Math.floor((z0 - PLAYER_R) / BUCKET); j <= Math.floor((z1 + PLAYER_R) / BUCKET); j++) {
+        const k = bucketKey(i, j);
+        let b = grid.get(k);
+        if (!b) grid.set(k, (b = { rects: [], circles: [] }));
+        b[kind].push(o);
+      }
+  };
+  for (const r of col.rects) add('rects', r, r.x - r.w / 2, r.z - r.d / 2, r.x + r.w / 2, r.z + r.d / 2);
+  for (const c of col.circles) add('circles', c, c.x - c.r, c.z - c.r, c.x + c.r, c.z + c.r);
+  col.grid = grid;
+  return col;
+}
 
 export function isWalkable(x, z, col) {
-  if (Math.hypot(x, z) > WORLD_RADIUS) return false;
+  if (landDistance(x, z) > 0) return false;
   // Lakes are water, except where a dock runs over them.
   if (LAKES.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + 0.3) && !DOCKS.some((d) => Math.abs(x - d.x) < d.w / 2 && Math.abs(z - d.z) < d.d / 2)) return false;
-  for (const r of col.rects) if (inRect(x, z, r, PLAYER_R)) return false;
-  for (const c of col.circles) if ((x - c.x) ** 2 + (z - c.z) ** 2 < (c.r + PLAYER_R) ** 2) return false;
+  const near = col.grid ? col.grid.get(bucketKey(Math.floor(x / BUCKET), Math.floor(z / BUCKET))) ?? NONE : col;
+  for (const r of near.rects) if (inRect(x, z, r, PLAYER_R)) return false;
+  for (const c of near.circles) if ((x - c.x) ** 2 + (z - c.z) ** 2 < (c.r + PLAYER_R) ** 2) return false;
   return true;
 }
 
 // ── Navigation grid + A* ───────────────────────────────────────────────
+// A grid of 1 m cells over the whole world. Cells are worked out a tile at a
+// time, the first time a search reaches them, and each search only looks at a
+// window around its start and goal, so even a huge world costs little.
 const CELL = 1;
+const TILE = 32;
 
 // The world uses the defaults (sized to the current map); a shop interior
 // passes its own small grid and walkable test (shared/shop.js).
 export class NavGrid {
-  constructor(col, { half = HALF, cell = CELL, walkable = isWalkable, margin = 0.2 } = {}) {
+  constructor(col, { half = null, bounds = null, cell = CELL, walkable = isWalkable, margin = 0.2 } = {}) {
     this.col = col;
-    this.half = half;
     this.cs = cell;
     this.walk = walkable;
-    const N = (this.n = Math.ceil((half * 2) / cell));
-    this.block = new Uint8Array(N * N);
-    const w = (x, z) => walkable(x, z, col);
-    const m = margin;
-    for (let j = 0; j < N; j++)
-      for (let i = 0; i < N; i++) {
-        // A cell is open only if its centre and the area around it are
-        // walkable, so paths never squeeze through gaps narrower than a hero.
+    this.margin = margin;
+    const b = bounds ?? (half != null ? { x0: -half, z0: -half, x1: half, z1: half } : EXTENT);
+    this.ox = b.x0;
+    this.oz = b.z0;
+    this.nx = Math.ceil((b.x1 - b.x0) / cell);
+    this.nz = Math.ceil((b.z1 - b.z0) / cell);
+    this.block = new Uint8Array(this.nx * this.nz);
+    this.tx = Math.ceil(this.nx / TILE);
+    this.done = new Uint8Array(this.tx * Math.ceil(this.nz / TILE));
+  }
+  // A cell is open only if its centre and the area around it are walkable,
+  // so paths never squeeze through gaps narrower than a hero.
+  #fill(ti, tj) {
+    this.done[tj * this.tx + ti] = 1;
+    const m = this.margin;
+    const w = (x, z) => this.walk(x, z, this.col);
+    for (let j = tj * TILE; j < Math.min(this.nz, (tj + 1) * TILE); j++)
+      for (let i = ti * TILE; i < Math.min(this.nx, (ti + 1) * TILE); i++) {
         const [x, z] = this.center(i, j);
         const ok = w(x, z) && w(x - m, z - m) && w(x + m, z - m) && w(x - m, z + m) && w(x + m, z + m);
-        this.block[j * N + i] = ok ? 0 : 1;
+        this.block[j * this.nx + i] = ok ? 0 : 1;
       }
   }
   center(i, j) {
-    return [-this.half + (i + 0.5) * this.cs, -this.half + (j + 0.5) * this.cs];
+    return [this.ox + (i + 0.5) * this.cs, this.oz + (j + 0.5) * this.cs];
   }
   cell(x, z) {
-    return [Math.floor((x + this.half) / this.cs), Math.floor((z + this.half) / this.cs)];
+    return [Math.floor((x - this.ox) / this.cs), Math.floor((z - this.oz) / this.cs)];
   }
   open(i, j) {
-    const N = this.n;
-    return i >= 0 && j >= 0 && i < N && j < N && !this.block[j * N + i];
+    if (i < 0 || j < 0 || i >= this.nx || j >= this.nz) return false;
+    const ti = (i / TILE) | 0;
+    const tj = (j / TILE) | 0;
+    if (!this.done[tj * this.tx + ti]) this.#fill(ti, tj);
+    return !this.block[j * this.nx + i];
   }
   // Straight line clear? (fine sampling against the exact colliders)
   clear(ax, az, bx, bz) {
@@ -280,7 +351,6 @@ export class NavGrid {
   }
   // Returns a list of waypoints [[x,z],...] excluding start, or null.
   findPath(sx, sz, tx, tz) {
-    const N = this.n;
     if (this.walk(tx, tz, this.col) && this.clear(sx, sz, tx, tz)) return [[tx, tz]];
     let goal = [tx, tz];
     if (!this.walk(tx, tz, this.col)) {
@@ -305,43 +375,9 @@ export class NavGrid {
       if (!g) return null;
       [gi, gj] = this.cell(g[0], g[1]);
     }
-    const start = sj * N + si;
-    const target = gj * N + gi;
-    const g = new Float32Array(N * N).fill(Infinity);
-    const from = new Int32Array(N * N).fill(-1);
-    const closed = new Uint8Array(N * N);
-    const heap = new MinHeap();
-    g[start] = 0;
-    heap.push(start, 0);
-    let expanded = 0;
-    while (heap.size) {
-      const cur = heap.pop();
-      if (cur === target) break;
-      if (closed[cur]) continue;
-      closed[cur] = 1;
-      if (++expanded > 30000) return null;
-      const ci = cur % N;
-      const cj = (cur / N) | 0;
-      for (let dj = -1; dj <= 1; dj++)
-        for (let di = -1; di <= 1; di++) {
-          if (!di && !dj) continue;
-          const ni = ci + di;
-          const nj = cj + dj;
-          if (!this.open(ni, nj)) continue;
-          if (di && dj && (!this.open(ci + di, cj) || !this.open(ci, cj + dj))) continue; // no corner cutting
-          const nid = nj * N + ni;
-          const cost = g[cur] + (di && dj ? 1.4142 : 1);
-          if (cost < g[nid]) {
-            g[nid] = cost;
-            from[nid] = cur;
-            heap.push(nid, cost + Math.hypot(gi - ni, gj - nj));
-          }
-        }
-    }
-    if (from[target] === -1 && target !== start) return null;
-    const cells = [];
-    for (let c = target; c !== -1 && c !== start; c = from[c]) cells.push(this.center(c % N, (c / N) | 0));
-    cells.reverse();
+    // Search near the straight line first; widen once if the way round is longer.
+    const cells = this.#astar(si, sj, gi, gj, 48) ?? this.#astar(si, sj, gi, gj, 160);
+    if (!cells) return null;
     if (!retargeted) {
       if (cells.length) cells[cells.length - 1] = goal;
       else cells.push(goal);
@@ -369,6 +405,52 @@ export class NavGrid {
       k = far + 1;
     }
     return out;
+  }
+  // A* between two cells inside a window `pad` cells around them. Returns the
+  // cell centres after the start up to the goal, or null.
+  #astar(si, sj, gi, gj, pad) {
+    const i0 = Math.max(0, Math.min(si, gi) - pad);
+    const j0 = Math.max(0, Math.min(sj, gj) - pad);
+    const W = Math.min(this.nx - 1, Math.max(si, gi) + pad) - i0 + 1;
+    const H = Math.min(this.nz - 1, Math.max(sj, gj) + pad) - j0 + 1;
+    const start = (sj - j0) * W + (si - i0);
+    const target = (gj - j0) * W + (gi - i0);
+    const g = new Float32Array(W * H).fill(Infinity);
+    const from = new Int32Array(W * H).fill(-1);
+    const closed = new Uint8Array(W * H);
+    const heap = new MinHeap();
+    const limit = Math.max(30000, Math.min(W * H, 120000));
+    g[start] = 0;
+    heap.push(start, 0);
+    let expanded = 0;
+    while (heap.size) {
+      const cur = heap.pop();
+      if (cur === target) break;
+      if (closed[cur]) continue;
+      closed[cur] = 1;
+      if (++expanded > limit) return null;
+      const ci = cur % W;
+      const cj = (cur / W) | 0;
+      for (let dj = -1; dj <= 1; dj++)
+        for (let di = -1; di <= 1; di++) {
+          if (!di && !dj) continue;
+          const ni = ci + di;
+          const nj = cj + dj;
+          if (ni < 0 || nj < 0 || ni >= W || nj >= H || !this.open(ni + i0, nj + j0)) continue;
+          if (di && dj && (!this.open(ci + di + i0, cj + j0) || !this.open(ci + i0, cj + dj + j0))) continue; // no corner cutting
+          const nid = nj * W + ni;
+          const cost = g[cur] + (di && dj ? 1.4142 : 1);
+          if (cost < g[nid]) {
+            g[nid] = cost;
+            from[nid] = cur;
+            heap.push(nid, cost + Math.hypot(gi - i0 - ni, gj - j0 - nj));
+          }
+        }
+    }
+    if (from[target] === -1 && target !== start) return null;
+    const cells = [];
+    for (let c = target; c !== -1 && c !== start; c = from[c]) cells.push(this.center((c % W) + i0, ((c / W) | 0) + j0));
+    return cells.reverse();
   }
 }
 

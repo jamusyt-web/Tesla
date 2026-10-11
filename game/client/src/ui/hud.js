@@ -4,7 +4,7 @@ import { sfx } from '../util/sfx.js';
 import { portrait } from './portrait.js';
 import { ITEMS } from '../../../shared/items.js';
 import { SKILLS, levelProgress } from '../../../shared/skills.js';
-import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, WORLD_RADIUS, doorPoint, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
+import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, LANDS, EXTENT, SPAWNS, pathSegments, doorPoint, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import { Panels } from './panels.js';
 import { glyph, coin } from './glyphs.js';
@@ -341,7 +341,11 @@ export class Hud {
         for (const m of g.mobs.values()) if (m.type === 'slime' && m.state !== 'dead' && (!mv || Math.hypot(m.x - p.x, m.z - p.z) < Math.hypot(mv.x - p.x, mv.z - p.z))) mv = m;
         this.questLock = mv ? { kind: 'slime', id: mv.id } : null;
       }
-      if (!mv) return null;
+      if (!mv) {
+        // None in sight: head for the nearest slime camp on the map.
+        const camp = SPAWNS.filter((sp) => sp.monster === 'slime').sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0];
+        return camp ? { x: camp.x, z: camp.z, y: 2.6, label: MONSTERS.slime.name, go: () => g.walkTo(camp.x, camp.z, true) } : null;
+      }
       const id = mv.id;
       return { x: mv.x, z: mv.z, y: 2.6, label: MONSTERS.slime.name, go: () => g.goMob(id) };
     }
@@ -533,60 +537,72 @@ export class Hud {
   }
 
   // ── Minimap ────────────────────────────────────────────────────────
+  // The whole world drawn once (up to 2 px per metre); the minimap shows a
+  // window of it around you.
   #drawMapBase() {
+    const E = EXTENT;
+    const span = Math.max(E.x1 - E.x0, E.z1 - E.z0) + 16;
+    const S = Math.min(2, 2048 / span);
+    const W = Math.ceil(span * S);
     const c = document.createElement('canvas');
-    c.width = c.height = 256;
+    c.width = c.height = W;
     const x = c.getContext('2d');
-    const S = 256 / (WORLD_RADIUS * 2 + 8);
-    const P = (v) => 128 + v * S;
-    x.fillStyle = '#3f7090';
-    x.fillRect(0, 0, 256, 256);
-    x.fillStyle = '#74a04c';
-    x.beginPath();
-    x.arc(128, 128, WORLD_RADIUS * S, 0, Math.PI * 2);
-    x.fill();
-    for (const z of ZONES) {
-      x.fillStyle = z.ground;
-      x.globalAlpha = 0.8;
-      x.beginPath();
-      x.arc(P(z.x), P(z.z), z.r * S, 0, Math.PI * 2);
-      x.fill();
-    }
-    x.globalAlpha = 1;
-    const disc = (col, o) => {
+    const ox = E.x0 - 8;
+    const oz = E.z0 - 8;
+    const PX = (v) => (v - ox) * S;
+    const PZ = (v) => (v - oz) * S;
+    const disc = (col, o, r = o.r) => {
       x.fillStyle = col;
       x.beginPath();
-      x.arc(P(o.x), P(o.z), o.r * S, 0, Math.PI * 2);
+      x.arc(PX(o.x), PZ(o.z), r * S, 0, Math.PI * 2);
       x.fill();
     };
+    x.fillStyle = '#3f7090';
+    x.fillRect(0, 0, W, W);
+    for (const l of LANDS) disc('#d6bd8a', l, l.r + 3);
+    for (const l of LANDS) disc('#74a04c', l);
+    x.globalAlpha = 0.8;
+    for (const z of ZONES) disc(z.ground, z);
+    x.globalAlpha = 1;
+    x.strokeStyle = '#b89b6e';
+    x.lineCap = 'round';
+    for (const [ax, az, bx, bz, w] of pathSegments()) {
+      x.lineWidth = Math.max(1, w * 2 * S);
+      x.beginPath();
+      x.moveTo(PX(ax), PZ(az));
+      x.lineTo(PX(bx), PZ(bz));
+      x.stroke();
+    }
     for (const l of LAKES) disc('#4b88a6', l);
     for (const p of PLAZAS) disc('#a89a82', p);
     for (const b of BUILDINGS) {
       x.fillStyle = b.deco ? '#c9a374' : b.roof;
-      x.fillRect(P(b.x - b.w / 2), P(b.z - b.d / 2), b.w * S, b.d * S);
+      x.fillRect(PX(b.x - b.w / 2), PZ(b.z - b.d / 2), b.w * S, b.d * S);
     }
     x.fillStyle = '#a87c4f';
-    for (const d of DOCKS) x.fillRect(P(d.x - d.w / 2), P(d.z - d.d / 2), d.w * S, d.d * S);
+    for (const d of DOCKS) x.fillRect(PX(d.x - d.w / 2), PZ(d.z - d.d / 2), d.w * S, d.d * S);
     this.mapBase = c;
     this.mapS = S;
+    this.mapO = [ox, oz];
   }
   #drawMap() {
     if (!this.mapBase || !this.game?.me) return;
     const x = this.mm.getContext('2d');
     const S = this.mapS;
+    const [ox, oz] = this.mapO;
     const me = this.game.myPos();
-    // Zoomed view centred on the player.
-    const zoom = 2.2;
+    // A window about 90 m across, centred on the player.
+    const zoom = 256 / (90 * S);
     x.save();
     x.clearRect(0, 0, 256, 256);
     x.translate(128, 128);
     x.scale(zoom, zoom);
-    x.translate(-(128 + me.x * S), -(128 + me.z * S));
+    x.translate(-(me.x - ox) * S, -(me.z - oz) * S);
     x.drawImage(this.mapBase, 0, 0);
     const dot = (wx, wz, col, r) => {
       x.fillStyle = col;
       x.beginPath();
-      x.arc(128 + wx * S, 128 + wz * S, r / zoom, 0, Math.PI * 2);
+      x.arc((wx - ox) * S, (wz - oz) * S, r / zoom, 0, Math.PI * 2);
       x.fill();
     };
     for (const mv of this.game.mobs.values()) if (mv.state !== 'dead') dot(mv.x, mv.z, MONSTERS[mv.type].boss ? '#a868e0' : '#e2574c', 5);

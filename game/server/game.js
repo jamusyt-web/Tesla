@@ -26,6 +26,10 @@ const ROUND_MS = 12000;
 const MOB_SPEED = 2.2;
 const NPC_SELL_RATE = 0.6; // instant-sell to the town merchant pays 60% of value
 const CHAT_MAX = 140;
+// Each hero is only told about monsters this close (and forgets them past
+// INTEREST_DROP), so a big world doesn't flood every client with every mob.
+const INTEREST = 100;
+const INTEREST_DROP = 125;
 
 // Collision and navigation for the current map (rebuilt when the map changes).
 const buildStatic = () => {
@@ -120,7 +124,7 @@ class Channel {
       you: c.publicSelf(),
       players: [...this.players.values()].filter((o) => o !== c).map((o) => o.publicInfo()),
       nodes: [...this.nodes.values()].filter((n) => !n.alive || n.hp < NODE_TYPES[n.type].hp).map((n) => ({ id: n.id, hp: n.hp, alive: n.alive, respawnIn: n.alive ? 0 : Math.max(0, n.respawnAt - Date.now()) })),
-      mobs: [...this.mobs.values()].map((m) => this.mobInfo(m)),
+      mobs: this.#nearMobs(c),
       battles: [...this.battles.values()].map((b) => b.publicState()),
     });
     this.broadcast({ t: 'join', p: c.publicInfo() }, c);
@@ -136,6 +140,20 @@ class Channel {
 
   mobInfo(m) {
     return { id: m.id, type: m.type, x: q2(m.x), z: q2(m.z), rot: q2(m.rot), state: m.state };
+  }
+  #mobRow(m) {
+    return [m.id, q2(m.x), q2(m.z), q2(m.rot), m.state];
+  }
+  // Start a hero's view of the monsters afresh: everything within range.
+  #nearMobs(c) {
+    c.mobSeen = new Map();
+    const out = [];
+    for (const m of this.mobs.values())
+      if (Math.hypot(m.x - c.ent.x, m.z - c.ent.z) < INTEREST) {
+        c.mobSeen.set(m.id, this.#mobRow(m).join(','));
+        out.push(this.mobInfo(m));
+      }
+    return out;
   }
 
   tick(now, dt) {
@@ -208,7 +226,9 @@ class Channel {
   }
 
   // Delta snapshot: only entities whose quantized state changed, plus a full
-  // refresh every 3 s so late packets can't leave anyone stuck.
+  // refresh every 3 s so late packets can't leave anyone stuck. Every hero
+  // sees every other hero; monsters only near them (add / rm as they come
+  // into and out of range).
   snapshot() {
     const full = this.tickNo % 60 === 0;
     const p = [];
@@ -222,23 +242,30 @@ class Channel {
         p.push(row);
       }
     }
-    const m = [];
-    for (const mob of this.mobs.values()) {
-      const row = [mob.id, q2(mob.x), q2(mob.z), q2(mob.rot), mob.state];
-      const key = row.join(',');
-      if (full || key !== mob.lastSnap) {
-        mob.lastSnap = key;
-        m.push(row);
+    const rows = [...this.mobs.values()].map((mob) => [mob, this.#mobRow(mob)]);
+    for (const c of this.players.values()) {
+      if (c.room) continue;
+      const seen = (c.mobSeen ??= new Map());
+      const m = [];
+      const add = [];
+      const rm = [];
+      for (const [mob, row] of rows) {
+        const d = Math.hypot(mob.x - c.ent.x, mob.z - c.ent.z);
+        const key = row.join(',');
+        if (seen.has(mob.id) ? d < INTEREST_DROP : d < INTEREST) {
+          if (!seen.has(mob.id)) add.push(this.mobInfo(mob));
+          else if (full || seen.get(mob.id) !== key) m.push(row);
+          seen.set(mob.id, key);
+        } else if (seen.delete(mob.id)) rm.push(mob.id);
       }
+      if (p.length || m.length || add.length || rm.length) c.send({ t: 's', p, m, ...(add.length ? { add } : {}), ...(rm.length ? { rm } : {}) });
     }
-    if (p.length || m.length) this.#townOnly({ t: 's', p, m });
   }
 
   // Everything about the town, for someone stepping back out of a shop.
-  fullSnapshot() {
-    const p = [...this.players.values()].filter((c) => !c.room).map((c) => [c.hero.id, q2(c.ent.x), q2(c.ent.z), q2(c.ent.rot), c.ent.act]);
-    const m = [...this.mobs.values()].map((mob) => [mob.id, q2(mob.x), q2(mob.z), q2(mob.rot), mob.state]);
-    return { t: 's', p, m, full: true };
+  fullSnapshot(c) {
+    const p = [...this.players.values()].filter((o) => !o.room).map((o) => [o.hero.id, q2(o.ent.x), q2(o.ent.z), q2(o.ent.rot), o.ent.act]);
+    return { t: 's', p, m: [], add: this.#nearMobs(c), full: true };
   }
 
   #townOnly(msg) {
@@ -637,7 +664,7 @@ export class Game {
     if (!c.room) fail("You're not in a shop.");
     c.room.remove(c, why);
     c.ch.broadcast({ t: 'show', p: c.publicInfo() }, c);
-    c.send(c.ch.fullSnapshot());
+    c.send(c.ch.fullSnapshot(c));
     return { x: q2(c.ent.x), z: q2(c.ent.z) };
   }
 

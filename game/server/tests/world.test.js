@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { current as currentMap, serverMapProblems, SHIPPED_MAP } from '../map.js';
-import { NODES, SPAWNS, PROPS, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKES, DOCKS, GATE, GATES, gateColliders, SWING_GATE, SWING_FLOOR, isPerfectSwing, mapProblems } from '../../shared/world.js';
+import { NODES, SPAWNS, PROPS, upgradeMap, setWorld, isWalkable, landDistance, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKES, DOCKS, GATE, GATES, gateColliders, SWING_GATE, SWING_FLOOR, isPerfectSwing, mapProblems } from '../../shared/world.js';
 import { ITEMS } from '../../shared/items.js';
 import { MODELS } from '../../client/src/scene/manifest.js';
 import { PROC_BUILDERS } from '../../client/src/scene/procprops.js';
@@ -121,7 +121,18 @@ test('broken maps are rejected with readable reasons', () => {
   const badMob = clone();
   badMob.spawns[0].monster = 'dragon';
   assert.match(serverMapProblems(badMob).join(), /unknown monster "dragon"/);
-  assert.deepEqual(mapProblems({ ...clone(), format: 2 }).slice(0, 1), ['Unknown map format 2 (expected 1).']);
+  assert.deepEqual(mapProblems({ ...clone(), format: 3 }).slice(0, 1), ['Unknown map format 3 (expected 2).']);
+});
+
+test('old (format 1) maps upgrade to lands', () => {
+  const { lands, ...rest } = structuredClone(currentMap.map);
+  const old = { ...rest, format: 1, bounds: { r: 96 } };
+  const up = upgradeMap(old);
+  assert.equal(up.format, 2);
+  assert.deepEqual(up.lands, [{ id: 'island', x: 0, z: 0, r: 96 }]);
+  assert.equal(up.bounds, undefined);
+  assert.deepEqual(mapProblems(up), []);
+  assert.equal(old.format, 1, 'the original is left alone');
 });
 
 test('swing rhythm: mashing can never score PERFECT, and on-beat swings always can', () => {
