@@ -11,6 +11,7 @@
     "build": "vite build",
     "start": "node --no-warnings server/index.js",
     "bots": "node --no-warnings scripts/bots.js",
+    "invite": "node --no-warnings scripts/invite.js",
     "test": "node --no-warnings --test server/tests/*.test.js"
   },
   "dependencies": {

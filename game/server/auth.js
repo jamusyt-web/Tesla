@@ -17,13 +17,21 @@ export class Auth {
     this.openSignup = process.env.OPEN_SIGNUP === '1';
   }
 
+  accountCount() {
+    return this.db.prepare('SELECT COUNT(*) AS n FROM accounts').get().n;
+  }
+
   // First boot: make sure there is a way in.
   bootstrap() {
-    const accounts = this.db.prepare('SELECT COUNT(*) AS n FROM accounts').get().n;
-    if (accounts > 0) return null;
-    const existing = this.db.prepare('SELECT code FROM invites WHERE created_by IS NULL AND used_by IS NULL').get();
+    return this.accountCount() > 0 ? null : this.hostInvite();
+  }
+
+  // An unused invite from whoever runs the server (not from any hero), made if
+  // needed. The same code comes back until someone uses it.
+  hostInvite() {
+    const existing = this.db.prepare('SELECT code FROM invites WHERE created_by IS NULL AND used_by IS NULL ORDER BY created_at').get();
     if (existing) return existing.code;
-    const code = process.env.FOUNDER_INVITE || newCode();
+    const code = (!this.accountCount() && process.env.FOUNDER_INVITE) || newCode();
     this.db.prepare('INSERT INTO invites (code, created_by, created_at) VALUES (?, NULL, ?)').run(code, Date.now());
     return code;
   }

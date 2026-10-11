@@ -19,7 +19,7 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
 
 ## What's in this build
 
-- **Accounts & invites**: invite-only signup, and every player can create 5 invites (no admins). On first boot the server prints a founder invite code.
+- **Accounts & invites**: invite-only signup, and every player can create 5 invites (no admins). On first boot the server prints a founder invite code; `npm run invite` prints a fresh one any time.
 - **Character creator**: a full-body, stylised 3D hero with skin, 7 hairstyles, hair and eye colors, eye styles, 5 outfits, pants, 7 hats, and back items (cape, backpack, wings). Costumes are data in `shared/avatar.js`, so adding one is a single entry. You can re-customize any time from Bag → Hero.
 - **3D town, full-screen**: tap or click to move with A* pathfinding. WASD also works on PC. Drag to rotate, pinch or scroll to zoom. The camera follows you, buildings fade when they block your view, and you see an x-ray silhouette when you're behind trees. The town has a minimap, a fountain, a lake with a dock, a forest, a quarry, a herb garden, the Wilds, and drifting clouds and butterflies.
 - **Gathering (Skyblock-style)**:
@@ -62,6 +62,8 @@ npm run dev          # game server on :8787 + Vite client on :5173 (hot reload)
 ```
 
 Open http://localhost:5173. The server log prints a **founder invite code** for the very first account. After that, create invites for friends in the **Town Hall → Invites** tab.
+
+Lost the code, or need one later? In a second terminal in the `game` folder run `npm run invite` (Windows: `npm.cmd run invite`). It prints a code you can sign up with, whether or not the server is running, and lists the accounts already on this save in case you just need to log in.
 
 To play on your phone on the same Wi-Fi, open `http://<your-computer's-IP>:5173`.
 
