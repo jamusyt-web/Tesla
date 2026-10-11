@@ -173,3 +173,21 @@ test('waystones removed from the map are dropped from what heroes are told', asy
   assert.ok(!again.welcome.you.stones.includes('stone_gone'));
   again.ws.close();
 });
+
+test('server owners can teleport anywhere on land; nobody else can', async () => {
+  const o = await player('Owna');
+  const f = await player('Fren');
+  game.auth.setAdmin(o.id, true);
+  game.auth.setAdmin(f.id, false);
+  assert.match((await f.call('owner.teleport', { x: -50, z: 0 })).err, /Only server owners/);
+  assert.match((await o.call('owner.teleport', { x: 500, z: 500 })).err, /not on land/);
+  assert.match((await o.call('owner.teleport', { x: 'a', z: 0 })).err, /not on land/);
+  const mark = f.inbox.length;
+  const r = await o.call('owner.teleport', { x: -50, z: 2 });
+  assert.ok(r.ok, r.err);
+  const e = game.online.get(o.id).ent;
+  assert.ok(Math.hypot(e.x + 50, e.z - 2) < 3 && W.isWalkable(e.x, e.z, W.buildColliders()), 'landed in Whisperwood, somewhere walkable');
+  await f.next((m) => m.t === 'tp' && m.id === o.id, 3000, mark);
+  o.ws.close();
+  f.ws.close();
+});

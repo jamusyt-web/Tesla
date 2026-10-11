@@ -6,7 +6,8 @@ import * as assets from '../scene/assets.js';
 import { buildTown, disposeTown } from '../scene/town.js';
 import { Particles } from '../scene/fx.js';
 import { PROC_BUILDERS } from '../scene/procprops.js';
-import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES, stoneFront, STONE_RANGE } from '../../../shared/world.js';
+import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES, stoneFront, STONE_RANGE, EXTENT } from '../../../shared/world.js';
+import { paintWorld } from '../ui/mapdraw.js';
 import { KINDS, KIND_KEYS, PALETTE, show, store } from './kinds.js';
 
 // The world editor: a top-down view of the real world where the server owner
@@ -563,6 +564,7 @@ class Editor {
     else if (k === 'g') this.toggle('snap');
     else if (k === 'v') this.setTool('select');
     else if (k === 'p') this.setTool('path');
+    else if (k === 'm' && !e.repeat) this.overview();
   }
   #down(e) {
     this.renderer.domElement.setPointerCapture(e.pointerId);
@@ -756,6 +758,7 @@ class Editor {
     clear(this.topEl).append(
       h('div.ed-group', b('Select', () => this.setTool('select'), { on: this.tool === 'select', title: 'Select and move (V)' }), b('Place', () => ((this.tab = 'place'), this.#drawSide(), this.setTool('select')), { on: this.tool === 'place', title: 'Pick something to place from the panel' }), b('Path', () => this.setTool('path'), { on: this.tool === 'path', title: 'Draw a dirt path (P)' })),
       h('div.ed-group', b('Undo', () => this.undo(), { title: 'Ctrl+Z' }), b('Redo', () => this.redo(), { title: 'Ctrl+Y' })),
+      h('div.ed-group', b('Map', () => this.overview(), { title: 'The whole world from above: click anywhere to jump there (M)' })),
       h('div.ed-group', b('Snap', () => this.toggle('snap'), { on: this.opts.snap, title: 'Snap to a half-metre grid (G)' }), b('Areas', () => this.toggle('areas'), { on: this.opts.areas, title: 'Show zones, camps and regions' }), b('Solid', () => this.toggle('colliders'), { on: this.opts.colliders, title: 'Show what blocks walking' })),
       h('div.ed-group', b(this.dirty ? 'Save •' : 'Save', () => this.save(), { cls: this.dirty ? '.hot' : '', title: 'Save to the world (Ctrl+S)' }), b('Export', () => this.export(), { title: 'Download the map as a file' }), b('Import', () => this.import(), { title: 'Load a map file' }), b('Exit', () => this.exit())),
     );
@@ -850,11 +853,15 @@ class Editor {
       h('div.ed-sec', 'Regions'),
       ...this.list('regions').map((r) => h('button.ed-item', { on: { click: () => (this.#jump(r), this.select({ kind: 'regions', id: r.id })) } }, KINDS.regions.name(r))),
       h('p.ed-muted', 'Regions are your towns and areas, each with a difficulty tier (1 = starter). Add one from Place → Buildings & areas.'),
+      h('div.ed-sec', 'Waystones'),
+      ...this.list('stones').map((st) => h('button.ed-item', { on: { click: () => (this.#jump(st), this.select({ kind: 'stones', id: st.id })) } }, st.name || st.id)),
+      h('div.ed-sec', 'Buildings'),
+      ...this.list('buildings').filter((b) => !b.deco).map((b) => h('button.ed-item', { on: { click: () => (this.#jump(b), this.select({ kind: 'buildings', id: b.id })) } }, b.label || b.id)),
       h('div.ed-sec', 'Land'),
       ...this.list('lands').map((l) => h('button.ed-item', { on: { click: () => (this.#jump(l), this.select({ kind: 'lands', id: l.id })) } }, `Land ${l.id} (${Math.round(l.r)} m)`)),
       h('p.ed-muted', 'Land is made of circles: overlap them to make any coastline, or put one far out at sea for a new island. Add one from Place → Buildings & areas.'),
       h('div.ed-sec', 'Keys'),
-      h('p.ed-muted', 'Drag ground: pan · Right-drag: turn the view · Wheel: zoom · WASD: move · Q/E: turn selection · Del: delete · Ctrl+D: copy · Ctrl+Z / Ctrl+Y: undo / redo · G: snap · Ctrl+S: save'),
+      h('p.ed-muted', 'Drag ground: pan · Right-drag: turn the view · Wheel: zoom · WASD: move · M: whole-world map · Q/E: turn selection · Del: delete · Ctrl+D: copy · Ctrl+Z / Ctrl+Y: undo / redo · G: snap · Ctrl+S: save'),
     );
   }
   // Zoomed out, the editor shows more of the world than the game ever does.
@@ -864,6 +871,80 @@ class Editor {
   #jump(p) {
     this.cam.x = p.x;
     this.cam.z = p.z;
+  }
+
+  // The whole world from above (the same map players see, every waystone
+  // shown). Click anywhere to jump the camera there; wheel zooms, drag pans.
+  overview() {
+    if (this.overviewEl) return this.overviewEl.close();
+    setWorld(this.map); // draw the map as edited, saved or not
+    const canvas = h('canvas');
+    const wrap = h('div.ed-overview', h('div.ed-ov-head', h('b', 'World map'), h('span.ed-muted', 'Click to jump there · wheel: zoom · drag: pan · M or Esc: close'), h('button.ed-btn', { on: { click: () => close() } }, 'Close')), canvas);
+    this.el.append(wrap);
+    const r = canvas.getBoundingClientRect();
+    const v = { W: r.width, H: r.height, dpr: Math.min(2, devicePixelRatio || 1) };
+    canvas.width = Math.round(v.W * v.dpr);
+    canvas.height = Math.round(v.H * v.dpr);
+    const E = EXTENT;
+    const minS = Math.min((v.W - 40) / (E.x1 - E.x0), (v.H - 80) / (E.z1 - E.z0));
+    Object.assign(v, { s: minS, cx: (E.x0 + E.x1) / 2, cz: (E.z0 + E.z1) / 2 - 20 / minS });
+    const toWorld = (sx, sy) => [v.cx + (sx - v.W / 2) / v.s, v.cz + (sy - v.H / 2) / v.s];
+    const draw = () => {
+      const x = canvas.getContext('2d');
+      const text = paintWorld(x, v, { known: 'all' });
+      // Where the editor camera is now, and the spawn point.
+      const at = (wx, wz) => [v.W / 2 + (wx - v.cx) * v.s, v.H / 2 + (wz - v.cz) * v.s];
+      const [cx, cy] = at(this.cam.x, this.cam.z);
+      x.strokeStyle = '#ffe9a8';
+      x.lineWidth = 2;
+      x.setLineDash([6, 4]);
+      x.beginPath();
+      x.arc(cx, cy, Math.max(10, this.cam.dist * 0.6 * v.s), 0, Math.PI * 2);
+      x.stroke();
+      x.setLineDash([]);
+      const [px, py] = at(this.map.spawn.x, this.map.spawn.z);
+      text('★ spawn', px, py, '700 12px "Alegreya Sans", sans-serif', '#ffe9a8');
+    };
+    let drag = null;
+    canvas.addEventListener('pointerdown', (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      drag = { x: e.offsetX, y: e.offsetY, cx: v.cx, cz: v.cz, moved: false };
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      if (Math.hypot(e.offsetX - drag.x, e.offsetY - drag.y) > 6) drag.moved = true;
+      if (!drag.moved) return;
+      v.cx = drag.cx - (e.offsetX - drag.x) / v.s;
+      v.cz = drag.cz - (e.offsetY - drag.y) / v.s;
+      draw();
+    });
+    canvas.addEventListener('pointerup', (e) => {
+      const d = drag;
+      drag = null;
+      if (!d || d.moved) return;
+      const [wx, wz] = toWorld(e.offsetX, e.offsetY);
+      this.#jump({ x: wx, z: wz });
+      close();
+    });
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const [wx, wz] = toWorld(e.offsetX, e.offsetY);
+      v.s = Math.max(minS, Math.min(10, v.s * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+      v.cx = wx - (e.offsetX - v.W / 2) / v.s;
+      v.cz = wz - (e.offsetY - v.H / 2) / v.s;
+      draw();
+    }, { passive: false });
+    const onKey = (e) => {
+      if (e.key === 'Escape') close();
+    };
+    addEventListener('keydown', onKey);
+    const close = () => {
+      removeEventListener('keydown', onKey);
+      wrap.remove();
+      this.overviewEl = null;
+    };
+    this.overviewEl = { close };
+    draw();
   }
 
   // A small modal; resolves with the index of the button pressed.

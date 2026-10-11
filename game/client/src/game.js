@@ -1240,6 +1240,20 @@ export class GameClient {
       this.travelling = false;
     }
   }
+  // Server owners: jump anywhere on land (to check on building work).
+  async ownerTeleport(x, z) {
+    if (this.travelling) return false;
+    this.travelling = true;
+    try {
+      await this.sock.rpc('owner.teleport', { x, z });
+      return true;
+    } catch (e) {
+      this.hud.toast(e.message, 'err');
+      return false;
+    } finally {
+      this.travelling = false;
+    }
+  }
   // Someone travelled by waystone: they vanish in a flash and reappear.
   onTeleport(m) {
     const pv = this.players.get(m.id);

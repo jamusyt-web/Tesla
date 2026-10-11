@@ -6,7 +6,7 @@ import { MONSTERS, heroStats, damage } from '../shared/monsters.js';
 import {
   NODES, SPAWNS, buildColliders, NavGrid, NODE_TYPES, stepPath,
   INTERACT_RANGE, FISH_RANGE, SPAWN, isWalkable, WORLD_RADIUS, isDeepSpot, SWING_FLOOR, isPerfectSwing,
-  stoneById, stoneNear, stoneFront, travelFee, STONE_RANGE,
+  stoneById, stoneNear, stoneFront, travelFee, STONE_RANGE, landDistance,
 } from '../shared/world.js';
 import { rollFish, fishingGear, fightRating, replayFight, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
 import { GameError, fail } from './db.js';
@@ -724,6 +724,27 @@ export class Game {
     return { to: dest.id, fee, x: q2(e.x), z: q2(e.z) };
   }
 
+  // Server owners can jump anywhere on land (to check their building), free.
+  ownerTeleport(c, x, z) {
+    if (!this.auth.isAdmin(c.hero.id)) fail('Only server owners can do that.');
+    if (c.room) fail('Leave the shop first.');
+    if (c.battle) fail("You can't travel in the middle of a battle!");
+    if (c.craft) fail('Finish your craft first.');
+    x = Number(x);
+    z = Number(z);
+    if (!Number.isFinite(x) || !Number.isFinite(z) || landDistance(x, z) > 0) fail("That's not on land.");
+    const open = isWalkable(x, z, STATIC.col) ? [x, z] : STATIC.nav.nearestOpen(x, z);
+    if (!open) fail("There's no room to stand there.");
+    c.cancelFishing();
+    const e = c.ent;
+    const from = { x: e.x, z: e.z };
+    [e.x, e.z] = c.ch.freeSpot(open[0], open[1], c);
+    Object.assign(e, { path: null, act: 'idle' });
+    this.heroes.savePos(c.hero.id, e.x, e.z);
+    c.ch.teleported(c, from);
+    return { x: q2(e.x), z: q2(e.z) };
+  }
+
   // Everyone who can see/hear c: their channel plus whoever is in their shop room.
   audience(c) {
     const out = new Set(c.ch ? c.ch.players.values() : []);
@@ -1109,6 +1130,7 @@ const RPC = {
   'craft.quick': (g, c, a) => g.crafting.quick(c, a),
   npcSell: (g, c, a) => g.npcSell(c, a.item, a.qty),
   travel: (g, c, a) => g.travel(c, String(a.to ?? '')),
+  'owner.teleport': (g, c, a) => g.ownerTeleport(c, a.x, a.z),
   equip: (g, c, a) => g.equip(c, a.item),
   avatar(g, c, a) {
     g.heroes.setAvatar(c.hero, a.avatar);

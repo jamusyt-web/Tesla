@@ -129,6 +129,8 @@ Everything placed in the world lives in **`maps/world.json`**: the land itself (
 The first account made on a server is its **owner**. Owners get an **Edit the world** button in the Town Hall, which opens the editor: the real world seen from above, where you can change anything.
 
 - **Look around:** drag empty ground to pan, right-drag to turn the view, scroll (or pinch) to zoom. WASD and the arrow keys also pan.
+- **Jump anywhere:** **Map** (or M) shows the whole world from above, the same map players see; click anywhere to jump there. The **World** tab also lists every region, waystone and main building: click one to go to it.
+- **Owner teleport in the game:** owners get a **Teleport (owner)** button on the world map (tap any spot on land, or a waystone), free, to check their building work up close.
 - **Select and move:** click something to select it; its details appear in the panel on the right, where you can type exact values. Drag it to move it. Big areas (zones, monster camps, regions, lakes) need a click first, so you can still pan across them. Clicking the same spot again picks the next thing underneath.
 - **Place:** open **Place**, pick something (plants, town props, resource nodes, monster camps, cottages, waystones, docks, fountains, plazas, lakes, zones, regions), then click the world. Plants and nodes keep placing until you press Esc. *Natural variety* gives plants a random turn and size.
 - **Paths:** **Path**, click points, then double-click the last point (or press Enter). Select a path to drag its points, add more, or change its width.
@@ -149,7 +151,7 @@ The big plan, one step at a time:
 3. **A much bigger world**, in three parts:
    - **3a, the engine** (done): land of any shape, collision checks that only look nearby, pathfinding that works out the map a tile at a time, the world drawn in 96 m tiles that load around the camera and drop behind, and monsters only sent to players within about 100 m.
    - **3b, travel** (done): waystones you attune to by visiting, then fast-travel between for a gold fee; a full world map (M); region names as you enter. The Craft, Market and Town buttons also open their menus instantly now.
-   - **3c, editor extras** for building big: jump anywhere on the map (waystones can already be placed in the editor).
+   - **3c, editor extras** (done): a whole-world map in the editor (click to jump there), go-to lists for regions, waystones and buildings, and owner teleport in the game.
 4. **Four or five major towns**, from the starter town up through harder ones, each with its own biome, resources, monsters and market (prices differ between towns, so hauling goods pays).
 5. **Personal land and building** (Skyblock-style): your own plot with buildings that make money over time, using the editor's placement tools.
 6. **An outlaw zone**: opt-in full-loot PvP for what you carry, bandit NPCs, and the best rewards in the game.
