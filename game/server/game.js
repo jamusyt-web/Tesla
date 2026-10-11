@@ -15,6 +15,7 @@ import { Market } from './market.js';
 import { Shops } from './shop.js';
 import { ShopRoom } from './rooms.js';
 import { Crafting } from './crafting.js';
+import { Jobs, jobText } from './jobs.js';
 import { SHOP } from '../shared/shop.js';
 import { Auth } from './auth.js';
 
@@ -574,6 +575,7 @@ export class Game {
     this.market = new Market(db, this.heroes);
     this.shops = new Shops(db, this.heroes);
     this.crafting = new Crafting(this);
+    this.jobs = new Jobs(db, this.heroes);
     this.auth = new Auth(db);
     this.channels = [];
     this.online = new Map(); // accountId → Client
@@ -591,11 +593,27 @@ export class Game {
     this.tickShops(); // catch up on sales made while the server was down
     if (this.opts.shopSim) this.shopTimer = setInterval(() => this.tickShops(), SHOP.SIM_STEP_MS);
     this.saveTimer = setInterval(() => this.savePositions(), 30000);
+    this.expireJobs();
+    this.jobTimer = setInterval(() => this.expireJobs(), 60000);
+  }
+  // Bulletin board jobs past their time: refund what's left, tell the poster.
+  expireJobs(now = Date.now()) {
+    try {
+      for (const r of this.jobs.expire(now)) {
+        const o = this.online.get(r.poster);
+        if (!o) continue;
+        o.pushInventory();
+        o.send({ t: 'toast', kind: 'gold', text: `Your job for ${ITEMS[r.item]?.name ?? r.item} ran out${r.refund ? `: ${r.refund} 🪙 back` : ''}.` });
+      }
+    } catch (e) {
+      console.error('job expiry error', e);
+    }
   }
   stop() {
     clearInterval(this.timer);
     clearInterval(this.shopTimer);
     clearInterval(this.saveTimer);
+    clearInterval(this.jobTimer);
     this.savePositions();
   }
 
@@ -1253,6 +1271,30 @@ const RPC = {
     };
   },
   'invite.create': (g, c) => ({ code: g.auth.createInvite(c.hero.id) }),
+
+  // Bulletin board (server/jobs.js)
+  'jobs.list': (g, c) => ({ open: g.jobs.list(), mine: g.jobs.mine(c.hero.id), now: Date.now() }),
+  'jobs.post'(g, c, a) {
+    const j = g.jobs.post(c.hero.id, a);
+    c.pushInventory();
+    g.announce(`${c.hero.name} posted a job on the board: ${jobText(j)} at ${j.per} 🪙 each.`);
+    return j;
+  },
+  'jobs.deliver'(g, c, a) {
+    const r = g.jobs.deliver(c.hero.id, a.id, a.qty);
+    c.pushInventory();
+    const o = g.online.get(r.poster);
+    if (o) {
+      o.pushInventory();
+      o.send({ t: 'toast', kind: 'good', text: `${c.hero.name} delivered ${r.qty}× ${ITEMS[r.item].name} for your job${r.left ? ` (${r.left} still wanted)` : '. Job done!'}` });
+    }
+    return r;
+  },
+  'jobs.cancel'(g, c, a) {
+    const r = g.jobs.cancel(c.hero.id, a.id);
+    c.pushInventory();
+    return r;
+  },
   'channel.switch'(g, c, a) {
     const target = g.channels.find((ch) => ch.id === Number(a.id));
     if (!target) fail('No such channel.');

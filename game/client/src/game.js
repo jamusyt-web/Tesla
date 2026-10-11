@@ -19,7 +19,7 @@ import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
   NODES, buildColliders, NavGrid, stepPath, approachPoint, doorPoint, zonesOfKind,
   BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, GATE, ZONES, SWING_GATE,
-  stoneById, stoneFront, STONE_RANGE,
+  stoneById, stoneFront, STONE_RANGE, PROPS,
 } from '../../shared/world.js';
 
 const INTERP_DELAY = 130; // ms behind real time we render other players
@@ -329,6 +329,8 @@ export class GameClient {
       const el =
         l.kind === 'place'
           ? h('div.place', { on: { click: (e) => (e.stopPropagation(), this.goBuilding(l.id)) } }, h('span.ic', l.glyph ? glyph(l.glyph) : l.icon), l.text)
+          : l.kind === 'board'
+            ? h('div.place', { on: { click: (e) => (e.stopPropagation(), this.goBoard(l.id)) } }, h('span.ic', glyph(l.glyph)), l.text)
           : l.kind === 'stone'
             ? h('div.place.stone', { on: { click: (e) => (e.stopPropagation(), this.goStone(l.id, { openMap: true })) } }, h('span.ic', glyph(l.glyph)), l.text)
             : h('div.zone-tag', l.text);
@@ -801,6 +803,7 @@ export class GameClient {
       if (u.node) return { kind: 'node', id: u.node, point: hit.point };
       if (u.station) return { kind: 'station', id: u.station, point: hit.point };
       if (u.stone) return { kind: 'stone', id: u.stone, point: hit.point };
+      if (u.tap) return { kind: 'tap', what: u.tap, point: hit.point };
       if (u.building) return { kind: 'building', id: u.building, point: hit.point };
       if ((u.ground || u.water) && !ground) ground = { kind: 'ground', point: hit.point };
     }
@@ -836,6 +839,7 @@ export class GameClient {
     if (hit.kind === 'player') return this.hud.openProfile(hit.id);
     if (hit.kind === 'station') return this.hud.panels.open('craft', { station: hit.id });
     if (hit.kind === 'stone') return this.goStone(hit.id, { openMap: true });
+    if (hit.kind === 'tap' && hit.what === 'jobs') return this.goBoard(null, hit.point);
     if (hit.kind === 'npc') {
       const info = hit.npc.info;
       const line = info.lines[Math.floor(Math.random() * info.lines.length)];
@@ -1209,6 +1213,18 @@ export class GameClient {
     const dz = L.z - mv.z;
     const d = Math.hypot(dx, dz) || 1;
     this.walkTo(mv.x + (dx / d) * 3.2, mv.z + (dz / d) * 3.2, true, engage);
+  }
+
+  // Walk up to a bulletin board (by prop id, or the one tapped), then open it.
+  goBoard(id, point = null) {
+    const pr = id ? PROPS.find((p) => p.id === id) : PROPS.filter((p) => p.slot === 'proc_job_board').sort((a, b) => Math.hypot(a.x - point.x, a.z - point.z) - Math.hypot(b.x - point.x, b.z - point.z))[0];
+    if (!pr || this.battle) return;
+    const open = () => this.hud.panels.open('jobs');
+    const [fx, fz] = [pr.x + Math.sin(pr.rot || 0) * 1.8, pr.z + Math.cos(pr.rot || 0) * 1.8];
+    const L = this.me.local;
+    if (Math.hypot(L.x - fx, L.z - fz) < 3) return open();
+    this.stopGather();
+    if (!this.walkTo(fx, fz, true, open)) open();
   }
 
   // ── Waystones (fast travel) ──────────────────────────────────────────

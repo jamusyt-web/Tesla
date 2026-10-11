@@ -37,6 +37,28 @@ export const PROC_BUILDERS = {
     return g;
   },
 
+  // The bulletin board (paid jobs): a little roofed notice board with notes
+  // pinned to its front (+z). Tapping it opens the board.
+  proc_job_board(p) {
+    const g = new THREE.Group();
+    for (const x of [-1.05, 1.05]) g.add(at(mesh(box(0.16, 2.5, 0.16), '#5c3b22', { outline: OL }), x, 1.25, 0));
+    g.add(at(mesh(box(2.2, 1.3, 0.1), '#8a6038', { outline: OL }), 0, 1.6, 0));
+    g.add(at(mesh(box(2.3, 0.1, 0.16), '#5c3b22', { outline: OL }), 0, 0.92, 0.02));
+    const roof = mesh(box(2.6, 0.1, 0.7), '#6b3a2a', { outline: OL });
+    roof.rotation.x = -0.35;
+    g.add(at(roof, 0, 2.5, 0.05));
+    const notes = ['#efe4cc', '#e8d8b0', '#f4ead6', '#e6cfa0', '#efe4cc', '#ead9b8'];
+    notes.forEach((col, i) => {
+      const n = new THREE.Mesh(box(0.42 + jitter(p.id, 'w' + i) * 0.12, 0.5 + jitter(p.id, 'h' + i) * 0.14, 0.012), toon(col));
+      n.position.set(-0.72 + (i % 3) * 0.72 + jitter(p.id, 'x' + i) * 0.12, 1.92 - Math.floor(i / 3) * 0.6, 0.06);
+      n.rotation.z = jitter(p.id, 'r' + i) * 0.3;
+      g.add(n);
+      g.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 4), toon('#a63a2e')), n.position.x, n.position.y + 0.2, 0.075));
+    });
+    g.userData.tap = 'jobs';
+    return g;
+  },
+
   // s scales the height (2.4 m at s = 1).
   proc_standing_stone(p) {
     const h = 2.4 * (p.s ?? 1);

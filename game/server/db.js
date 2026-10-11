@@ -187,6 +187,25 @@ const MIGRATIONS = [
   (db) => {
     db.exec(`ALTER TABLE heroes ADD COLUMN stones TEXT NOT NULL DEFAULT '[]';`);
   },
+  // 5: the bulletin board: paid jobs between players (server/jobs.js).
+  (db) => {
+    db.exec(`
+      CREATE TABLE jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        poster INTEGER NOT NULL REFERENCES accounts(id),
+        item TEXT NOT NULL,
+        qty INTEGER NOT NULL,
+        left INTEGER NOT NULL CHECK (left >= 0),
+        per INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        closed_at INTEGER
+      );
+      CREATE INDEX idx_jobs_open ON jobs(status, expires_at);
+      CREATE INDEX idx_jobs_poster ON jobs(poster, status);
+    `);
+  },
 ];
 
 export function migrate(db) {

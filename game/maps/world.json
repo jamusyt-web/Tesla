@@ -1031,6 +1031,7 @@
     {"id":"p856","slot":"proc_standing_stone","x":-9,"z":-86,"rot":1.532,"r":0,"s":1.146},
     {"id":"p857","slot":"proc_standing_stone","x":-6.36,"z":-92.36,"rot":1.832,"r":0,"s":1.226},
     {"id":"p858","slot":"proc_standing_stone","x":0,"z":-95,"rot":0.675,"r":0,"s":1.342},
-    {"id":"p859","slot":"proc_standing_stone","x":6.36,"z":-92.36,"rot":1.511,"r":0,"s":1.147}
+    {"id":"p859","slot":"proc_standing_stone","x":6.36,"z":-92.36,"rot":1.511,"r":0,"s":1.147},
+    {"id":"p_job_board","slot":"proc_job_board","x":-6.2,"z":5.2,"rot":1.76,"r":0.9}
   ]
 }

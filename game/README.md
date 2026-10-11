@@ -52,6 +52,10 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
   - **Town demand**: each item has a town-wide pool of NPC demand that refills over 8 hours, so flooding the town with one item lowers what townsfolk will pay. Fair prices sell, greedy ones don't (never above 1.5× value).
   - **Friends shop in person**: visit any shop from Town Hall → Shops or a player's profile, walk around with whoever's inside, and buy at the shown price (4% fee, same as the market; 8% guild levy on NPC sales).
   - **While you were away**: a summary of what sold, who bought, and your till.
+- **Bulletin board (paid jobs)**: the board in the town square (or Town Hall → Jobs) lists jobs players have posted, like "bring me 20 Oak Logs at 5 🪙 each". Use it to get others to gather or craft for you.
+  - **Posting**: pick the item, how many and the pay per item. The full reward is held when you post, so every job pays. You can have 5 jobs up at once, each for 3 days.
+  - **Delivering**: hand in some or all of what's wanted and get paid on the spot, less the usual 4% tax. The goods go straight into the poster's bag, even while they're offline.
+  - **Refunds**: cancel a job, or let it run out, and you get back the gold for whatever wasn't delivered.
 - **Co-op battles in the world**: monsters roam the Wilds (slimes, wolves, goblins, and a Ruinwarden Golem boss). Tap one to start a turn-based fight right where it stands. **Anyone nearby can tap the same monster to join** (up to 4). Each round has a 12 s timer and the actions are Attack, Special (charges up), Defend, Item (potions) and Flee. Other players can watch the fight happen.
 - **Social**: channel chat with speech bubbles, emotes (wave, dance, cheer, heart, sit), player profiles, online list, leaderboards, and a shop directory.
 - **Onboarding quest**: chop → craft → fight → stock your shop, with gold rewards. A light pillar marks the target, glowing dots trace the walking path, an arrow around your hero points the way with the distance, and a **Take me there** button walks you over.
@@ -101,7 +105,7 @@ maps/     world.json  the world map: everything placed in the world (see below)
 shared/   rules & data used by BOTH server and client (items, recipes, skills,
           monsters, avatar options, world rules + the map loader, A* navigation)
 server/   game.js   channels, 20Hz tick, movement, gathering, fishing, battles, chat
-          market.js order book + matching + escrow
+          market.js order book + matching + escrow     jobs.js bulletin board
           shop.js   player shops: displays, till, NPC customer simulation
           rooms.js  shop interiors (who's inside, movement)
           heroes.js inventory/gold/xp persistence      auth.js  invites + sessions
@@ -156,7 +160,7 @@ The big plan, one step at a time:
 5. **Personal land and building** (Skyblock-style): your own plot with buildings that make money over time, using the editor's placement tools.
 6. **An outlaw zone**: opt-in full-loot PvP for what you carry, bandit NPCs, and the best rewards in the game.
 7. **Procedurally generated dungeons**: a fresh layout every run, played solo or with a party. Group runs are harder (more and tougher monsters, stronger bosses) and pay better loot to match.
-8. **A bulletin board** for paid jobs: post a task you'd rather not do ("collect 50 iron ore", "craft 10 health potions") with a gold reward. The gold is held when you post and paid to whoever hands in the goods.
+8. **A bulletin board** for paid jobs (done): post a task you'd rather not do ("collect 50 iron ore", "craft 10 health potions") with a gold reward. The gold is held when you post and paid to whoever hands in the goods.
 
 Also planned:
 

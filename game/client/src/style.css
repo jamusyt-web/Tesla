@@ -556,3 +556,9 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .ed-ov-head { display: flex; align-items: center; gap: 12px; padding: 8px 12px; color: var(--bone); border-bottom: 2px solid var(--brass); }
 .ed-ov-head .ed-muted { flex: 1; color: var(--bone-soft); }
 .ed-overview canvas { flex: 1 1 0; min-height: 0; width: 100%; display: block; cursor: crosshair; touch-action: none; }
+/* Bulletin board */
+.jobform { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.jobform .row { align-items: stretch; }
+.jobf { display: flex; flex-direction: column; gap: 4px; font-weight: 700; font-size: 13px; color: var(--ink-soft); flex: 1; min-width: 0; }
+.jobf select, .jobf input { font-size: 16px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--parch-edge); background: #f4ead4; width: 100%; }
+.rowcard .row input { width: 64px; padding: 6px; border-radius: 5px; border: 1px solid var(--parch-edge); background: #f4ead4; font-size: 15px; }

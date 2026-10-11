@@ -681,6 +681,9 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     root.add(dock);
   }
 
+  // Bulletin boards get a name tag like the buildings.
+  for (const pr of PROPS) if (pr.slot === 'proc_job_board') labels.push({ kind: 'board', id: pr.id, text: 'Bulletin Board', glyph: 'scroll', pos: new THREE.Vector3(pr.x, 3.4, pr.z) });
+
   // Zone names floating over each zone.
   for (const zn of ZONES) labels.push({ kind: 'zone', id: zn.id, text: zn.label, glyph: zn.glyph, pos: new THREE.Vector3(zn.x, 0.5, zn.z) });
 
@@ -826,6 +829,11 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
         obj.position.set(pr.x, pr.y || 0, pr.z);
         obj.rotation.y = pr.rot;
         obj.traverse((o) => o.isMesh && o.material.side !== THREE.BackSide && (o.castShadow = true));
+        if (obj.userData.tap) {
+          // Something you can tap (the bulletin board): tag its meshes for picking.
+          obj.traverse((o) => o.isMesh && (o.userData.tap = obj.userData.tap));
+          pick.push(obj);
+        }
         group.add(obj);
         continue;
       }
