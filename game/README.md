@@ -147,10 +147,11 @@ The big plan, one step at a time:
 4. **Four or five major towns**, from the starter town up through harder ones, each with its own biome, resources, monsters and market (prices differ between towns, so hauling goods pays).
 5. **Personal land and building** (Skyblock-style): your own plot with buildings that make money over time, using the editor's placement tools.
 6. **An outlaw zone**: opt-in full-loot PvP for what you carry, bandit NPCs, and the best rewards in the game.
+7. **Procedurally generated dungeons**: a fresh layout every run, played solo or with a party. Group runs are harder (more and tougher monsters, stronger bosses) and pay better loot to match.
+8. **A bulletin board** for paid jobs: post a task you'd rather not do ("collect 50 iron ore", "craft 10 health potions") with a gold reward. The gold is held when you post and paid to whoever hands in the goods.
 
 Also planned:
 
-- **Group dungeons**: instanced multi-room co-op runs with bosses and better loot.
 - **PvP duels**, using the same turn-based battle engine.
 - **Auctions** for rare items (bid and buyout), alongside the order book.
 - **Cosmetics and costumes**: the avatar and tool-skin systems are already data-driven.
