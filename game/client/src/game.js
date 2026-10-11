@@ -1,12 +1,14 @@
 import { PROPS } from '../../shared/props.js';
 import * as THREE from 'three';
 import { Avatar } from './scene/avatar.js';
+import { useGrade } from './scene/grade.js';
 import { Mob } from './scene/mobs.js';
 import { buildTown } from './scene/town.js';
 import { Particles, Rings } from './scene/fx.js';
 import { Townsfolk } from './scene/townsfolk.js';
 import { RoomView } from './room.js';
 import { CraftGame } from './ui/craftgame.js';
+import { glyph } from './ui/glyphs.js';
 import { RECIPE_BY_ID } from '../../shared/recipes.js';
 import { spotsOf, stationPos } from '../../shared/stations.js';
 import { STATIONS } from '../../shared/crafting.js';
@@ -34,6 +36,10 @@ const STATIC = (() => {
   const col = buildColliders(nodes, generateScenery(), PROPS);
   return { nodes: new Map(nodes.map((n) => [n.id, n])), col, nav: new NavGrid(col) };
 })();
+
+const MOOD = { fog: new THREE.Color('#b8c4c8'), fogWild: new THREE.Color('#9faea6'), sun: new THREE.Color('#ffe4bc'), sunWild: new THREE.Color('#ffd0a0') };
+// Name colour by how a monster's level compares with yours.
+const conColor = (diff) => (diff <= -3 ? '#9a9a9a' : diff <= -1 ? '#7fc06a' : diff <= 1 ? '#e8d070' : diff <= 3 ? '#f08a3a' : '#e04a3a');
 
 class RemoteBody {
   constructor() {
@@ -94,6 +100,7 @@ export class GameClient {
     renderer.setPixelRatio(Math.min(devicePixelRatio, low ? 1.5 : 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    useGrade(renderer);
     this.renderer = renderer;
     this.el = h('div#game');
     this.el.append(renderer.domElement);
@@ -103,14 +110,15 @@ export class GameClient {
     root.append(this.el);
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog('#cdeaf7', 70, 190);
+    scene.fog = new THREE.Fog('#b8c4c8', 20, 100);
     this.scene = scene;
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.5, 900);
-    const hemi = new THREE.HemisphereLight('#dff3ff', '#b08a66', 1.5);
+    const hemi = new THREE.HemisphereLight('#c8d8ec', '#6b5a48', 1.3);
     hemi.layers.enableAll(); // lights must be on the hero layer too
     scene.add(hemi);
-    const sun = new THREE.DirectionalLight('#fff3dc', 2.3);
-    sun.position.set(30, 50, 20);
+    this.hemi = hemi;
+    const sun = new THREE.DirectionalLight('#ffe4bc', 2.7);
+    sun.position.set(40, 34, 10);
     sun.castShadow = true;
     sun.layers.enableAll();
     sun.shadow.mapSize.set(low ? 1024 : 2048, low ? 1024 : 2048);
@@ -172,7 +180,7 @@ export class GameClient {
       .sort((a, b) => Math.hypot(a.x - L.x, a.z - L.z) - Math.hypot(b.x - L.x, b.z - L.z))[0];
     const start = () => this.#startCraft(recipe, batch);
     if (Math.hypot(L.x - sp.x, L.z - sp.z) < 1.5) return start();
-    this.hud.toast(`🚶 Off to the ${STATIONS[r.station].label}…`);
+    this.hud.toast(`Off to the ${STATIONS[r.station].label}…`);
     if (!this.walkTo(sp.x, sp.z, true, start)) this.hud.toast("Can't reach the station.", 'err');
   }
   async #startCraft(recipe, batch) {
@@ -226,7 +234,7 @@ export class GameClient {
     }
     if (res.xp) this.hud.onXp(res.xp);
     const g = this.hud.craftGame;
-    if (!g) return this.hud.toast(`🔨 ${res.out.qty}× ${ITEMS[res.out.item].name} (grade ${res.grade})`, 'good');
+    if (!g) return this.hud.toast(`${res.out.qty}× ${ITEMS[res.out.item].name} (grade ${res.grade})`, 'good');
     g.showResult(res, {
       onAgain: cr ? () => (g.close(), this.goCraft(cr.recipe, cr.batch)) : null,
       onEquip: (id) => this.sock.rpc('equip', { item: id }).then(() => this.hud.toast(`Equipped ${ITEMS[id].name}!`, 'good')).catch((e) => this.hud.toast(e.message, 'err')),
@@ -253,7 +261,7 @@ export class GameClient {
       // Reloaded or another device: it can only be finished as it is.
       this.sock
         .rpc('craft.finish', { sid: c.sid, toggles: [], end: 0, off: [0, 0], stop: true })
-        .then((res) => this.hud.toast(`🔨 Your ${ITEMS[res.out?.item]?.name || 'craft'} was finished as it was (grade ${res.grade}).`))
+        .then((res) => this.hud.toast(`Your ${ITEMS[res.out?.item]?.name || 'craft'} was finished as it was (grade ${res.grade}).`))
         .catch(() => {});
     } else if (this.craft) {
       this.hud.craftGame?.close();
@@ -319,7 +327,7 @@ export class GameClient {
     this.staticLabels = this.town.labels.map((l) => {
       const el =
         l.kind === 'place'
-          ? h('div.place', { on: { click: (e) => (e.stopPropagation(), this.goBuilding(l.id)) } }, h('span.ic', l.icon), l.text)
+          ? h('div.place', { on: { click: (e) => (e.stopPropagation(), this.goBuilding(l.id)) } }, h('span.ic', l.glyph ? glyph(l.glyph) : l.icon), l.text)
           : h('div.zone-tag', l.text);
       this.labelLayer.append(el);
       return { ...l, el };
@@ -497,25 +505,31 @@ export class GameClient {
     mob.root.traverse((o) => (o.userData.mob = m.id));
     this.scene.add(mob.root);
     const d = MONSTERS[m.type];
-    const tag = h('div.tag.mob', h('span.fight.hidden', '⚔️'), h('div', h('span.lvl', { style: { background: d.boss ? '#a868e0' : '#ea5a4f', boxShadow: 'none' } }, d.lvl), h('span.nm', d.name)));
+    const nm = h('span.nm', d.name);
+    const tag = h('div.tag.mob' + (d.boss ? '.boss' : ''), h('span.engaged.hidden', glyph('swords')), h('div', d.boss ? glyph('skull') : null, h('span.lvl', d.lvl), nm));
     this.labelLayer.append(tag);
-    mv = { id: m.id, type: m.type, mob, tag, body: new RemoteBody(), state: m.state, x: m.x, z: m.z };
+    mv = { id: m.id, type: m.type, mob, tag, nm, body: new RemoteBody(), state: m.state, x: m.x, z: m.z };
+    nm.style.color = conColor(d.lvl - (this.hud.me.level || 1));
     mv.body.push(m.x, m.z, m.rot, m.state);
     this.mobs.set(m.id, mv);
     this.#mobState(mv, m.state);
     return mv;
   }
+  // Recolour monster names when the hero's level changes (grey = trivial … red = deadly).
+  tintMobs() {
+    for (const mv of this.mobs.values()) mv.nm.style.color = conColor(MONSTERS[mv.type].lvl - (this.hud.me.level || 1));
+  }
   #mobState(mv, st) {
     const prev = mv.state;
     mv.state = st;
-    mv.tag.querySelector('.fight').classList.toggle('hidden', st !== 'battle');
+    mv.tag.querySelector('.engaged').classList.toggle('hidden', st !== 'battle');
     if (st === 'dead') {
       if (prev !== 'dead' && mv.mob.root.visible) {
         mv.mob.play('die');
         setTimeout(() => mv.state === 'dead' && (mv.mob.root.visible = false), 800);
       } else mv.mob.root.visible = false;
     } else if (prev === 'dead' || !mv.mob.root.visible) {
-      mv.mob.oneShot = null;
+      mv.mob.revive();
       mv.mob.root.visible = true;
       mv.body.buf = [];
       this.fx.burst(new THREE.Vector3(mv.x, 0.5, mv.z), { n: 14, color: ['#ffffff', '#e9e2d0'], speed: 3, up: 2, gravity: 2, size: 0.4, life: 0.7, drag: 2 });
@@ -549,14 +563,14 @@ export class GameClient {
       s.on('craftResult', (m) => {
         this.#craftDone(m, null);
         if (m.reason === 'timeout') this.hud.toast('Your craft ran out of time and was finished as it was.');
-        else if (m.reason === 'offline') this.hud.toast(`🔨 While you were away your ${ITEMS[m.out?.item]?.name || 'craft'} was finished as it was.`);
+        else if (m.reason === 'offline') this.hud.toast(`While you were away your ${ITEMS[m.out?.item]?.name || 'craft'} was finished as it was.`);
       }),
       s.on('crafted', (m) => {
         const pv = this.players.get(m.by);
         const p = stationPos(m.station);
         if (!pv || pv.isMe || !p) return;
         pv.av.play('cheer');
-        this.floatText(new THREE.Vector3(p.x, 2.6, p.z), `${m.grade} · ${m.qty}× ${ITEMS[m.item]?.name}`, m.mw || m.grade === 'S' ? 'loot rare' : 'loot');
+        this.floatText(new THREE.Vector3(p.x, 2.8, p.z), `${m.grade} · ${m.qty}× ${ITEMS[m.item]?.name}`, m.mw || m.grade === 'S' ? 'loot rare' : 'loot');
       }),
       s.on('rjoin', (m) => this.room?.onJoin(m)),
       s.on('rleave', (m) => this.room?.onLeave(m)),
@@ -567,7 +581,7 @@ export class GameClient {
       s.on('join', (m) => {
         this.addPlayer(m.p);
         this.hud.setOnline(this.players.size);
-        this.hud.chatLine({ sys: true, text: `👋 ${m.p.name} arrived in town.` });
+        this.hud.chatLine({ sys: true, text: `${m.p.name} arrived in town.` });
       }),
       s.on('leave', (m) => {
         const pv = this.players.get(m.id);
@@ -884,12 +898,12 @@ export class GameClient {
     const me = this.hud.me;
     if (!me || t.kind === 'fish') return null;
     const lvl = levelFromXp(me.skills?.[t.skill] || 0);
-    if (lvl < t.lvl) return `🔒 ${t.name} needs ${SKILLS[t.skill].name} level ${t.lvl} (you're ${lvl}).`;
+    if (lvl < t.lvl) return `${t.name} needs ${SKILLS[t.skill].name} level ${t.lvl} (you're ${lvl}).`;
     if (t.tool) {
       const tool = ITEMS[me.equip?.[t.tool]];
       const name = t.tool === 'axe' ? 'axe' : 'pickaxe';
       if (!tool || !(me.inv?.[me.equip[t.tool]] > 0)) return `You need ${t.tool === 'axe' ? 'an axe' : 'a pickaxe'}. Craft one at the Workshop!`;
-      if (tool.tier < t.tier) return `🔒 ${t.name} needs a better ${name} (tier ${t.tier}).`;
+      if (tool.tier < t.tier) return `${t.name} needs a better ${name} (tier ${t.tier}).`;
     }
     return null;
   }
@@ -1029,11 +1043,11 @@ export class GameClient {
 
   onLoot(m) {
     const view = this.town.nodes.get(m.node);
-    const base = (view ? view.root.position.clone() : this.me.av.root.position.clone()).setY(2.5);
+    const base = (view ? view.root.position.clone() : this.me.av.root.position.clone()).setY(2.7);
     let i = 0;
     for (const [id, q] of Object.entries(m.loot)) {
       const rare = m.rare?.includes(id);
-      setTimeout(() => this.floatText(base.clone().setY(2.5 + i * 0.01), `${ITEMS[id].icon} +${q} ${ITEMS[id].name}`, 'loot' + (rare ? ' rare' : '')), 350 + i++ * 260);
+      setTimeout(() => this.floatText(base.clone().setY(2.7 + i * 0.01), `${ITEMS[id].icon} +${q} ${ITEMS[id].name}`, 'loot' + (rare ? ' rare' : '')), 350 + i++ * 260);
     }
     setTimeout(() => (m.rare?.length ? sfx.rare() : sfx.loot()), 350);
     this.hud.onXp(m.xp);
@@ -1232,7 +1246,7 @@ export class GameClient {
         if (!mv) return;
         mv.mob.play('hurt');
         if (near) (ev.crit || ev.skill ? sfx.crit : sfx.hit)();
-        this.floatText(mobPos, `${ev.crit ? 'CRIT ' : ''}${ev.skill ? '★ ' : ''}${ev.dmg}`, ev.crit || ev.skill ? 'crit' : 'dmg');
+        this.floatText(mobPos, `${ev.crit ? 'CRIT ' : ''}${ev.skill ? '' : ''}${ev.dmg}`, ev.crit || ev.skill ? 'crit' : 'dmg');
         this.fx.burst(mobPos, { n: ev.skill ? 26 : 12, color: ev.skill ? ['#c79bff', '#ffffff', '#ffd84a'] : ['#ffffff', '#ffe066', '#ff9f5a'], speed: 5, up: 4, size: 0.14, life: 0.6 });
         if (pv?.isMe) this.shakeAmt = Math.max(this.shakeAmt, ev.skill ? 0.5 : ev.crit ? 0.35 : 0.15);
       }, 260);
@@ -1243,8 +1257,8 @@ export class GameClient {
       setTimeout(() => {
         if (!pv) return;
         pv.av.play('hurt');
-        const p = pv.av.root.position.clone().setY(2.6);
-        this.floatText(p, ev.blocked ? `🛡️ ${ev.dmg}` : `${ev.dmg}`, 'dmg');
+        const p = pv.av.root.position.clone().setY(2.7);
+        this.floatText(p, ev.blocked ? `${ev.dmg}` : `${ev.dmg}`, 'dmg');
         this.fx.burst(p, { n: 8, color: ['#ff6b6b', '#ffffff'], speed: 4, up: 3, size: 0.12, life: 0.5 });
         if (pv.isMe) {
           sfx.hurt();
@@ -1255,7 +1269,7 @@ export class GameClient {
     } else if (ev.k === 'heal') {
       const pv = this.players.get(ev.who);
       if (pv) {
-        this.floatText(pv.av.root.position.clone().setY(2.6), `+${ev.amt}`, 'heal');
+        this.floatText(pv.av.root.position.clone().setY(2.7), `+${ev.amt}`, 'heal');
         this.fx.burst(pv.av.root.position.clone().setY(1), { n: 14, color: ['#7dff8a', '#ffffff'], speed: 1.5, up: 4, gravity: -1, size: 0.12, life: 1 });
         if (pv.isMe) sfx.heal();
       }
@@ -1305,7 +1319,7 @@ export class GameClient {
     if (!pv) return;
     if (m.e === 'sit') pv.av.setState('sit');
     else pv.av.play(m.e);
-    if (m.e === 'heart') this.floatText(pv.av.root.position.clone().setY(3.2), '💖', 'crit');
+    if (m.e === 'heart') this.floatText(pv.av.root.position.clone().setY(3.3), '💖', 'crit');
     if (pv.isMe) pv.local.path = null;
   }
 
@@ -1556,8 +1570,19 @@ export class GameClient {
     }
     cam.lookAt(c.target.x, 1.4, c.target.z);
     // Keep the shadow camera centred on the player.
-    this.sun.position.set(c.target.x + 30, 50, c.target.z + 20);
+    this.sun.position.set(c.target.x + 40, 34, c.target.z + 10);
     this.sun.target.position.set(c.target.x, 0, c.target.z);
+    // Mood: the Wilds (north) are hazier, greener-grey and a touch dimmer than town.
+    const w = 1 - THREE.MathUtils.smoothstep(c.target.z, -60, -36);
+    if (w !== this.mood) {
+      this.mood = w;
+      const f = this.scene.fog;
+      f.color.lerpColors(MOOD.fog, MOOD.fogWild, w);
+      f.near = 20 - 6 * w;
+      f.far = 100 - 30 * w;
+      this.hemi.intensity = 1.3 - 0.25 * w;
+      this.sun.color.lerpColors(MOOD.sun, MOOD.sunWild, w);
+    }
   }
 
   #updateLabels() {
@@ -1565,7 +1590,7 @@ export class GameClient {
     const tmp = {};
     const v = new THREE.Vector3();
     for (const pv of this.players.values()) {
-      v.copy(pv.av.root.position).setY(2.85);
+      v.copy(pv.av.root.position).setY(3.0);
       this.project(v, tmp);
       const far = v.distanceTo(cam) > 70;
       pv.tag.style.display = tmp.vis && !far && !pv.hidden ? '' : 'none';

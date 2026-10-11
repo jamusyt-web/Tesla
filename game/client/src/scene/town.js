@@ -9,7 +9,7 @@ import {
   generateNodes, generateScenery, doorPoint, mulberry32,
 } from '../../../shared/world.js';
 
-const OL = 0.035;
+const OL = 0.03;
 const sph = (r, a = 14, b = 10) => new THREE.SphereGeometry(r, a, b);
 const cyl = (a, b, h, s = 10) => new THREE.CylinderGeometry(a, b, h, s);
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
@@ -292,7 +292,7 @@ export class NodeView {
       this.stump.visible = true;
       const c = kind === 'rock' ? ['#9c9a94', '#c8c5bd', '#7c7f86'] : ['#4fae4f', '#9be37a', '#ffffff'];
       this.fx.burst(new THREE.Vector3(p.x, 0.8, p.z), { n: kind === 'rock' ? 30 : 14, color: c, speed: 6, up: 6, size: kind === 'rock' ? 0.3 : 0.12, life: 1.1 });
-      this.fx.puff.burst(new THREE.Vector3(p.x, 0.3, p.z), { n: 10, color: ['#f1ebdd', '#e2d9c4'], speed: 2, up: 1.5, gravity: 1, size: 0.6, life: 0.8, drag: 3 });
+      this.fx.puff.burst(new THREE.Vector3(p.x, 0.3, p.z), { n: 10, color: ['#cbbfa8', '#b8ab92'], speed: 2, up: 1.5, gravity: 1, size: 0.6, life: 0.8, drag: 3 });
     }
   }
 
@@ -321,7 +321,7 @@ export class NodeView {
         f.landed = true;
         const p = this.root.position;
         const land = new THREE.Vector3(p.x + f.dir.x * 2.8, 0.3, p.z + f.dir.z * 2.8);
-        this.fx.puff.burst(land, { n: 22, color: ['#f1ebdd', '#e2d9c4', '#d6ccb4'], speed: 4, up: 2, gravity: 2, size: 0.8, life: 1, drag: 2.5 });
+        this.fx.puff.burst(land, { n: 22, color: ['#cbbfa8', '#b8ab92', '#a89a82'], speed: 4, up: 2, gravity: 2, size: 0.8, life: 1, drag: 2.5 });
         this.fx.burst(land, { n: 16, color: ['#5fb04a', '#8bcf5a'], speed: 3, up: 3, gravity: 3, size: 0.2, life: 1.4, flat: true });
         this.onLand?.();
       }
@@ -387,12 +387,14 @@ export function buildTown(scene, fx, { low = false } = {}) {
   animated.push((dt, t, cam) => sky.position.copy(cam.position));
 
   // Ocean
-  const ocean = new THREE.Mesh(new THREE.RingGeometry(WORLD_RADIUS - 2, 420, 160, 6), waterMaterial({ radius: 420, coast: WORLD_RADIUS + 5.2, shallow: '#6fd6f2', deep: '#2b8fd0', fog: { color: '#cdeaf7', near: 70, far: 190 }, opacity: 1 }));
+  const ocean = new THREE.Mesh(new THREE.RingGeometry(WORLD_RADIUS - 2, 420, 160, 6), waterMaterial({ radius: 420, coast: WORLD_RADIUS + 5.2, shallow: '#58a8bc', deep: '#1b4f74', fog: scene.fog, opacity: 1 }));
   ocean.rotation.x = -Math.PI / 2;
   ocean.position.y = -2.2;
   scene.add(ocean);
   animated.push((dt, t) => {
-    ocean.material.uniforms.time.value = t;
+    const u = ocean.material.uniforms;
+    u.time.value = t;
+    if (scene.fog) (u.fogNear.value = scene.fog.near), (u.fogFar.value = scene.fog.far);
     ocean.position.y = -2.2 + Math.sin(t * 0.8) * 0.06;
   });
 
@@ -404,12 +406,12 @@ export function buildTown(scene, fx, { low = false } = {}) {
   const pos = g.attributes.position;
   const colors = new Float32Array(pos.count * 3);
   const c = new THREE.Color();
-  const grass = new THREE.Color('#8fd16a');
-  const grass2 = new THREE.Color('#7cc25c');
-  const path = new THREE.Color('#e9d2a0');
-  const plaza = new THREE.Color('#dcc9a6');
-  const sand = new THREE.Color('#f3dfa6');
-  const cliff = new THREE.Color('#b98e5c');
+  const grass = new THREE.Color('#74a04c');
+  const grass2 = new THREE.Color('#628c42');
+  const path = new THREE.Color('#b89b6e');
+  const plaza = new THREE.Color('#a89a82');
+  const sand = new THREE.Color('#d6bd8a');
+  const cliff = new THREE.Color('#7a5b40');
   const zoneCols = ZONES.map((z) => new THREE.Color(z.ground));
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
@@ -452,7 +454,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
 
   // Plaza: concentric paving rings, plus sparse stepping stones along paths.
   {
-    const rings = [[0, 11.2, '#e6d8b8'], [10.4, 11.2, '#c9b48c'], [6.2, 6.9, '#d4c29d'], [3.6, 4.2, '#d4c29d']];
+    const rings = [[0, 11.2, '#b3a58c'], [10.4, 11.2, '#8a7c66'], [6.2, 6.9, '#988a72'], [3.6, 4.2, '#988a72']];
     rings.forEach(([a, b, col], i) => {
       const m = new THREE.Mesh(a ? new THREE.RingGeometry(a, b, 64) : new THREE.CircleGeometry(b, 64), toon(col));
       m.rotation.x = -Math.PI / 2;
@@ -462,7 +464,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     });
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
-      const spoke = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 3.4), toon('#d4c29d'));
+      const spoke = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 3.4), toon('#988a72'));
       spoke.rotation.x = -Math.PI / 2;
       spoke.rotation.z = -a;
       spoke.position.set(Math.cos(a) * 8.6, 0.035, Math.sin(a) * 8.6);
@@ -495,7 +497,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
       o.scale.set(sc, 1, sc * (0.7 + rng() * 0.4));
       o.updateMatrix();
       im.setMatrixAt(i, o.matrix);
-      im.setColorAt(i, col.set(['#efe2c4', '#e2d1ad', '#f3e8d0'][i % 3]));
+      im.setColorAt(i, col.set(['#b8ac96', '#a89c86', '#c4b8a2'][i % 3]));
     });
     im.receiveShadow = true;
     scene.add(im);
@@ -528,7 +530,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
         o.updateMatrix();
         im.setMatrixAt(k, o.matrix);
         const wild = z < -40;
-        im.setColorAt(k++, col.set(wild ? ['#5c9a45', '#4e8a3b', '#6aa84f'][j] : ['#79c95a', '#6abb4d', '#8fd96a'][j]));
+        im.setColorAt(k++, col.set(wild ? ['#4e6e38', '#43602f', '#5b7a42'][j] : ['#6b9a48', '#5a8a3d', '#7caa55'][j]));
       }
     scene.add(im);
   }
@@ -748,7 +750,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     });
     if (!b.deco) {
       pickables.push(grp);
-      labels.push({ kind: 'place', id: b.id, text: b.label, icon: b.icon, pos: new THREE.Vector3(b.x, grp.userData.top + 0.9, b.z) });
+      labels.push({ kind: 'place', id: b.id, text: b.label, icon: b.icon, glyph: b.glyph, pos: new THREE.Vector3(b.x, grp.userData.top + 0.9, b.z) });
     }
     buildingMeshes.push(grp);
     if (grp.userData.smoke) animated.push((dt, t) => {
@@ -770,7 +772,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
       animated.push((dt, t) => flame.scale.setScalar(1 + Math.sin(t * 13 + sx) * 0.18));
       scene.add(torch, flame);
     }
-    labels.push({ kind: 'place', id: 'gate', text: GATE.label, icon: GATE.icon, pos: new THREE.Vector3(GATE.x, castle.userData.top + 1.2, GATE.z) });
+    labels.push({ kind: 'place', id: 'gate', text: GATE.label, icon: GATE.icon, glyph: GATE.glyph, pos: new THREE.Vector3(GATE.x, castle.userData.top + 1.2, GATE.z) });
   } else {
     const grp = new THREE.Group();
     grp.position.set(GATE.x, 0, GATE.z);
@@ -796,7 +798,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     banner.position.set(0, 4.8, 0.55);
     grp.add(beam, roof, banner);
     scene.add(grp);
-    labels.push({ kind: 'place', id: 'gate', text: GATE.label, icon: GATE.icon, pos: new THREE.Vector3(GATE.x, 8.3, GATE.z) });
+    labels.push({ kind: 'place', id: 'gate', text: GATE.label, icon: GATE.icon, glyph: GATE.glyph, pos: new THREE.Vector3(GATE.x, 8.3, GATE.z) });
   }
 
   // Fountain
@@ -804,7 +806,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     const grp = new THREE.Group();
     const rim = mesh(cyl(FOUNTAIN.r, FOUNTAIN.r + 0.2, 0.7, 24), '#c9c1b2', { outline: OL });
     rim.position.y = 0.35;
-    const water = new THREE.Mesh(cyl(FOUNTAIN.r - 0.3, FOUNTAIN.r - 0.3, 0.1, 24), toon('#6fd0f5', { emissive: '#3aa8de', emissiveIntensity: 0.25 }));
+    const water = new THREE.Mesh(cyl(FOUNTAIN.r - 0.3, FOUNTAIN.r - 0.3, 0.1, 24), toon('#5aa9c2', { emissive: '#2a7a9a', emissiveIntensity: 0.1 }));
     water.position.y = 0.62;
     const pillar = mesh(cyl(0.35, 0.5, 2.2, 10), '#c9c1b2', { outline: OL });
     pillar.position.y = 1.4;
@@ -822,13 +824,17 @@ export function buildTown(scene, fx, { low = false } = {}) {
 
   // Lake + dock + reeds + lily pads
   {
-    const water = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r + 0.6, 64), waterMaterial({ radius: LAKE.r + 0.6, foamAt: LAKE.r + 0.1, shallow: '#86e3f5', deep: '#2f95cf', opacity: 0.93 }));
+    const water = new THREE.Mesh(new THREE.CircleGeometry(LAKE.r + 0.6, 64), waterMaterial({ radius: LAKE.r + 0.6, foamAt: LAKE.r + 0.1, shallow: '#5fb3c4', deep: '#1f5f86', fog: scene.fog, opacity: 0.93 }));
     water.rotation.x = -Math.PI / 2;
     water.position.set(LAKE.x, -0.12, LAKE.z);
     water.userData.water = true;
     scene.add(water);
     pickables.push(water);
-    animated.push((dt, t) => (water.material.uniforms.time.value = t));
+    animated.push((dt, t) => {
+      const u = water.material.uniforms;
+      u.time.value = t;
+      if (scene.fog) (u.fogNear.value = scene.fog.near), (u.fogFar.value = scene.fog.far);
+    });
     const dock = new THREE.Group();
     const planks = Math.round(DOCK.d / 0.6);
     for (let i = 0; i < planks; i++) {
@@ -917,7 +923,7 @@ export function buildTown(scene, fx, { low = false } = {}) {
     sign.add(post, board);
     sign.lookAt(0, 0, 0);
     scene.add(sign);
-    labels.push({ kind: 'zone', id: zn.id, text: `${zn.icon} ${zn.label}`, pos: new THREE.Vector3(zn.x, 0.5, zn.z) });
+    labels.push({ kind: 'zone', id: zn.id, text: zn.label, glyph: zn.glyph, pos: new THREE.Vector3(zn.x, 0.5, zn.z) });
   }
   // Quarry: mine cart + rails
   {

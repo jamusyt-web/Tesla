@@ -1,11 +1,14 @@
 import './style.css';
+import './scene/grade.js';
 import { h } from './util/dom.js';
 import { api, getToken, setToken } from './net/api.js';
 import { Socket } from './net/socket.js';
 import { openAuth } from './ui/auth.js';
 import { openCreator } from './ui/creator.js';
+import { coinify } from './ui/glyphs.js';
 
 const app = document.getElementById('app');
+coinify(app);
 
 async function boot() {
   if (!getToken()) return openAuth(app, afterAuth);
@@ -17,7 +20,7 @@ async function boot() {
       setToken(null);
       return openAuth(app, afterAuth);
     }
-    app.append(h('div.loading', h('div', h('span.spin', '🏰'), 'Can’t reach the server. Retrying…')));
+    app.append(h('div.loading', h('div', h('span.spin'), 'Can’t reach the server. Retrying…')));
     setTimeout(() => location.reload(), 3000);
   }
 }
@@ -38,7 +41,7 @@ function createHero() {
 
 async function enterGame() {
   const bar = h('i', { style: { width: '0%' } });
-  const loading = h('div.loading', h('div', h('span.spin', '🌲'), 'Entering Hearthvale…', h('div.loadbar', bar)));
+  const loading = h('div.loading', h('div', h('span.spin'), 'Entering Hearthvale…', h('div.loadbar', bar)));
   app.append(loading);
   // three.js, the world and its 3D models are big; load them only once we're in.
   const [{ GameClient }, { Hud }, { loadAssets }, { itemIcon }] = await Promise.all([import('./game.js'), import('./ui/hud.js'), import('./scene/assets.js'), import('./ui/portrait.js')]);
@@ -62,7 +65,7 @@ async function enterGame() {
       return createHero();
     }
     if (ev.code === 4002) {
-      app.append(h('div.loading', h('div', h('span.spin', '🔁'), 'You logged in on another device.', h('br'), h('button.btn', { style: { marginTop: '14px' }, on: { click: () => location.reload() } }, 'Play here instead'))));
+      app.append(h('div.loading', h('div', h('span.spin'), 'You logged in on another device.', h('br'), h('button.btn', { style: { marginTop: '14px' }, on: { click: () => location.reload() } }, 'Play here instead'))));
       return;
     }
     if (!banner) {

@@ -10,7 +10,7 @@ import { iconEl } from './panels.js';
 // same inputs to grade the craft. One button for everything: tap anywhere
 // (or Space/Enter), and for "hold" steps, hold and let go in the band.
 const OFF = [2, 1]; // small latency allowance: shifts the windows, never widens them
-const MARK = { P: ['★ PERFECT', '#ffd84a'], G: ['● GOOD', '#7ed957'], W: ['◐ WEAK', '#f3a56b'], M: ['✕ MISS', '#ea5a4f'] };
+const MARK = { P: ['PERFECT', '#f3d589'], G: ['GOOD', '#8fd46a'], W: ['WEAK', '#d9925a'], M: ['MISS', '#d0584a'] };
 const touch = () => matchMedia('(pointer: coarse)').matches;
 
 export class CraftGame {

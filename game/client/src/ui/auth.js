@@ -12,8 +12,7 @@ export function openAuth(root, onAuthed) {
   const submit = h('button.btn.green.big.block', { type: 'submit' });
   const tabs = h('div.tabs');
   const form = h('form', { on: { submit: go } }, tabs, inviteField, h('label.field', h('span', 'Username'), user), h('label.field', h('span', 'Password'), pass), err, submit);
-  const clouds = h('div.clouds', ...[0, 1, 2, 3].map((i) => h('div.cloud', { style: { top: 6 + i * 18 + '%', animationDuration: 40 + i * 13 + 's', animationDelay: -i * 11 + 's' } }, '☁️')));
-  const el = h('div.splash', clouds, h('div', { style: { position: 'relative', width: 'min(420px, 100%)' } }, h('div.logo', 'Hearthvale'), h('div.tagline', '🌲 Gather · 🔨 Craft · 🏪 Trade · ⚔️ Adventure — together'), h('div.card', form)));
+  const el = h('div.splash', h('div', { style: { position: 'relative', width: 'min(420px, 100%)' } }, h('div.logo', 'Hearthvale'), h('div.tagline', 'Gather ◆ Craft ◆ Trade ◆ Fight — a town built by its heroes'), h('div.card', form)));
   root.append(el);
 
   function draw() {
@@ -23,7 +22,7 @@ export function openAuth(root, onAuthed) {
     );
     inviteField.classList.toggle('hidden', mode !== 'join');
     pass.autocomplete = mode === 'join' ? 'new-password' : 'current-password';
-    submit.textContent = mode === 'join' ? '🎟️ Create account' : '🏰 Enter Hearthvale';
+    submit.textContent = mode === 'join' ? 'Claim your invite' : 'Enter Hearthvale';
     err.textContent = '';
   }
 

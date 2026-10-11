@@ -7,6 +7,7 @@ import { STATIONS, batchCap, isStackable } from '../../../shared/crafting.js';
 import { SKILLS, SKILL_IDS, levelProgress, levelFromXp } from '../../../shared/skills.js';
 import { MARKET_TAX as TAX } from '../../../shared/economy.js';
 import { SHOP_PANELS } from './shop-panels.js';
+import { glyph } from './glyphs.js';
 
 const NPC_RATE = 0.6;
 
@@ -53,7 +54,7 @@ export class Panels {
     this.close();
     const body = h('div.panel-body');
     const titleEl = h('h3');
-    const panel = h('div.panel' + (['profile', 'result'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, h('button.close', { on: { click: () => this.close() } }, '✕')), body);
+    const panel = h('div.panel' + (['profile', 'result'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, h('button.close', { 'aria-label': 'Close', on: { click: () => this.close() } }, '✕')), body);
     const scrim = h('div.scrim', { on: { pointerdown: (e) => e.target === scrim && this.close() } }, panel);
     this.hud.el.append(scrim);
     this.cur = { name, scrim, body, titleEl, args, refresh: null, onClose: null };
@@ -77,20 +78,20 @@ export class Panels {
     this.cur.refresh?.();
   }
 
-  title(c, t) {
-    c.titleEl.textContent = t;
+  title(c, t, g) {
+    c.titleEl.replaceChildren(...(g ? [glyph(g)] : []), t);
   }
 
   // ── Bag & Hero ─────────────────────────────────────────────────────
   p_bag(c, args) {
-    this.title(c, '🎒 Bag');
+    this.title(c, 'Bag', 'bag');
     let tab = args.tab || 'items';
     let cat = 'all';
     let sel = null;
     const render = () => {
       clear(c.body);
       c.body.append(
-        h('div.tabs', ...[['items', '🎒 Items'], ['hero', '🧑 Hero']].map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render()) } }, l))),
+        h('div.tabs', ...[['items', 'Items'], ['hero', 'Hero']].map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render()) } }, l))),
       );
       if (tab === 'hero') return this.#heroTab(c.body);
       const inv = Object.entries(this.me.inv).filter(([id, n]) => n > 0 && ITEMS[id] && (cat === 'all' || ITEMS[id].cat === cat));
@@ -117,7 +118,7 @@ export class Panels {
     const q = qtyInput(Math.max(1, sellable), Math.max(1, sellable));
     const box = h(
       'div.detail',
-      h('div.row', h('div', { style: { fontSize: '40px' } }, iconEl(id, '56px')), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '18px' } }, it.name), h('div', { style: { color: RARITY[it.rarity].color, fontWeight: 600, fontSize: '13px' } }, RARITY[it.rarity].label + ' · ' + CATEGORIES[it.cat]), h('div.muted', itemDesc(it)))),
+      h('div.row', h('div', { style: { fontSize: '40px' } }, iconEl(id, '56px')), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '18px' } }, it.name), h('div', { style: { fontWeight: 700, fontSize: '13px' } }, h('span', { style: { background: '#2a2018', color: RARITY[it.rarity].color, padding: '1px 6px', borderRadius: '3px' } }, RARITY[it.rarity].label), ' · ' + CATEGORIES[it.cat]), h('div.muted', itemDesc(it)))),
       h('div.kv', h('span', 'You own'), h('b', fmt(have))),
       h('div.kv', h('span', 'Base value'), h('b.gold', `${it.value} 🪙`)),
       h('div.kv', h('span', 'Merchant pays'), h('b.gold', `${npc} 🪙 each`)),
@@ -128,7 +129,7 @@ export class Panels {
         isEq ? h('span.chip.on', 'Equipped') : null,
         sellable > 0 ? h('div.qty', q) : null,
         sellable > 0 ? h('button.btn.small', { on: { click: () => this.#npcSell(id, +q.value) } }, 'Sell to merchant') : null,
-        h('button.btn.blue.small', { on: { click: () => this.open('market', { item: id }) } }, '⚖️ Market'),
+        h('button.btn.blue.small', { on: { click: () => this.open('market', { item: id }) } }, 'Market'),
       ),
     );
     return box;
@@ -166,14 +167,14 @@ export class Panels {
       h(
         'div.row',
         { style: { alignItems: 'flex-start', flexWrap: 'wrap' } },
-        h('img', { src: portrait(this.hud.myAvatar, { full: true }), style: { width: '130px', height: '162px', background: 'linear-gradient(#bfe8ff,#fdeccf)', borderRadius: '18px' } }),
+        h('img', { src: portrait(this.hud.myAvatar, { full: true }), style: { width: '130px', height: '162px', background: 'radial-gradient(circle at 50% 35%, #4a3a2c, #1e1814)', borderRadius: '6px', border: '1px solid #8a6a3a' } }),
         h(
           'div',
           { style: { flex: 1, minWidth: '200px' } },
           h('div', { style: { fontWeight: 700, fontSize: '22px' } }, this.hud.myName),
           h('div.muted', `Hero level ${me.level}`),
-          h('div.statgrid', { style: { margin: '10px 0' } }, h('div.stat', h('b', st.atk), h('span', '⚔️ Attack')), h('div.stat', h('b', st.def), h('span', '🛡️ Defense')), h('div.stat', h('b', st.hp), h('span', '❤️ Health'))),
-          h('button.btn.purple.small', { on: { click: () => (this.close(), this.hud.onCustomize?.()) } }, '🎨 Customize look'),
+          h('div.statgrid', { style: { margin: '10px 0' } }, h('div.stat', h('b', st.atk), h('span', 'Attack')), h('div.stat', h('b', st.def), h('span', 'Defense')), h('div.stat', h('b', st.hp), h('span', 'Health'))),
+          h('button.btn.purple.small', { on: { click: () => (this.close(), this.hud.onCustomize?.()) } }, 'Customize look'),
         ),
       ),
       h('div.section-title', 'Equipment'),
@@ -197,7 +198,7 @@ export class Panels {
   // make it by hand (client/src/ui/craftgame.js). Mastered refining/cooking
   // recipes can be Quick-crafted.
   p_craft(c, args = {}) {
-    this.title(c, '🔨 Workshop');
+    this.title(c, 'Workshop', 'anvil');
     let tab = args.station || 'workbench';
     let info = null;
     let pick = null;
@@ -206,7 +207,7 @@ export class Panels {
       clear(c.body);
       const lvl = levelFromXp(this.me.skills.crafting || 0);
       c.body.append(
-        h('div.muted', { style: { marginBottom: '8px' } }, `🔨 Crafting level ${lvl}. Pick a recipe, walk to its station and make it yourself — good timing gives bonus materials or Fine and Masterwork gear.`),
+        h('div.muted', { style: { marginBottom: '8px' } }, `Crafting level ${lvl}. Pick a recipe, walk to its station and make it yourself — good timing gives bonus materials or Fine and Masterwork gear.`),
         h('div.tabs', { style: { flexWrap: 'wrap' } }, ...Object.entries(STATIONS).map(([k, st]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), (pick = null), render()) } }, `${st.icon} ${st.label}`))),
       );
       for (const r of RECIPES.filter((x) => x.station === tab)) {
@@ -225,7 +226,7 @@ export class Panels {
             h('div.t', out.name, h('span.muted', `  · worth ${out.value} 🪙`)),
             h('div', ...Object.entries(r.in).map(([id, n]) => h('span.need' + ((this.me.inv[id] || 0) < n ? '.short' : ''), `${ITEMS[id].icon} ${this.me.inv[id] || 0}/${n}`))),
             out.cat === 'tool' || out.cat === 'gear' ? h('div.s', itemDesc(out)) : null,
-            locked ? h('div.s', `🔒 Requires Crafting ${r.lvl}`) : m ? h('div.s', `Best ${m.best} · made well ${m.n}×${m.quick ? ' · ⚡ Quick' : ''}`) : null,
+            locked ? h('div.s', `Requires Crafting ${r.lvl}`) : m ? h('div.s', `Best ${m.best} · made well ${m.n}×${m.quick ? ' · ⚡ Quick' : ''}`) : null,
           ),
         );
         c.body.append(row);
@@ -250,7 +251,7 @@ export class Panels {
               'div.row.wrap',
               h('button.btn.green', { disabled: afford < 1, on: { click: (e) => (e.stopPropagation(), this.close(), this.hud.game?.goCraft(r.id, n)) } }, `${STATIONS[r.station].icon} ${STATIONS[r.station].verb} it`),
               stackable && m?.quick
-                ? h('button.btn.blue.small', { disabled: afford < 1, on: { click: (e) => (e.stopPropagation(), this.rpc('craft.quick', { recipe: r.id, times: n }).then((res) => (this.hud.toast(`⚡ ${res.qty}× ${out.name} (fee ${res.fee} 🪙)`, 'good'), this.hud.onXp(res.xp), load()))) } }, `⚡ Quick ×${n}`)
+                ? h('button.btn.blue.small', { disabled: afford < 1, on: { click: (e) => (e.stopPropagation(), this.rpc('craft.quick', { recipe: r.id, times: n }).then((res) => (this.hud.toast(`${res.qty}× ${out.name} (fee ${res.fee} 🪙)`, 'good'), this.hud.onXp(res.xp), load()))) } }, `Quick ×${n}`)
                 : null,
             ),
           ),
@@ -269,7 +270,7 @@ export class Panels {
 
   // ── Grand Market ───────────────────────────────────────────────────
   p_market(c, args) {
-    this.title(c, '⚖️ Grand Market');
+    this.title(c, 'Grand Market', 'scales');
     const st = { tab: 'browse', cat: 'all', q: '', item: args.item || null, side: 'buy', summary: {}, book: null };
     const load = async () => {
       try {
@@ -281,7 +282,7 @@ export class Panels {
       clear(c.body);
       if (st.item) return this.#marketItem(c, st, render);
       c.body.append(
-        h('div.tabs', ...[['browse', '🔎 Browse'], ['mine', '📋 My Orders']].map(([k, l]) => h('button' + (st.tab === k ? '.on' : ''), { on: { click: () => ((st.tab = k), render()) } }, l))),
+        h('div.tabs', ...[['browse', 'Browse'], ['mine', 'My Orders']].map(([k, l]) => h('button' + (st.tab === k ? '.on' : ''), { on: { click: () => ((st.tab = k), render()) } }, l))),
       );
       if (st.tab === 'mine') return this.#myOrders(c.body, render);
       const search = h('input.search', { placeholder: 'Search items…', value: st.q });
@@ -305,7 +306,7 @@ export class Panels {
               { style: { cursor: 'pointer' }, on: { click: () => ((st.item = id), render()) } },
               h('div.ic', iconEl(id, '44px')),
               h('div.grow', h('div.t', it.name), h('div.s', s.last ? `Last ${s.last} 🪙 · ${fmt(s.vol)} traded today` : `No trades yet · base ${it.value} 🪙`), this.me.inv[id] ? h('div.s', `You have ${fmt(this.me.inv[id])}`) : null),
-              h('div', { style: { textAlign: 'right', fontSize: '13px', fontWeight: 600 } }, h('div', { style: { color: '#b8382f' } }, s.ask ? `Sell ${s.ask} 🪙 (${fmt(s.supply)})` : 'No sellers'), h('div', { style: { color: '#3a8f3d' } }, s.bid ? `Buy ${s.bid} 🪙 (${fmt(s.demand)})` : 'No buyers')),
+              h('div', { style: { textAlign: 'right', fontSize: '13px', fontWeight: 600 } }, h('div', { style: { color: '#a63a2e' } }, s.ask ? `Sell ${s.ask} 🪙 (${fmt(s.supply)})` : 'No sellers'), h('div', { style: { color: '#437a36' } }, s.bid ? `Buy ${s.bid} 🪙 (${fmt(s.demand)})` : 'No buyers')),
             ),
           );
         }
@@ -337,7 +338,7 @@ export class Panels {
         h(
           'div.rowcard',
           h('div.ic', it?.icon),
-          h('div.grow', h('div.t', `${o.side === 'buy' ? '🟢 Buying' : '🔴 Selling'} ${it?.name}`), h('div.s', `${o.price} 🪙 each · ${o.filled}/${o.qty} filled · ${o.status}`)),
+          h('div.grow', h('div.t', `${o.side === 'buy' ? 'Buying' : 'Selling'} ${it?.name}`), h('div.s', `${o.price} 🪙 each · ${o.filled}/${o.qty} filled · ${o.status}`)),
           o.status === 'open'
             ? h('button.btn.red.small', {
                 on: {
@@ -383,8 +384,8 @@ export class Panels {
       x.clearRect(0, 0, W, H);
       const pts = b.history;
       if (pts.length < 2) {
-        x.fillStyle = '#b39a7c';
-        x.font = '600 22px Fredoka, sans-serif';
+        x.fillStyle = '#8a785e';
+        x.font = '700 20px "Alegreya Sans", sans-serif';
         x.textAlign = 'center';
         x.fillText(pts.length ? `Last trade: ${pts[0].price} 🪙` : 'No price history yet', W / 2, H / 2 + 8);
         return;
@@ -393,14 +394,14 @@ export class Panels {
       const lo = Math.min(...ps, it.value) * 0.9;
       const hi = Math.max(...ps, it.value) * 1.1;
       const Y = (v) => H - 14 - ((v - lo) / (hi - lo)) * (H - 28);
-      x.strokeStyle = '#e2c89e';
+      x.strokeStyle = '#a8946e';
       x.setLineDash([6, 6]);
       x.beginPath();
       x.moveTo(0, Y(it.value));
       x.lineTo(W, Y(it.value));
       x.stroke();
       x.setLineDash([]);
-      x.strokeStyle = '#f7b928';
+      x.strokeStyle = '#b8862e';
       x.lineWidth = 4;
       x.beginPath();
       pts.forEach((p, i) => {
@@ -408,8 +409,8 @@ export class Panels {
         i ? x.lineTo(px, Y(p.price)) : x.moveTo(px, Y(p.price));
       });
       x.stroke();
-      x.fillStyle = '#8a6a55';
-      x.font = '600 18px Fredoka, sans-serif';
+      x.fillStyle = '#6b5a46';
+      x.font = '700 17px "Alegreya Sans", sans-serif';
       x.fillText(`${Math.round(hi)} 🪙`, 8, 20);
       x.fillText(`${Math.round(lo)} 🪙`, 8, H - 4);
     };
@@ -461,7 +462,7 @@ export class Panels {
             sfx.coin();
             this.hud.toast(`${side === 'buy' ? 'Bought' : 'Sold'} ${r.filledQty}× ${it.name}!`, 'gold');
           }
-          if (r.order) this.hud.toast(`📋 ${side === 'buy' ? 'Buy' : 'Sell'} order placed for ${r.order.qty - r.order.filled}.`, 'good');
+          if (r.order) this.hud.toast(`${side === 'buy' ? 'Buy' : 'Sell'} order placed for ${r.order.qty - r.order.filled}.`, 'good');
           st.price = st.qty = undefined;
           refreshItem();
         } catch (e) {
@@ -469,7 +470,7 @@ export class Panels {
         }
       };
       trade.append(
-        h('div.tabs', ...[['buy', '🟢 Buy'], ['sell', '🔴 Sell']].map(([k, l]) => h('button' + (side === k ? '.on' : ''), { on: { click: () => ((st.side = k), (st.price = st.qty = undefined), drawTrade(b)) } }, l))),
+        h('div.tabs', ...[['buy', 'Buy'], ['sell', 'Sell']].map(([k, l]) => h('button' + (side === k ? '.on' : ''), { on: { click: () => ((st.side = k), (st.price = st.qty = undefined), drawTrade(b)) } }, l))),
         h('div.row', { style: { flexWrap: 'wrap' } }, h('label.qty', 'Qty ', qty), h('label.qty', 'Price ', price, ' 🪙')),
         summary,
         h(
@@ -501,10 +502,10 @@ export class Panels {
   // ── Your Shop ──────────────────────────────────────────────────────
   // ── Town Hall ──────────────────────────────────────────────────────
   p_townhall(c, args) {
-    this.title(c, '🏛️ Town Hall');
+    this.title(c, 'Town Hall', 'castle');
     let tab = args.tab || 'online';
     let info = null;
-    const tabs = [['online', '🟢 Online'], ['shops', '🏪 Shops'], ['leaders', '🏆 Leaders'], ['channels', '🌐 Channels'], ['invites', '🎟️ Invites']];
+    const tabs = [['online', 'Online'], ['shops', 'Shops'], ['leaders', 'Leaders'], ['channels', 'Channels'], ['invites', 'Invites']];
     const render = () => {
       clear(c.body);
       c.body.append(h('div.tabs', { style: { flexWrap: 'wrap' } }, ...tabs.map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render()) } }, l))));
@@ -516,8 +517,8 @@ export class Panels {
       } else if (tab === 'shops') {
         return this.open('shops');
       } else if (tab === 'leaders') {
-        c.body.append(h('div.section-title', '💰 Richest'), ...info.rich.map((r, i) => h('div.kv', h('span', `${['🥇', '🥈', '🥉'][i] || i + 1 + '.'} ${r.name}`), h('b.gold', `${fmt(r.gold)} 🪙`))));
-        c.body.append(h('div.section-title', '⭐ Most experienced'), ...info.levels.map((r, i) => h('div.kv', h('span', `${['🥇', '🥈', '🥉'][i] || i + 1 + '.'} ${r.name}`), h('b', `${fmt(r.total)} XP`))));
+        c.body.append(h('div.section-title', 'Richest'), ...info.rich.map((r, i) => h('div.kv', h('span', `${['🥇', '🥈', '🥉'][i] || i + 1 + '.'} ${r.name}`), h('b.gold', `${fmt(r.gold)} 🪙`))));
+        c.body.append(h('div.section-title', 'Most experienced'), ...info.levels.map((r, i) => h('div.kv', h('span', `${['🥇', '🥈', '🥉'][i] || i + 1 + '.'} ${r.name}`), h('b', `${fmt(r.total)} XP`))));
       } else if (tab === 'channels') {
         c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, 'Each channel is a live copy of town. New players join the busiest channel with room, so friends end up together.'));
         for (const ch of info.channels)
@@ -529,6 +530,7 @@ export class Panels {
         if (info.invites.length < 5)
           c.body.append(h('button.btn.green', { on: { click: () => this.#rpc('invite.create', {}, 'Invite created!').then(load) } }, '＋ Create invite'));
       }
+      c.body.append(h('div.muted', { style: { marginTop: '16px', fontSize: '12px', textAlign: 'center' } }, 'Models by Kenney (CC0) · Icons by Lorc, Delapouite & contributors, game-icons.net (CC BY 3.0)'));
     };
     const load = async () => {
       try {
@@ -553,7 +555,7 @@ export class Panels {
 
   // ── Player profile ─────────────────────────────────────────────────
   p_profile(c, { id }) {
-    this.title(c, 'Hero');
+    this.title(c, 'Hero', 'helm');
     c.body.append(h('div.empty', 'Loading…'));
     this.sock
       .rpc('profile', { id })
@@ -561,15 +563,15 @@ export class Panels {
         clear(c.body);
         this.title(c, p.name);
         c.body.append(
-          h('div', { style: { textAlign: 'center' } }, h('img', { src: portrait(p.avatar, { full: true }), style: { width: '140px', height: '175px', background: 'linear-gradient(#bfe8ff,#fdeccf)', borderRadius: '18px' } })),
-          h('div', { style: { textAlign: 'center', margin: '6px 0 10px' } }, h('b', `Level ${p.level}`), h('div.muted', p.online ? `🟢 Online · Channel ${p.channel}` : '⚪ Offline')),
+          h('div', { style: { textAlign: 'center' } }, h('img', { src: portrait(p.avatar, { full: true }), style: { width: '140px', height: '175px', background: 'radial-gradient(circle at 50% 35%, #4a3a2c, #1e1814)', borderRadius: '6px', border: '1px solid #8a6a3a' } })),
+          h('div', { style: { textAlign: 'center', margin: '6px 0 10px' } }, h('b', `Level ${p.level}`), h('div.muted', p.online ? `Online · Channel ${p.channel}` : 'Offline')),
           ...SKILL_IDS.map((k) => h('div.kv', h('span', `${SKILLS[k].icon} ${SKILLS[k].name}`), h('b', `Lv ${levelFromXp(p.skills[k] || 0)}`))),
           h(
             'div.row',
             { style: { marginTop: '12px', flexWrap: 'wrap', justifyContent: 'center' } },
-            h('button.btn.small', { on: { click: () => (this.hud.game?.sendEmote('wave'), this.close()) } }, '👋 Wave'),
-            p.shop && (p.shopOpen || p.id === this.hud.myId) ? h('button.btn.green.small', { on: { click: () => (this.close(), this.hud.game?.enterShop(p.id)) } }, '🏪 Visit shop') : null,
-            p.online && p.channel !== this.hud.channel ? h('button.btn.blue.small', { on: { click: () => this.#rpc('channel.switch', { id: p.channel }).then(() => this.close()) } }, '🌐 Join their channel') : null,
+            h('button.btn.small', { on: { click: () => (this.hud.game?.sendEmote('wave'), this.close()) } }, 'Wave'),
+            p.shop && (p.shopOpen || p.id === this.hud.myId) ? h('button.btn.green.small', { on: { click: () => (this.close(), this.hud.game?.enterShop(p.id)) } }, 'Visit shop') : null,
+            p.online && p.channel !== this.hud.channel ? h('button.btn.blue.small', { on: { click: () => this.#rpc('channel.switch', { id: p.channel }).then(() => this.close()) } }, 'Join their channel') : null,
           ),
         );
       })
@@ -578,10 +580,10 @@ export class Panels {
 
   // ── Battle results ─────────────────────────────────────────────────
   p_result(c, r) {
-    this.title(c, r.victory ? '🏆 Victory!' : '💫 Defeated');
+    this.title(c, r.victory ? 'Victory' : 'Defeat', r.victory ? 'trophy' : 'skull');
     if (r.victory) {
       c.body.append(
-        h('div.result', h('div.big', 'VICTORY!'), h('div', { style: { fontWeight: 700, fontSize: '20px' } }, `+${r.gold} 🪙   +${r.xp?.amount || 0} ⚔️ XP`)),
+        h('div.result', h('div.big', 'Victory'), h('div', { style: { fontWeight: 700, fontSize: '20px' } }, `+${r.gold} 🪙  ·  +${r.xp?.amount || 0} Combat XP`)),
         h('div.loot-row', ...Object.entries(r.loot || {}).map(([id, n], i) => {
           const s = itemSlot(id, n);
           s.style.animationDelay = i * 0.12 + 's';
@@ -590,7 +592,7 @@ export class Panels {
         h('button.btn.green.block.big', { on: { click: () => this.close() } }, 'Continue'),
       );
     } else {
-      c.body.append(h('div.result.lose', h('div.big', 'Defeated…'), h('p', 'You limp back, a little bruised. Rest a moment, craft potions or better gear, and bring friends — anyone can join your fight!')), h('button.btn.block.big', { on: { click: () => this.close() } }, 'OK'));
+      c.body.append(h('div.result.lose', h('div.big', 'Defeat'), h('p', 'You’re driven back. Mend your wounds, better your gear, and bring allies — anyone can join your fight.')), h('button.btn.block.big', { on: { click: () => this.close() } }, 'OK'));
     }
   }
 }

@@ -34,10 +34,10 @@ export function mulberry32(seed) {
 // ── Buildings: axis-aligned footprints (w along x, d along z). Door faces +z
 // unless `face` says otherwise. `action` is what tapping it opens.
 export const BUILDINGS = [
-  { id: 'workshop', label: 'Workshop', icon: '🔨', action: 'craft', x: -17, z: -6, w: 9, d: 7, face: 'e', color: '#d98b5f', roof: '#8a4b3a' },
-  { id: 'market', label: 'Grand Market', icon: '⚖️', action: 'market', x: 18, z: -6, w: 11, d: 8, face: 'w', color: '#f2d38a', roof: '#3f7fbf' },
-  { id: 'shop', label: 'Your Shop', icon: '🏪', action: 'shop', x: -15, z: 16, w: 9, d: 7, face: 'n', color: '#f6c6a6', roof: '#c4534a' },
-  { id: 'townhall', label: 'Town Hall', icon: '🏛️', action: 'townhall', x: 16, z: 17.5, w: 11, d: 10, face: 'n', color: '#efe6d2', roof: '#5b7f4a' },
+  { id: 'workshop', label: 'Workshop', icon: '🔨', glyph: 'anvil', action: 'craft', x: -17, z: -6, w: 9, d: 7, face: 'e', color: '#d98b5f', roof: '#8a4b3a' },
+  { id: 'market', label: 'Grand Market', icon: '⚖️', glyph: 'scales', action: 'market', x: 18, z: -6, w: 11, d: 8, face: 'w', color: '#f2d38a', roof: '#3f7fbf' },
+  { id: 'shop', label: 'Your Shop', icon: '🏪', glyph: 'shop', action: 'shop', x: -15, z: 16, w: 9, d: 7, face: 'n', color: '#f6c6a6', roof: '#c4534a' },
+  { id: 'townhall', label: 'Town Hall', icon: '🏛️', glyph: 'castle', action: 'townhall', x: 16, z: 17.5, w: 11, d: 10, face: 'n', color: '#efe6d2', roof: '#5b7f4a' },
   { id: 'cottage1', x: -30, z: 4, w: 6, d: 5, face: 'e', color: '#f1e1b6', roof: '#b4553f', deco: true },
   { id: 'cottage2', x: 31, z: 6, w: 6, d: 5, face: 'w', color: '#d7e7f0', roof: '#6d5aa8', deco: true },
   { id: 'cottage3', x: -2, z: 30, w: 6, d: 5, face: 'n', color: '#f8d7da', roof: '#4f7d8c', deco: true },
@@ -48,7 +48,7 @@ export const BUILDINGS = [
 // The gate to the Wilds: a castle wall with an arch you walk through. The
 // client builds it from castle-kit modules (1 unit = GATE_SCALE metres):
 // the arch tower in the middle, two wall sections and a corner tower each side.
-export const GATE = { id: 'gate', label: 'Wilds Gate', icon: '⚔️', x: 0, z: -34, width: 7 };
+export const GATE = { id: 'gate', label: 'Wilds Gate', icon: '⚔️', glyph: 'swords', x: 0, z: -34, width: 7 };
 export const GATE_SCALE = 4.5;
 const GATE_OPENING = 1.25; // half-width of the walkable arch (model: 0.255 × scale)
 
@@ -70,11 +70,11 @@ export const DOCK = { x: 26, z: 32, w: 3, d: 10 }; // pier running into the lake
 
 // Named regions. Tinted ground + signposts on the client, spawn areas on the server.
 export const ZONES = [
-  { id: 'forest', label: 'Whisperwood', icon: '🌲', x: -54, z: 0, r: 22, ground: '#5f9e4f' },
-  { id: 'quarry', label: 'Copperstone Quarry', icon: '⛏️', x: 54, z: 0, r: 20, ground: '#b9a68a' },
-  { id: 'garden', label: 'Herb Garden', icon: '🌿', x: -30, z: 40, r: 11, ground: '#7fc46a' },
-  { id: 'lake', label: 'Mirror Lake', icon: '🎣', x: LAKE.x, z: LAKE.z, r: LAKE.r + 4, ground: '#e3d29a' },
-  { id: 'wilds', label: 'The Wilds', icon: '⚔️', x: 0, z: -66, r: 30, ground: '#6c9a54' },
+  { id: 'forest', label: 'Whisperwood', icon: '🌲', glyph: 'pine', x: -54, z: 0, r: 22, ground: '#46703a' },
+  { id: 'quarry', label: 'Copperstone Quarry', icon: '⛏️', glyph: 'pick', x: 54, z: 0, r: 20, ground: '#8f8270' },
+  { id: 'garden', label: 'Herb Garden', icon: '🌿', glyph: 'herbs', x: -30, z: 40, r: 11, ground: '#679a50' },
+  { id: 'lake', label: 'Mirror Lake', icon: '🎣', glyph: 'rod', x: LAKE.x, z: LAKE.z, r: LAKE.r + 4, ground: '#c9b282' },
+  { id: 'wilds', label: 'The Wilds', icon: '⚔️', glyph: 'swords', x: 0, z: -66, r: 30, ground: '#556e40' },
 ];
 
 // ── Resource node types ────────────────────────────────────────────────

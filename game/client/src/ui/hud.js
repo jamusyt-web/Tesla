@@ -7,18 +7,19 @@ import { SKILLS, levelProgress } from '../../../shared/skills.js';
 import { BUILDINGS, ZONES, LAKE, DOCK, WORLD_RADIUS, doorPoint, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import { Panels } from './panels.js';
+import { glyph, coin } from './glyphs.js';
 import { newFight, stepFight, FISH_TICK } from '../../../shared/fishing.js';
 
-const RATING = { easy: ['Easy', '#5cbf5a'], fair: ['Fair', '#f7b928'], tough: ['Tough', '#ff8a3d'], brutal: ['Brutal', '#ea5a4f'] };
-const sizeHint = (d) => (d < 20 ? 'A little nibble…' : d < 45 ? 'A decent fish!' : d < 70 ? 'A big one!' : 'Something HUGE!!');
+const RATING = { easy: ['Easy', '#437a36'], fair: ['Fair', '#8a6a2a'], tough: ['Tough', '#a8551e'], brutal: ['Brutal', '#a63a2e'] };
+const sizeHint = (d) => (d < 20 ? 'A light tug' : d < 45 ? 'A steady pull' : d < 70 ? 'A heavy line' : 'The line screams — something massive');
 
 const isTouchDevice = () => matchMedia('(pointer: coarse)').matches;
 
 const TUTORIAL_TEXT = [
-  { text: 'Chop a tree in Whisperwood', hint: 'Tap a tree, then tap again in rhythm to swing your axe!', target: 'tree' },
-  { text: 'Saw Oak Planks at the Workshop', hint: 'Tap 🔨 Craft, pick Oak Plank at the Workbench, then tap in time to saw it yourself.', target: 'workshop' },
-  { text: 'Defeat a Meadow Slime', hint: 'Head through the ⚔️ Wilds Gate to the north.', target: 'slime' },
-  { text: 'Put something on a display in Your Shop', hint: 'Tap 🏪 Shop, then tap an empty display.', target: 'shop' },
+  { text: 'Fell an oak in Whisperwood', hint: 'Tap a tree, then strike as the ring closes.', target: 'tree' },
+  { text: 'Saw oak planks at the Workshop', hint: 'Tap Craft, choose Oak Plank at the workbench, then saw in time.', target: 'workshop' },
+  { text: `Slay a ${MONSTERS.slime.name}`, hint: 'Beyond the Wilds Gate, to the north.', target: 'slime' },
+  { text: 'Stock a display in your shop', hint: 'Tap Shop, then tap an empty display and set a price.', target: 'shop' },
 ];
 
 export class Hud {
@@ -45,13 +46,15 @@ export class Hud {
     this.hpFill = h('i', { style: { width: '100%' } });
     const chip = h('div.hero-chip', { on: { click: () => this.panels.open('bag') } }, h('div', { style: { position: 'relative' } }, this.face, this.lv), h('div', this.nameEl, h('div.hpbar', this.hpFill)));
     this.goldEl = h('b', '0');
-    const gold = h('div.pill', h('span.ic', '🪙'), this.goldEl);
+    const gold = h('div.pill', coin(), this.goldEl);
     this.onlineEl = h('span', '1');
     const online = h('div.pill.online', { on: { click: () => this.panels.open('townhall', { tab: 'online' }) } }, h('span.dot'), this.onlineEl, ' here');
     this.chanEl = h('span.muted', '');
     this.mm = h('canvas', { width: 256, height: 256 });
     const minimap = h('div.minimap', this.mm);
-    this.muteBtn = h('button.pill', { style: { padding: '6px 10px' }, on: { click: () => (this.muteBtn.textContent = sfx.toggle() ? '🔇' : '🔊') } }, sfx.muted ? '🔇' : '🔊');
+    const muteIcon = () => this.muteBtn.replaceChildren(glyph(sfx.muted ? 'mute' : 'sound', '20px'));
+    this.muteBtn = h('button.pill', { 'aria-label': 'Sound on/off', style: { padding: '8px 10px', color: 'var(--gold)' }, on: { click: () => (sfx.toggle(), muteIcon()) } });
+    muteIcon();
     this.el.append(h('div.topbar', chip, h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } }, gold, online), h('div.spacer'), this.muteBtn, minimap));
 
     this.questEl = h('div.quest.hidden');
@@ -60,31 +63,35 @@ export class Hud {
     this.arrow = h('div.guide-arrow.hidden', this.arrowIcon, this.arrowLabel);
     this.el.append(this.questEl, this.arrow);
 
-    const dockBtn = (ic, label, fn, badge) => h('button', { on: { click: () => (sfx.tap(), fn()) } }, ic, h('span', label), badge);
+    const dockBtn = (ic, label, fn, badge) => h('button', { 'aria-label': label, on: { click: () => (sfx.tap(), fn()) } }, glyph(ic), h('span', label), badge);
     this.shopBadge = h('i.badge.hidden', '0');
     this.dock = h(
       'div.dock',
-      dockBtn('🎒', 'Bag', () => this.panels.open('bag')),
-      dockBtn('🔨', 'Craft', () => this.travel('workshop')),
-      dockBtn('⚖️', 'Market', () => this.travel('market')),
-      dockBtn('🏪', 'Shop', () => this.game?.enterShop(this.myId), this.shopBadge),
-      dockBtn('🏛️', 'Town', () => this.travel('townhall')),
+      dockBtn('bag', 'Bag', () => this.panels.open('bag')),
+      dockBtn('anvil', 'Craft', () => this.travel('workshop')),
+      dockBtn('scales', 'Market', () => this.travel('market')),
+      dockBtn('shop', 'Shop', () => this.game?.enterShop(this.myId), this.shopBadge),
+      dockBtn('castle', 'Town', () => this.travel('townhall')),
     );
     // Inside a shop the dock changes: leave, bag, the ledger (yours), other shops.
-    this.ledgerBtn = dockBtn('📒', 'Ledger', () => this.panels.open('ledger'));
+    this.ledgerBtn = dockBtn('scroll', 'Ledger', () => this.panels.open('ledger'));
     this.roomDock = h(
       'div.dock.hidden',
-      dockBtn('🚪', 'Leave', () => this.game?.exitShop()),
-      dockBtn('🎒', 'Bag', () => this.panels.open('bag')),
+      dockBtn('door', 'Leave', () => this.game?.exitShop()),
+      dockBtn('bag', 'Bag', () => this.panels.open('bag')),
       this.ledgerBtn,
-      dockBtn('🏪', 'Shops', () => this.panels.open('shops')),
+      dockBtn('village', 'Shops', () => this.panels.open('shops')),
     );
     this.el.append(this.dock, this.roomDock);
 
     this.log = h('div.log');
     this.input = h('input', { placeholder: 'Say something…', maxLength: 140, enterKeyHint: 'send' });
     const form = h('form', { on: { submit: (e) => this.#sendChat(e) } }, this.input, h('button.btn.small.blue', { type: 'submit' }, 'Send'));
-    const emotes = h('div.emotes', ...[['wave', '👋'], ['dance', '💃'], ['cheer', '🙌'], ['heart', '💖'], ['sit', '🪑']].map(([e, ic]) => h('button', { title: e, on: { click: () => this.game?.sendEmote(e) } }, ic)));
+    // Emotes tuck away behind one button so the HUD stays clean.
+    const emotes = h('div.emotes');
+    const toggle = h('button.toggle', { 'aria-label': 'Emotes', title: 'Emotes', on: { click: () => toggle.classList.toggle('on', emotes.classList.toggle('open')) } }, glyph('talk'));
+    const pick = h('div.pick', ...[['wave', '👋'], ['dance', '💃'], ['cheer', '🙌'], ['heart', '💖'], ['sit', '🪑']].map(([e, ic]) => h('button', { title: e, 'aria-label': e, on: { click: () => (this.game?.sendEmote(e), emotes.classList.remove('open'), toggle.classList.remove('on')) } }, ic)));
+    emotes.append(toggle, pick);
     this.chat = h('div.chat', this.log, emotes, form);
     this.el.append(this.chat);
     this.input.addEventListener('focus', () => this.chat.classList.remove('collapsed'));
@@ -92,11 +99,11 @@ export class Hud {
     this.toasts = h('div.toasts');
     this.el.append(this.toasts);
 
-    this.rhythm = h('div.rhythm.hidden', h('div.target'), h('div.ring'), h('div.hint', 'Tap in rhythm!'));
+    this.rhythm = h('div.rhythm.hidden', h('div.target'), h('div.ring'), h('div.hint', 'Strike in rhythm'));
     this.nodebar = h('div.nodebar.hidden');
     this.el.append(this.rhythm, this.nodebar);
-    this.fishBtn = h('div.fishcall.hidden', h('button.btn.red.big', { on: { click: (e) => (e.stopPropagation(), this.game?.reel()) } }, '❗ REEL!'));
-    this.fishWait = h('div.fishcall.hidden', h('div.waiting', '🎣 Waiting for a bite… (tap too early and it escapes!)'));
+    this.fishBtn = h('div.fishcall.hidden', h('button.btn.red.big', { on: { click: (e) => (e.stopPropagation(), this.game?.reel()) } }, 'Strike!'));
+    this.fishWait = h('div.fishcall.hidden', h('div.waiting', 'Waiting for a bite… strike too early and it’s gone'));
     this.el.append(this.fishBtn, this.fishWait);
   }
 
@@ -106,7 +113,7 @@ export class Hud {
     s.on('toast', (m) => this.toast(m.text, m.kind));
     s.on('tutorial', (m) => {
       this.me.tutorial = m.step;
-      this.toast(`✅ Quest complete! +${m.reward} 🪙`, 'gold');
+      this.toast(`Quest complete! +${m.reward} 🪙`, 'gold');
       sfx.coin();
       this.#renderQuest();
     });
@@ -115,7 +122,7 @@ export class Hud {
       this.setTill(m.till);
       if (m.awayMs < 10 * 60_000) {
         // Just a quick tab switch: one line is enough.
-        setTimeout(() => this.toast(`🏪 Your shop made ${m.count} sale${m.count === 1 ? '' : 's'} (+${fmt(m.net)} 🪙)`, 'gold'), 1200);
+        setTimeout(() => this.toast(`Your shop made ${m.count} sale${m.count === 1 ? '' : 's'} (+${fmt(m.net)} 🪙)`, 'gold'), 1200);
         this.sock.rpc('shop.ack', { upto: m.upto }, { auto: true }).catch(() => {});
       } else setTimeout(() => this.panels.open('away', m), 1200);
     });
@@ -128,7 +135,7 @@ export class Hud {
       const b = this.saleBuffer;
       this.saleBuffer = [];
       const gold = b.reduce((a, x) => a + x.net, 0);
-      this.toast(`🏪 ${b.length} sale${b.length === 1 ? '' : 's'} while you were away from the tab (+${fmt(gold)} 🪙)`, 'gold');
+      this.toast(`${b.length} sale${b.length === 1 ? '' : 's'} while you were away from the tab (+${fmt(gold)} 🪙)`, 'gold');
       this.sock.rpc('shop.ack', { upto: Math.max(...b.map((x) => x.id)) }, { auto: true }).catch(() => {});
     });
     s.on('kicked', (m) => this.toast(m.reason, 'err'));
@@ -147,7 +154,7 @@ export class Hud {
     this.#renderFace();
     this.#renderQuest();
     this.#drawMapBase();
-    this.chatLine({ sys: true, text: `🏰 Welcome to Hearthvale — Channel ${m.channel}. ${m.players.length ? `${m.players.length} other ${m.players.length === 1 ? 'hero is' : 'heroes are'} here!` : 'Invite friends from the Town Hall!'}` });
+    this.chatLine({ sys: true, text: `Welcome to Hearthvale — Channel ${m.channel}. ${m.players.length ? `${m.players.length} other ${m.players.length === 1 ? 'hero is' : 'heroes are'} here!` : 'Invite friends from the Town Hall!'}` });
   }
 
   #renderFace() {
@@ -164,6 +171,7 @@ export class Hud {
     const prevGold = this.me.gold;
     Object.assign(this.me, m);
     if (m.level && prevLevel && m.level > prevLevel) this.levelUp(`Hero Level ${m.level}!`, 'You feel stronger.');
+    if (m.level && m.level !== prevLevel) this.game?.tintMobs();
     this.goldEl.textContent = fmt(this.me.gold);
     if (prevGold !== undefined && m.gold > prevGold && prevGold !== 0) {
       this.goldEl.parentElement.animate([{ transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 300 });
@@ -189,7 +197,7 @@ export class Hud {
 
   levelUp(big, small) {
     sfx.level();
-    const el = h('div.levelup', h('div.big', '⭐ ' + big), h('div.sm', small || ''));
+    const el = h('div.levelup', h('div.big', '' + big), h('div.sm', small || ''));
     this.el.append(el);
     setTimeout(() => el.remove(), 2700);
     this.confetti(40);
@@ -197,9 +205,12 @@ export class Hud {
 
   confetti(n = 60) {
     const wrap = h('div.confetti');
-    const cols = ['#ffd84a', '#ff7aa2', '#7ed957', '#4aa3e8', '#a868e0', '#ff9f5a'];
+    // Drifting gold dust rather than party confetti.
+    const cols = ['#e0b048', '#f3d589', '#c9773a'];
+    n = Math.min(n, 30);
     for (let i = 0; i < n; i++) {
-      const c = h('i', { style: { left: Math.random() * 100 + '%', background: cols[i % cols.length], animationDuration: 1.6 + Math.random() * 1.6 + 's', animationDelay: Math.random() * 0.4 + 's' } });
+      const col = cols[i % cols.length];
+      const c = h('i', { style: { left: Math.random() * 100 + '%', background: col, color: col, animationDuration: 2.4 + Math.random() * 0.8 + 's', animationDelay: Math.random() * 0.5 + 's' } });
       wrap.append(c);
     }
     this.el.append(wrap);
@@ -217,9 +228,9 @@ export class Hud {
       return;
     }
     const npc = m.sales.filter((x) => x.kind !== 'player');
-    for (const x of m.sales.filter((x) => x.kind === 'player')) this.toast(`🧑 ${x.buyer} bought ${x.qty}× ${ITEMS[x.item].name} (+${fmt(x.net)} 🪙)`, 'gold');
-    if (npc.length === 1) this.toast(`🏪 Sold ${npc[0].qty}× ${ITEMS[npc[0].item].name} (+${fmt(npc[0].net)} 🪙)`, 'gold');
-    else if (npc.length > 1) this.toast(`🏪 ${npc.length} sales (+${fmt(npc.reduce((a, x) => a + x.net, 0))} 🪙)`, 'gold');
+    for (const x of m.sales.filter((x) => x.kind === 'player')) this.toast(`${x.buyer} bought ${x.qty}× ${ITEMS[x.item].name} (+${fmt(x.net)} 🪙)`, 'gold');
+    if (npc.length === 1) this.toast(`Sold ${npc[0].qty}× ${ITEMS[npc[0].item].name} (+${fmt(npc[0].net)} 🪙)`, 'gold');
+    else if (npc.length > 1) this.toast(`${npc.length} sales (+${fmt(npc.reduce((a, x) => a + x.net, 0))} 🪙)`, 'gold');
     for (const x of m.sales) if (x.left === 0) this.toast(`Your ${ITEMS[x.item].name} sold out!`, 'good');
     sfx.coin();
     this.sock.rpc('shop.ack', { upto: m.upto }, { auto: true }).catch(() => {});
@@ -273,7 +284,7 @@ export class Hud {
     const b = BUILDINGS.find((x) => x.id === id);
     const [dx, dz] = doorPoint(b);
     const p = g.myPos();
-    if (Math.hypot(p.x - dx, p.z - dz) > 3) this.toast(`🚶 Walking to ${b.label}…`);
+    if (Math.hypot(p.x - dx, p.z - dz) > 3) this.toast(`Walking to ${b.label}…`);
     g.goBuilding(id);
   }
 
@@ -297,7 +308,7 @@ export class Hud {
       h('b', `Quest ${step + 1}/${TUTORIAL_TEXT.length}`),
       h('div', { style: { fontWeight: 600 } }, q.text),
       h('div.muted', q.hint),
-      h('button.btn.small.green', { style: { marginTop: '6px' }, on: { click: () => this.#questTarget()?.go() } }, '📍 Take me there'),
+      h('button.btn.small.green', { style: { marginTop: '6px' }, on: { click: () => this.#questTarget()?.go() } }, glyph('compass'), 'Take me there'),
       h('br'),
       h('button.skip', { on: { click: () => (this.sock.rpc('tutorialSkip'), (this.me.tutorial = 99), this.#renderQuest()) } }, 'skip tutorial'),
     );
@@ -332,7 +343,7 @@ export class Hud {
       }
       if (!mv) return null;
       const id = mv.id;
-      return { x: mv.x, z: mv.z, y: 2.6, label: 'Meadow Slime', go: () => g.goMob(id) };
+      return { x: mv.x, z: mv.z, y: 2.6, label: MONSTERS.slime.name, go: () => g.goMob(id) };
     }
     const b = BUILDINGS.find((x) => x.id === q.target);
     const [dx, dz] = doorPoint(b);
@@ -447,7 +458,7 @@ export class Hud {
     const meter = h('i');
     const [label, color] = RATING[bite.rating] || RATING.fair;
     const status = h('div.fight-status', 'Hold to reel!');
-    const giveUp = h('button.btn.plain.small', { on: { pointerdown: (e) => e.stopPropagation(), click: (e) => (e.stopPropagation(), finish()) } }, 'Let it go');
+    const giveUp = h('button.btn.plain.small', { on: { pointerdown: (e) => e.stopPropagation(), click: (e) => (e.stopPropagation(), finish()) } }, 'Cut line');
     const box = h(
       'div.fight',
       h('div.fight-head', h('b', sizeHint(bite.fish.d)), h('span.rating', { style: { background: color } }, label)),
@@ -478,7 +489,7 @@ export class Hud {
     const finish = () => {
       if (sent) return;
       sent = true;
-      status.textContent = state.done === 'caught' ? '🎉 Got it!' : '…';
+      status.textContent = state.done === 'caught' ? 'Got it!' : '…';
       onDone(toggles, Math.max(1, state.tick));
     };
     const loop = () => {
@@ -502,7 +513,7 @@ export class Hud {
       fish.classList.toggle('free', !state.inZone);
       meter.style.height = `${state.progress * 100}%`;
       meter.style.background = state.progress > 0.7 ? '#5cbf5a' : state.progress > 0.35 ? '#f7b928' : '#ea5a4f';
-      status.textContent = state.inZone ? (held ? '🎣 Reeling in!' : '🎣 Got it on the line!') : '💨 Keep it in the green!';
+      status.textContent = state.inZone ? (held ? 'Reeling in' : 'On the line') : 'Keep tension in the band';
       if (held && now - clickT > 110) {
         clickT = now;
         sfx.tap();
@@ -528,9 +539,9 @@ export class Hud {
     const x = c.getContext('2d');
     const S = 256 / (WORLD_RADIUS * 2 + 8);
     const P = (v) => 128 + v * S;
-    x.fillStyle = '#5bb8e6';
+    x.fillStyle = '#3f7090';
     x.fillRect(0, 0, 256, 256);
-    x.fillStyle = '#8fcf6b';
+    x.fillStyle = '#74a04c';
     x.beginPath();
     x.arc(128, 128, WORLD_RADIUS * S, 0, Math.PI * 2);
     x.fill();
@@ -542,11 +553,11 @@ export class Hud {
       x.fill();
     }
     x.globalAlpha = 1;
-    x.fillStyle = '#5cc4ee';
+    x.fillStyle = '#4b88a6';
     x.beginPath();
     x.arc(P(LAKE.x), P(LAKE.z), LAKE.r * S, 0, Math.PI * 2);
     x.fill();
-    x.fillStyle = '#dcc9a6';
+    x.fillStyle = '#a89a82';
     x.beginPath();
     x.arc(128, 128, 11 * S, 0, Math.PI * 2);
     x.fill();
@@ -611,12 +622,12 @@ export class Hud {
     this.battleTop = h('div.battle-top', h('div.mobbar', this.mobName, h('div.hp', this.mobHp), h('div.timer', this.timerFill)));
     this.partyEl = h('div.party');
     this.waitEl = h('div.waiting.hidden', 'Waiting for your party…');
-    const act = (a, e, label, cls) => h('button.btn.' + cls, { on: { click: () => this.#battleAct(a) } }, h('span.e', e), label);
-    this.skillBtn = act('skill', '🌟', 'Special', 'purple');
-    this.actionsEl = h('div.actions', act('attack', '⚔️', 'Attack', 'red'), this.skillBtn, act('defend', '🛡️', 'Defend', 'blue'), act('potion', '🧪', 'Item', 'green'), act('flee', '🏃', 'Flee', 'plain'));
+    const act = (a, e, label, cls) => h('button.btn.' + cls, { on: { click: () => this.#battleAct(a) } }, h('span.e', glyph(e)), label);
+    this.skillBtn = act('skill', 'spark', 'Special', 'purple');
+    this.actionsEl = h('div.actions', act('attack', 'swords', 'Attack', 'red'), this.skillBtn, act('defend', 'shield', 'Defend', 'blue'), act('potion', 'flask', 'Item', 'green'), act('flee', 'run', 'Flee', 'plain'));
     this.battleUi = h('div.battle-ui', this.partyEl, this.waitEl, this.actionsEl);
     this.el.append(this.battleTop, this.battleUi);
-    const splash = h('div.levelup', h('div.big', '⚔️ BATTLE!'), h('div.sm', `${def.name} · Lv ${def.lvl}`));
+    const splash = h('div.levelup', h('div.big', def.name), h('div.sm', `Level ${def.lvl}${def.boss ? ' · Boss' : ''}`));
     this.el.append(splash);
     setTimeout(() => splash.remove(), 1800);
   }
@@ -646,7 +657,7 @@ export class Hud {
       const waiting = mine.ready || !mine.alive;
       this.actionsEl.classList.toggle('hidden', waiting);
       this.waitEl.classList.toggle('hidden', !waiting);
-      this.waitEl.textContent = mine.alive ? 'Waiting for your party…' : '💫 Knocked out — your party fights on!';
+      this.waitEl.textContent = mine.alive ? 'Waiting for your party…' : 'Knocked out — your party fights on!';
       this.skillBtn.disabled = mine.charge < 3;
     }
     clearInterval(this.timerInt);
@@ -681,7 +692,7 @@ export class Hud {
     this.dock.classList.remove('hidden');
     this.chat.classList.remove('hidden');
     this.questEl.style.visibility = '';
-    if (r.fled) return this.toast('🏃 You got away safely.');
+    if (r.fled) return this.toast('You got away safely.');
     if (r.victory) {
       sfx.victory();
       this.confetti(80);

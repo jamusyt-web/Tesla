@@ -42,7 +42,7 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 export const TUTORIAL = [
   { id: 'chop', text: 'Chop a tree in Whisperwood (west)', reward: 20 },
   { id: 'craft', text: 'Saw Oak Planks at the Workshop', reward: 30 },
-  { id: 'fight', text: 'Defeat a Meadow Slime beyond the Wilds Gate (north)', reward: 50 },
+  { id: 'fight', text: `Slay a ${MONSTERS.slime.name} beyond the Wilds Gate (north)`, reward: 50 },
   { id: 'stock', text: 'Put something on a display in Your Shop', reward: 60 },
 ];
 
@@ -430,7 +430,7 @@ class Battle {
     if (victory) {
       this.mob.state = 'dead';
       this.mob.respawnAt = Date.now() + (this.def.boss ? 90_000 : 25_000);
-      if (this.def.boss) g.announce(`⚔️ ${[...this.fighters.values()].map((f) => f.c.hero.name).join(', ')} defeated the ${this.def.name}!`);
+      if (this.def.boss) g.announce(`${[...this.fighters.values()].map((f) => f.c.hero.name).join(', ')} defeated the ${this.def.name}!`);
     } else {
       this.mob.state = 'roam';
     }
@@ -813,7 +813,7 @@ export class Game {
     for (const [id, q] of Object.entries(loot)) this.heroes.addItem(c.hero.id, id, q);
     const xp = this.heroes.addXp(c.hero, t.skill, t.xp);
     c.send({ t: 'loot', node: n.id, loot, xp, rare: rares });
-    for (const r of rares) this.announce(`✨ ${c.hero.name} found a ${ITEMS[r].name}!`);
+    for (const r of rares) this.announce(`${c.hero.name} found a ${ITEMS[r].name}!`);
     c.pushInventory();
     if (t.kind === 'tree') c.advanceTutorial('chop');
   }
@@ -890,7 +890,7 @@ export class Game {
     const xp = this.heroes.addXp(c.hero, 'fishing', Math.round(FISH[fish.id].xp * (1 + fish.d / 200)));
     c.send({ t: 'fishResult', ok: true, item: fish.id, qty, kg: fish.kg, xp });
     const rarity = ITEMS[fish.id].rarity;
-    if (rarity === 'epic' || rarity === 'legendary') this.announce(`🎣 ${c.hero.name} landed a ${fish.kg} kg ${ITEMS[fish.id].name}!`);
+    if (rarity === 'epic' || rarity === 'legendary') this.announce(`${c.hero.name} landed a ${fish.kg} kg ${ITEMS[fish.id].name}!`);
     c.pushInventory();
     return { ok: true };
   }
@@ -1034,7 +1034,7 @@ const RPC = {
       const o = g.online.get(id);
       if (!o) continue;
       o.pushInventory();
-      if (id !== c.hero.id) o.send({ t: 'toast', kind: 'good', text: `📈 Your ${a.side === 'buy' ? 'sell' : 'buy'} order for ${ITEMS[a.item].name} was filled!` });
+      if (id !== c.hero.id) o.send({ t: 'toast', kind: 'good', text: `Your ${a.side === 'buy' ? 'sell' : 'buy'} order for ${ITEMS[a.item].name} was filled!` });
     }
     return { order: r.order, fills: r.fills, filledQty: r.filledQty };
   },

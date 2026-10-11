@@ -16,7 +16,7 @@ const gltfs = new Map(); // url -> gltf
 const ready = new Map(); // slot -> { scene, animations, scale, def }
 const matCache = new Map();
 const hullCache = new WeakMap();
-const OUTLINE_WORLD = 0.035; // ink line thickness in metres
+const OUTLINE_WORLD = 0.03; // ink line thickness in metres
 
 const gradMap = toon('#ffffff').gradientMap;
 
@@ -37,8 +37,8 @@ const GRADE = `
     float k = step(max(c.r, c.g), c.b) * (1.0 - smoothstep(0.35, 0.6, (mx - mn) / max(mx, 1e-3))) * 0.55;
     c = mix(c, vec3(dot(c, vec3(0.299, 0.587, 0.114))) * vec3(1.05, 1.0, 0.92), k);
     float lum = dot(c, vec3(0.299, 0.587, 0.114));
-    c = mix(vec3(lum), c, 1.12);
-    diffuseColor.rgb = c * vec3(1.04, 1.01, 0.95);
+    c = mix(vec3(lum), c, 1.0);
+    diffuseColor.rgb = c * vec3(1.02, 1.0, 0.97);
   }`;
 function graded(mat) {
   mat.onBeforeCompile = (sh) => {
@@ -162,7 +162,7 @@ function hullGeometry(geo, skinned = false) {
   return merged;
 }
 
-const CHAR_OUTLINE = 0.025; // characters get a finer line than buildings
+const ACTOR_OUTLINE = 0.036; // characters and monsters get a bolder line than the scenery
 const outlineFor = (scale, world = OUTLINE_WORLD) => outlineMat(Math.round((world / Math.max(scale, 1e-3)) * 1000) / 1000);
 
 const textures = new Map(); // url -> Texture (palette variants for modular kits)
@@ -260,6 +260,7 @@ export function make(slot, { variant = 0, tint = null, outline = true, castShado
   // Collect first: adding outline children while traversing would recurse forever.
   const meshes = [];
   inner.traverse((o) => o.isMesh && meshes.push(o));
+  const ol = /^(mob_|npc_)/.test(slot) ? ACTOR_OUTLINE : OUTLINE_WORLD;
   meshes.forEach((o) => {
     // unique: own material copies (e.g. so one monster can flash red alone)
     const conv = (m) => (unique ? toToon(m, tint, p.def).clone() : toToon(m, tint, p.def));
@@ -273,9 +274,9 @@ export function make(slot, { variant = 0, tint = null, outline = true, castShado
         // Same inked look for rigged characters: a skinned hull that bends
         // with the same skeleton (the push along the normal happens before
         // skinning, so the line stays even while animating).
-        hull = new THREE.SkinnedMesh(hullGeometry(o.geometry, true), outlineFor(p.scale, CHAR_OUTLINE));
+        hull = new THREE.SkinnedMesh(hullGeometry(o.geometry, true), outlineFor(p.scale, ol));
         hull.bind(o.skeleton, o.bindMatrix);
-      } else hull = new THREE.Mesh(hullGeometry(o.geometry), outlineFor(p.scale));
+      } else hull = new THREE.Mesh(hullGeometry(o.geometry), outlineFor(p.scale, ol));
       hull.raycast = () => {};
       hull.castShadow = false;
       hull.frustumCulled = !o.isSkinnedMesh; // a posed character can leave its rest-pose bounds

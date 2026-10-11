@@ -3,7 +3,7 @@ import { mesh, toon, shade } from './toon.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import * as assets from './assets.js';
 
-const OL = 0.025;
+const OL = 0.036;
 const sph = (r, a = 16, b = 12) => new THREE.SphereGeometry(r, a, b);
 
 function eyes(parent, y, z, spread, r = 0.09, color = '#2b1d14') {
@@ -30,7 +30,7 @@ export class Mob {
     this.oneShot = null;
     this.mats = [];
     this.legs = [];
-    const blob = new THREE.Mesh(new THREE.CircleGeometry(0.7, 18), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.18, depthWrite: false }));
+    const blob = new THREE.Mesh(new THREE.CircleGeometry(0.7, 18), new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.28, depthWrite: false }));
     blob.rotation.x = -Math.PI / 2;
     blob.position.y = 0.02;
     this.root.add(blob);
@@ -53,7 +53,9 @@ export class Mob {
     this.blob.scale.setScalar(Math.max(made.size.x, made.size.z) * 0.8);
     if (made.mixer) {
       this.mixer = made.mixer;
-      this.anim = { idle: assets.findClip(made.actions, 'idle'), walk: assets.findClip(made.actions, 'walk'), attack: assets.findClip(made.actions, 'attack'), hit: assets.findClip(made.actions, 'hit'), die: assets.findClip(made.actions, 'die') };
+      // Only real melee/death clips: the kits' other 'attack' (a gun pose, grazing) and
+      // 'hit' (a head shake) clips read as goofy, so those stay procedural.
+      this.anim = { idle: assets.findClip(made.actions, 'idle'), walk: assets.findClip(made.actions, 'walk'), attack: made.actions.attack || made.actions['attack-melee-right'] || null, hit: made.actions.hit || null, die: made.actions.die || null };
       this.loop = null;
       this.#loop('idle');
     }
@@ -74,13 +76,13 @@ export class Mob {
   }
 
   slime() {
-    const mat = new THREE.MeshToonMaterial({ color: this.def.color, emissive: this.def.color, emissiveIntensity: 0.18 });
+    const mat = new THREE.MeshToonMaterial({ color: this.def.color, emissive: this.def.color, emissiveIntensity: 0.08 });
     this.mats.push(mat);
     const b = mesh(sph(0.62, 20, 14), null, { outline: OL, mat });
     b.scale.set(1, 0.8, 1);
     b.position.y = 0.5;
     this.body.add(b);
-    const shine = new THREE.Mesh(sph(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.8 }));
+    const shine = new THREE.Mesh(sph(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.4 }));
     shine.position.set(-0.25, 0.85, 0.32);
     this.body.add(shine);
     eyes(this.body, 0.6, 0.52, 0.2, 0.1);
@@ -232,7 +234,7 @@ export class Mob {
 
   play(name) {
     this.oneShot = { name, t: 0, dur: { attack: 0.6, hurt: 0.35, die: 0.8 }[name] || 0.5 };
-    if (name === 'hurt') this.flash = 0.3;
+    if (name === 'hurt') this.flash = 0.08;
     const clip = this.anim?.[{ attack: 'attack', hurt: 'hit', die: 'die' }[name]];
     if (clip) {
       clip.reset().setLoop(THREE.LoopOnce, 1).fadeIn(0.08).play();
@@ -249,13 +251,16 @@ export class Mob {
       this.#loop(moving ? 'walk' : 'idle');
       this.mixer.update(dt);
       this.body.position.set(0, 0, 0);
+      this.body.rotation.set(0, 0, 0);
       const os = this.oneShot;
       if (os) {
         os.t += dt;
         const k = Math.min(1, os.t / os.dur);
         if (os.name === 'attack') this.body.position.z = Math.sin(Math.PI * k) * 1.0;
-        else if (os.name === 'hurt') this.body.position.z = -Math.sin(Math.PI * k) * 0.35;
-        else if (os.name === 'die' && !os.clip) this.body.scale.setScalar(1 - k * 0.9);
+        else if (os.name === 'hurt') {
+          this.body.position.z = -Math.sin(Math.PI * k) * 0.35;
+          this.body.rotation.x = -Math.sin(Math.PI * k) * 0.2;
+        } else if (os.name === 'die' && !os.clip) this.#topple(k);
         if (os.t >= os.dur && os.name !== 'die') this.oneShot = null;
       }
       this.#flashTick(dt);
@@ -290,20 +295,43 @@ export class Mob {
       } else if (os.name === 'hurt') {
         this.body.position.z -= Math.sin(Math.PI * k) * 0.4;
         this.body.rotation.x = -Math.sin(Math.PI * k) * 0.2;
-      } else if (os.name === 'die') {
-        this.body.scale.multiplyScalar(1 - k * 0.9);
-        this.body.rotation.y = k * 6;
-      }
+      } else if (os.name === 'die') this.#topple(k);
       if (os.t >= os.dur && os.name !== 'die') this.oneShot = null;
     }
     this.#flashTick(dt);
   }
 
+  // Keel over and sink; only shrink away at the very end.
+  #topple(k) {
+    this.body.rotation.x = -k * 1.4;
+    this.body.position.y -= k * 0.3;
+    this.body.scale.setScalar(k > 0.7 ? 1 - ((k - 0.7) / 0.3) * 0.9 : 1);
+  }
+
+  // Back from the dead (monsters respawn in place, reusing this object).
+  revive() {
+    this.oneShot = null;
+    this.anim?.die?.stop();
+    this.body.position.set(0, 0, 0);
+    this.body.rotation.set(0, 0, 0);
+    this.body.scale.set(1, 1, 1);
+    if (this.anim) {
+      this.loop = null;
+      this.#loop('idle');
+    }
+  }
+
+  // A short white hit flash; each material gets its own glow back afterwards.
   #flashTick(dt) {
-    if (this.flash > 0) {
-      this.flash -= dt;
-      const on = this.flash > 0 && Math.floor(this.flash * 30) % 2 === 0;
-      for (const m of this.mats) m.emissive?.set(on ? '#ff3030' : '#000000');
+    if (this.flash <= 0) return;
+    this.flash -= dt;
+    const on = this.flash > 0;
+    for (const m of this.mats) {
+      if (!m.emissive) continue;
+      m.userData.baseEmissive ??= [m.emissive.clone(), m.emissiveIntensity];
+      const [c, i] = m.userData.baseEmissive;
+      if (on) m.emissive.set('#ffffff'), (m.emissiveIntensity = 0.6);
+      else m.emissive.copy(c), (m.emissiveIntensity = i);
     }
   }
 }

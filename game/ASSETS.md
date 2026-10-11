@@ -8,14 +8,14 @@ Hearthvale mixes three kinds of art:
 | **World models** (trees, rocks, buildings, props, creatures, item icons) | `.glb` files in `client/public/models/`, listed in `client/src/scene/manifest.js` | Editing the manifest (below) |
 | **Everything else** (ground, water, sky, effects, UI) | Built in code: `client/src/scene/town.js`, `fx.js`, `style.css` | Code |
 
-Every imported model is drawn with the game's own look: cel shading, ink outlines and a warm colour grade (`client/src/scene/assets.js`). That's why models from different sources still feel like one game.
+Every imported model is drawn with the game's own look: cel shading, ink outlines and a colour grade (`client/src/scene/assets.js`, plus the whole-screen grade in `client/src/scene/grade.js`). That's why models from different sources still feel like one game.
 
 ## Swapping in your own model (or one from an AI generator)
 
 1. Export it as **.glb** (binary glTF). Most tools can: Blender, Meshy, Tripo, Higgsfield, Kenney Shape, MagicaVoxel and others.
    - Keep it Y-up. The loader re-centres it and stands it on the ground, so its origin doesn't matter.
    - Keep it light. Scenery should be roughly under 5,000 triangles; heroes and monsters under 15,000.
-   - Animated creatures: name the clips `idle`, `walk`, `attack`, `hit`, `die` where you can.
+   - Animated creatures: name the clips `idle`, `walk`, `attack`, `hit`, `die` where you can. Without an `attack` or `hit` clip the game animates a lunge or knockback itself.
 2. Put the file in `client/public/models/custom/`, for example `client/public/models/custom/my-oak.glb`.
 3. In `client/src/scene/manifest.js`, point the slot at it and give it a size:
 
@@ -80,3 +80,5 @@ This needs Playwright, as a dev tool only.
 ## Licenses
 
 The current packs are by Kenney (kenney.nl) and are **CC0**: free for commercial use, changes allowed, no credit required. We credit them anyway in `client/public/models/CREDITS.md`.
+
+The HUD icons in `client/public/ui/icons/` come from [game-icons.net](https://game-icons.net) (by Lorc, Delapouite and contributors) under **CC BY 3.0**, which requires credit. The credit line sits at the bottom of the Town Hall panel; keep it if you add or swap icons. To add one, take its SVG (any colour; the game recolours it), save it as `client/public/ui/icons/<name>.svg` and use `glyph('<name>')` from `client/src/ui/glyphs.js`.

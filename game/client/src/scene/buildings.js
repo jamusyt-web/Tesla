@@ -190,7 +190,7 @@ function market(W, D) {
   const nx = cells(W, 2.2);
   const nz = cells(D, 2.2);
   const b = new Builder([W / nx, 2.8, D / nz], null);
-  const pal = [['stall-red', null], ['stall-green', null], ['stall-green', TEX.roof_blue], ['stall-green', TEX.roof_yellow], ['stall-green', TEX.roof_purple], ['stall-green', TEX.roof_orange]];
+  const pal = [['stall-red', null], ['stall-green', null], ['stall-green', TEX.roof_blue]];
   let n = 0;
   const st = (x, z, r) => {
     const [m, t] = pal[n++ % pal.length];

@@ -14,7 +14,7 @@ export function waterMaterial({ radius, shallow = '#7fe0f7', deep = '#2f9fd8', f
       deep: { value: new THREE.Color(deep) },
       foamAt: { value: foamAt ?? -1 },
       coast: { value: coast ?? -1 },
-      fogColor: { value: new THREE.Color(fog?.color ?? '#cdeaf7') },
+      fogColor: { value: fog?.color?.isColor ? fog.color : new THREE.Color(fog?.color ?? '#cdeaf7') },
       fogNear: { value: fog?.near ?? 1e6 },
       fogFar: { value: fog?.far ?? 2e6 },
       opacity: { value: opacity },
@@ -55,7 +55,9 @@ export function waterMaterial({ radius, shallow = '#7fe0f7', deep = '#2f9fd8', f
         c += vec3(pow(max(sp, 0.0), 10.0)) * 0.55;
         c = mix(c, vec3(1.0), clamp(foam, 0.0, 1.0) * 0.85);
         float f = smoothstep(fogNear, fogFar, vDist);
-        gl_FragColor = vec4(mix(c, fogColor, f), opacity);
+        gl_FragColor = vec4(c, opacity);
+        #include <tonemapping_fragment>
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, f);
         #include <colorspace_fragment>
       }`,
   });

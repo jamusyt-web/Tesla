@@ -13,7 +13,7 @@ function renderer() {
   const r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   r.setSize(160, 160);
   const scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight('#ffffff', '#b08a66', 1.8));
+  scene.add(new THREE.HemisphereLight('#e8eef6', '#6b5a48', 1.7));
   const d = new THREE.DirectionalLight('#ffffff', 1.6);
   d.position.set(2, 3, 4);
   scene.add(d);
@@ -34,15 +34,17 @@ export function portrait(cfg, { full = false } = {}) {
   if (full) {
     r.setSize(160, 200);
     cam.aspect = 160 / 200;
-    cam.position.set(0, 1.4, 6.6);
-    cam.lookAt(0, 1.15, 0);
+    cam.position.set(0, 1.5, 7.0);
+    cam.lookAt(0, 1.2, 0);
   } else {
     r.setSize(160, 160);
     cam.aspect = 1;
-    cam.position.set(0.4, 1.75, 3.2);
-    cam.lookAt(0, 1.55, 0);
+    cam.position.set(0.35, 2.02, 2.5);
+    cam.lookAt(0, 1.88, 0);
   }
   cam.updateProjectionMatrix();
+  r.toneMapping = THREE.CustomToneMapping;
+  r.toneMappingExposure = 1.05;
   r.render(scene, cam);
   const url = r.domElement.toDataURL();
   scene.remove(av.root);
@@ -108,6 +110,7 @@ export function itemIcon(itemId) {
       const F = 128 / s;
       cam.setViewOffset(F, F, (((x0 + x1) / 2 - s + 1) / 2) * F, ((1 - ((y0 + y1) / 2 + s)) / 2) * F, 128, 128);
     }
+    r.toneMapping = THREE.NoToneMapping; // icons keep their full colour
     r.render(scene, cam);
     cam.clearViewOffset();
     url = r.domElement.toDataURL();

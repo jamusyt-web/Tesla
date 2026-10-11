@@ -3,13 +3,18 @@ import { mesh, toon, shade, outlineMat } from './toon.js';
 import { buildTool } from './tools.js';
 import { sanitizeAvatar } from '../../../shared/avatar.js';
 
-const OL = 0.025;
+const OL = 0.036;
+// Proportions: ~3 heads tall, 2.28 m overall. Not a chibi, still stylised.
+const HIP = 0.84;
+const HEAD_Y = 1.9;
+const HEAD_S = 0.76;
+const HOL = OL / HEAD_S; // head children are scaled by HEAD_S; keep their ink line the same weight
 const sph = (r, ws = 18, hs = 14) => new THREE.SphereGeometry(r, ws, hs);
 const cyl = (rt, rb, h, s = 14) => new THREE.CylinderGeometry(rt, rb, h, s);
 const ease = (t) => 1 - Math.pow(1 - t, 3);
 const clamp01 = (t) => Math.max(0, Math.min(1, t));
 
-// A full-body chibi hero built from primitives. Every slot (hair, outfit, hat,
+// A full-body stylised hero built from primitives. Every slot (hair, outfit, hat,
 // back) is swappable, and tools/weapons attach to a hand socket so tool skins
 // show up automatically.
 export class Avatar {
@@ -27,7 +32,7 @@ export class Avatar {
     this.held = null;
     this.heldId = null;
     if (shadowBlob) {
-      const blob = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.18, depthWrite: false }));
+      const blob = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }));
       blob.rotation.x = -Math.PI / 2;
       blob.position.y = 0.02;
       blob.renderOrder = -1;
@@ -46,21 +51,21 @@ export class Avatar {
     this.mats = [];
     const skin = toon(c.skin, { unique: true });
     const top = toon(c.outfitColor, { unique: true });
-    const shirt = toon(c.outfit === 'overalls' || c.outfit === 'vest' ? '#f6f1e6' : c.outfitColor, { unique: true });
+    const shirt = toon(c.outfit === 'overalls' || c.outfit === 'vest' ? '#d9cfb8' : c.outfitColor, { unique: true });
     const pants = toon(c.pantsColor, { unique: true });
-    const shoe = toon('#5a3a26');
+    const shoe = toon('#3b2a1e');
     this.mats.push(skin, top, shirt, pants);
     const M = (geo, mat, outline = OL) => mesh(geo, null, { outline, mat });
 
     // ── Legs
     this.legs = [-1, 1].map((s) => {
       const pivot = new THREE.Group();
-      pivot.position.set(0.14 * s, 0.6, 0);
-      const leg = M(cyl(0.1, 0.11, 0.46), pants);
-      leg.position.y = -0.24;
+      pivot.position.set(0.14 * s, HIP, 0);
+      const leg = M(cyl(0.1, 0.085, 0.62), pants);
+      leg.position.y = -0.33;
       const boot = M(new THREE.CapsuleGeometry(0.11, 0.1, 4, 8), shoe);
       boot.rotation.x = Math.PI / 2;
-      boot.position.set(0, -0.52, 0.05);
+      boot.position.set(0, -0.74, 0.06);
       pivot.add(leg, boot);
       rig.add(pivot);
       return pivot;
@@ -68,52 +73,55 @@ export class Avatar {
 
     // ── Torso
     const torso = new THREE.Group();
-    torso.position.y = 0.6;
+    torso.position.y = HIP;
     rig.add(torso);
     this.torso = torso;
     const robe = c.outfit === 'robe';
-    const chest = M(cyl(0.27, 0.33, 0.56, 16), top);
-    chest.position.y = 0.3;
+    const chest = M(cyl(0.3, 0.25, 0.62, 16), top);
+    chest.position.y = 0.31;
     torso.add(chest);
-    const shoulders = M(sph(0.27, 16, 10), top);
-    shoulders.scale.set(1, 0.55, 0.95);
-    shoulders.position.y = 0.56;
+    const shoulders = M(sph(0.3, 16, 10), top);
+    shoulders.scale.set(1.15, 0.5, 0.9);
+    shoulders.position.y = 0.6;
     torso.add(shoulders);
+    const neck = M(cyl(0.1, 0.11, 0.16, 10), skin);
+    neck.position.y = 0.68;
+    torso.add(neck);
     if (robe) {
-      const skirt = M(cyl(0.32, 0.46, 0.62, 16), top);
-      skirt.position.y = -0.24;
+      const skirt = M(cyl(0.3, 0.5, 0.86, 16), top);
+      skirt.position.y = -0.36;
       torso.add(skirt);
-      const sash = M(new THREE.TorusGeometry(0.31, 0.05, 6, 20), toon('#f2c94c'), 0);
+      const sash = M(new THREE.TorusGeometry(0.28, 0.05, 6, 20), toon('#c9a54a'), 0);
       sash.rotation.x = Math.PI / 2;
       sash.position.y = 0.08;
       torso.add(sash);
     } else if (c.outfit === 'tunic') {
-      const skirt = M(cyl(0.33, 0.4, 0.2, 16), top);
+      const skirt = M(cyl(0.31, 0.38, 0.26, 16), top);
       skirt.position.y = 0.0;
       torso.add(skirt);
-      const collar = M(new THREE.TorusGeometry(0.17, 0.04, 6, 16), toon('#f6f1e6'), 0);
+      const collar = M(new THREE.TorusGeometry(0.17, 0.04, 6, 16), toon('#d9cfb8'), 0);
       collar.rotation.x = Math.PI / 2;
       collar.position.y = 0.6;
       torso.add(collar);
     } else if (c.outfit === 'adventurer') {
-      const belt = M(new THREE.TorusGeometry(0.32, 0.045, 6, 20), toon('#6b4226'), 0);
+      const belt = M(new THREE.TorusGeometry(0.27, 0.045, 6, 20), toon('#4a3020'), 0);
       belt.rotation.x = Math.PI / 2;
       belt.position.y = 0.08;
-      const buckle = M(new THREE.BoxGeometry(0.1, 0.08, 0.04), toon('#f2c94c'), 0);
-      buckle.position.set(0, 0.08, 0.33);
-      const strap = M(new THREE.BoxGeometry(0.08, 0.7, 0.04), toon('#6b4226'), 0);
-      strap.position.set(0, 0.32, 0.29);
+      const buckle = M(new THREE.BoxGeometry(0.1, 0.08, 0.04), toon('#c9a54a'), 0);
+      buckle.position.set(0, 0.08, 0.28);
+      const strap = M(new THREE.BoxGeometry(0.08, 0.78, 0.04), toon('#4a3020'), 0);
+      strap.position.set(0, 0.32, 0.28);
       strap.rotation.z = 0.7;
       torso.add(belt, buckle, strap);
     } else if (c.outfit === 'overalls') {
       for (const s of [-1, 1]) {
         const st = M(new THREE.BoxGeometry(0.07, 0.4, 0.03), pants, 0);
-        st.position.set(0.12 * s, 0.42, 0.27);
+        st.position.set(0.12 * s, 0.42, 0.26);
         torso.add(st);
       }
       const bib = M(new THREE.BoxGeometry(0.34, 0.26, 0.05), pants, 0);
-      bib.position.set(0, 0.2, 0.3);
-      const lower = M(cyl(0.33, 0.34, 0.2, 16), pants);
+      bib.position.set(0, 0.2, 0.28);
+      const lower = M(cyl(0.27, 0.29, 0.22, 16), pants);
       lower.position.y = 0.02;
       torso.add(bib, lower);
       chest.material = shirt;
@@ -123,43 +131,49 @@ export class Avatar {
       shoulders.material = shirt;
       for (const s of [-1, 1]) {
         const panel = M(new THREE.BoxGeometry(0.2, 0.48, 0.05), top, 0);
-        panel.position.set(0.15 * s, 0.3, 0.29);
+        panel.position.set(0.15 * s, 0.3, 0.28);
         panel.rotation.y = -0.25 * s;
         torso.add(panel);
       }
       const back = M(new THREE.BoxGeometry(0.5, 0.5, 0.05), top, 0);
-      back.position.set(0, 0.3, -0.3);
+      back.position.set(0, 0.3, -0.28);
       torso.add(back);
     }
 
     // ── Arms
     this.arms = [-1, 1].map((s) => {
       const pivot = new THREE.Group();
-      pivot.position.set(0.34 * s, 1.12, 0);
-      const sleeve = M(cyl(0.085, robe ? 0.13 : 0.09, 0.4, 10), shirt);
-      sleeve.position.y = -0.18;
+      pivot.position.set(0.38 * s, 1.4, 0);
+      const sleeve = M(cyl(0.085, robe ? 0.13 : 0.09, 0.56, 10), shirt);
+      sleeve.position.y = -0.27;
       const hand = M(sph(0.1, 12, 10), skin);
-      hand.position.y = -0.42;
+      hand.position.y = -0.58;
       pivot.add(sleeve, hand);
-      pivot.rotation.z = 0.12 * s;
+      pivot.rotation.z = 0.1 * s;
       rig.add(pivot);
       return pivot;
     });
     this.socket = new THREE.Group();
-    this.socket.position.set(0, -0.44, 0.02);
+    this.socket.position.set(0, -0.6, 0.02);
+    this.socket.scale.setScalar(1.15); // tools in proportion to the longer body
     this.socket.rotation.x = 2.09; // tool juts forward-down from the fist
     this.arms[1].add(this.socket);
 
     // ── Head
     const head = new THREE.Group();
-    head.position.y = 1.62;
+    head.position.y = HEAD_Y;
+    head.scale.setScalar(HEAD_S);
     rig.add(head);
     this.head = head;
-    const skull = M(sph(0.5, 24, 18), skin, 0.028);
-    skull.scale.set(1, 0.95, 0.95);
+    const skull = M(sph(0.5, 24, 18), skin, HOL);
+    skull.scale.set(0.92, 1.04, 0.95);
     head.add(skull);
+    const nose = M(sph(0.04, 8, 6), toon(shade(c.skin, 0.9)), 0);
+    nose.scale.set(0.8, 1, 1.2);
+    nose.position.set(0, -0.07, 0.49);
+    head.add(nose);
     for (const s of [-1, 1]) {
-      const ear = M(sph(0.09, 8, 8), skin);
+      const ear = M(sph(0.09, 8, 8), skin, HOL);
       ear.position.set(0.48 * s, -0.04, 0);
       head.add(ear);
     }
@@ -170,7 +184,7 @@ export class Avatar {
 
     // Sword rests on the back when hands are busy or idle.
     this.backSlot = new THREE.Group();
-    this.backSlot.position.set(0.18, 1.0, -0.36);
+    this.backSlot.position.set(0.18, 1.2, -0.33);
     this.backSlot.rotation.set(0, 0, 2.6);
     rig.add(this.backSlot);
     this.setEquip(this.equip);
@@ -204,10 +218,11 @@ export class Avatar {
         g.add(lid);
       } else {
         const big = c.eyes === 'sparkle' ? 1.25 : 1;
-        const eye = new THREE.Mesh(sph(0.085 * big, 14, 12), eyeMat);
-        eye.scale.set(0.85, 1.15, 0.45);
-        const hl = new THREE.Mesh(sph(0.026 * big, 8, 6), white);
-        hl.position.set(0.025, 0.04, 0.04);
+        const eye = new THREE.Mesh(sph(0.075 * big, 14, 12), eyeMat);
+        eye.scale.set(0.9, 0.95, 0.45);
+        eye.position.y = 0.02;
+        const hl = new THREE.Mesh(sph(0.018 * big, 8, 6), white);
+        hl.position.set(0.022, 0.05, 0.04);
         g.add(eye, hl);
         if (c.eyes === 'sparkle') {
           const hl2 = new THREE.Mesh(sph(0.014, 6, 6), white);
@@ -216,20 +231,29 @@ export class Avatar {
         }
       }
       head.add(g);
-      const blush = new THREE.Mesh(sph(0.065, 10, 8), new THREE.MeshBasicMaterial({ color: '#ff8f8f', transparent: true, opacity: 0.45 }));
-      blush.scale.set(1.2, 0.6, 0.3);
-      blush.position.set(0.3 * s, -0.13, 0.37);
-      blush.rotation.y = 0.6 * s;
-      head.add(blush);
-      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(0.015, 0.07, 3, 6), toon(shade(c.hairColor, 0.7)));
-      brow.rotation.z = Math.PI / 2 + 0.15 * s;
-      brow.position.set(0.18 * s, 0.14, 0.44);
+      if (c.eyes === 'happy') {
+        const blush = new THREE.Mesh(sph(0.065, 10, 8), new THREE.MeshBasicMaterial({ color: '#ff8f8f', transparent: true, opacity: 0.15 }));
+        blush.scale.set(1.2, 0.6, 0.3);
+        blush.position.set(0.3 * s, -0.13, 0.37);
+        blush.rotation.y = 0.6 * s;
+        head.add(blush);
+      }
+      const brow = new THREE.Mesh(new THREE.CapsuleGeometry(0.024, 0.11, 3, 6), toon(shade(c.hairColor, 0.7)));
+      brow.rotation.z = Math.PI / 2 + 0.22 * s;
+      brow.position.set(0.18 * s, 0.12, 0.44);
       brow.rotation.y = 0.32 * s;
       head.add(brow);
     }
-    const mouth = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.016, 6, 10, Math.PI), ink);
-    mouth.rotation.z = Math.PI;
-    mouth.position.set(0, -0.15, 0.46);
+    let mouth;
+    if (c.eyes === 'happy') {
+      mouth = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.016, 6, 10, Math.PI), ink);
+      mouth.rotation.z = Math.PI;
+      mouth.position.set(0, -0.15, 0.46);
+    } else {
+      mouth = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.07, 3, 6), ink);
+      mouth.rotation.z = Math.PI / 2;
+      mouth.position.set(0, -0.17, 0.46);
+    }
     head.add(mouth);
     this.mouth = mouth;
   }
@@ -238,7 +262,7 @@ export class Avatar {
     if (c.hairStyle === 'bald') return;
     const hm = toon(c.hairColor, { unique: true });
     this.mats.push(hm);
-    const M = (geo) => mesh(geo, null, { outline: OL, mat: hm });
+    const M = (geo) => mesh(geo, null, { outline: HOL, mat: hm });
     const hatCovers = ['wizard', 'beanie', 'straw'].includes(c.hat);
     if (c.hairStyle === 'mohawk') {
       for (let i = 0; i < 6; i++) {
@@ -305,56 +329,56 @@ export class Avatar {
   }
 
   #buildHat(head, c) {
-    const M = (geo, col, ol = OL) => mesh(geo, col, { outline: ol });
+    const M = (geo, col, ol = HOL) => mesh(geo, col, { outline: ol });
     if (c.hat === 'wizard') {
-      const brim = M(cyl(0.78, 0.78, 0.05, 24), '#3d3a8f');
+      const brim = M(cyl(0.78, 0.78, 0.05, 24), '#2e2b5e');
       brim.position.y = 0.36;
-      const cone = M(new THREE.ConeGeometry(0.46, 0.95, 18), '#3d3a8f');
+      const cone = M(new THREE.ConeGeometry(0.46, 0.95, 18), '#2e2b5e');
       cone.position.set(0, 0.84, -0.06);
       cone.rotation.x = -0.18;
-      const band = M(cyl(0.44, 0.46, 0.08, 20), '#f2c94c', 0);
+      const band = M(cyl(0.44, 0.46, 0.08, 20), '#c9a54a', 0);
       band.position.y = 0.42;
-      const star = M(new THREE.OctahedronGeometry(0.08), '#f2c94c', 0);
+      const star = M(new THREE.OctahedronGeometry(0.08), '#c9a54a', 0);
       star.position.set(0, 0.62, 0.36);
       head.add(brim, cone, band, star);
     } else if (c.hat === 'crown') {
-      const ring = M(cyl(0.3, 0.32, 0.18, 16, 1), '#f2c230');
+      const ring = M(cyl(0.3, 0.32, 0.18, 16, 1), '#c9a54a');
       ring.position.y = 0.5;
       head.add(ring);
       for (let i = 0; i < 6; i++) {
         const a = (i / 6) * Math.PI * 2;
-        const p = M(new THREE.ConeGeometry(0.06, 0.16, 4), '#f2c230', 0);
+        const p = M(new THREE.ConeGeometry(0.06, 0.16, 4), '#c9a54a', 0);
         p.position.set(Math.cos(a) * 0.29, 0.66, Math.sin(a) * 0.29);
         const gem = M(sph(0.035, 6, 6), i % 2 ? '#e24a5b' : '#4a8fe2', 0);
         gem.position.set(Math.cos(a) * 0.31, 0.52, Math.sin(a) * 0.31);
         head.add(p, gem);
       }
     } else if (c.hat === 'beanie') {
-      const dome = M(new THREE.SphereGeometry(0.56, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), '#e2574c');
+      const dome = M(new THREE.SphereGeometry(0.56, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), '#8a3a2e');
       dome.position.y = 0.08;
-      const fold = M(new THREE.TorusGeometry(0.53, 0.07, 8, 24), '#f6f1e6');
+      const fold = M(new THREE.TorusGeometry(0.53, 0.07, 8, 24), '#d9cfb8');
       fold.rotation.x = Math.PI / 2;
       fold.position.y = 0.12;
-      const pom = M(sph(0.12, 10, 8), '#f6f1e6');
+      const pom = M(sph(0.12, 10, 8), '#d9cfb8');
       pom.position.y = 0.66;
       head.add(dome, fold, pom);
     } else if (c.hat === 'straw') {
-      const brim = M(cyl(0.88, 0.9, 0.04, 28), '#e8c872');
+      const brim = M(cyl(0.88, 0.9, 0.04, 28), '#c9a865');
       brim.position.y = 0.3;
-      const crown = M(cyl(0.4, 0.45, 0.28, 20), '#e8c872');
+      const crown = M(cyl(0.4, 0.45, 0.28, 20), '#c9a865');
       crown.position.y = 0.46;
-      const band = M(cyl(0.455, 0.455, 0.08, 20), '#c0392b', 0);
+      const band = M(cyl(0.455, 0.455, 0.08, 20), '#7a2a22', 0);
       band.position.y = 0.37;
       head.add(brim, crown, band);
     } else if (c.hat === 'bandana') {
-      const band = M(new THREE.TorusGeometry(0.5, 0.07, 8, 24), '#c0392b');
+      const band = M(new THREE.TorusGeometry(0.5, 0.07, 8, 24), '#7a2a22');
       band.rotation.x = Math.PI / 2 - 0.25;
       band.position.y = 0.2;
-      const knot = M(sph(0.09, 8, 8), '#c0392b');
+      const knot = M(sph(0.09, 8, 8), '#7a2a22');
       knot.position.set(0, 0.12, -0.52);
       head.add(band, knot);
       for (const s of [-1, 1]) {
-        const tail = M(new THREE.BoxGeometry(0.08, 0.25, 0.03), '#c0392b', 0);
+        const tail = M(new THREE.BoxGeometry(0.08, 0.25, 0.03), '#7a2a22', 0);
         tail.position.set(0.08 * s, -0.02, -0.55);
         tail.rotation.z = 0.3 * s;
         head.add(tail);
@@ -375,27 +399,27 @@ export class Avatar {
     this.wings = null;
     this.cape = null;
     if (c.back === 'cape') {
-      const geo = new THREE.PlaneGeometry(0.7, 1.0, 4, 6);
+      const geo = new THREE.PlaneGeometry(0.78, 1.3, 4, 6);
       const pos = geo.attributes.position;
       for (let i = 0; i < pos.count; i++) pos.setZ(i, -Math.pow(pos.getX(i), 2) * 0.6);
       geo.computeVertexNormals();
       const cape = new THREE.Mesh(geo, toon(shade(c.outfitColor, 0.75), { side: THREE.DoubleSide }));
       cape.castShadow = true;
       const pivot = new THREE.Group();
-      pivot.position.set(0, 1.16, -0.3);
-      cape.position.y = -0.5;
+      pivot.position.set(0, 1.44, -0.3);
+      cape.position.y = -0.65;
       pivot.add(cape);
       pivot.rotation.x = 0.12;
       rig.add(pivot);
       this.cape = pivot;
     } else if (c.back === 'backpack') {
       const pack = mesh(new THREE.BoxGeometry(0.46, 0.5, 0.24), '#a0703f', { outline: OL });
-      pack.position.set(0, 0.9, -0.42);
+      pack.position.set(0, 1.14, -0.38);
       const flap = mesh(new THREE.BoxGeometry(0.48, 0.18, 0.26), '#7c5530', { outline: 0 });
-      flap.position.set(0, 1.1, -0.42);
-      const roll = mesh(cyl(0.08, 0.08, 0.5, 10), '#4caf6a', { outline: OL });
+      flap.position.set(0, 1.34, -0.38);
+      const roll = mesh(cyl(0.08, 0.08, 0.5, 10), '#5a6e3a', { outline: OL });
       roll.rotation.z = Math.PI / 2;
-      roll.position.set(0, 1.22, -0.4);
+      roll.position.set(0, 1.46, -0.36);
       rig.add(pack, flap, roll);
     } else if (c.back === 'wings') {
       const mat = new THREE.MeshToonMaterial({ color: '#cfefff', transparent: true, opacity: 0.8, emissive: '#7fd0ff', emissiveIntensity: 0.25, side: THREE.DoubleSide });
@@ -404,7 +428,7 @@ export class Avatar {
         w.scale.set(1, 0.6, 0.08);
         w.position.x = 0.33 * s;
         const pivot = new THREE.Group();
-        pivot.position.set(0.05 * s, 1.05, -0.32);
+        pivot.position.set(0.05 * s, 1.3, -0.32);
         pivot.add(w);
         rig.add(pivot);
         return pivot;
@@ -459,24 +483,24 @@ export class Avatar {
     this.rig.position.set(0, 0, 0);
     legL.rotation.set(0, 0, 0);
     legR.rotation.set(0, 0, 0);
-    armL.rotation.set(0, 0, -0.12);
-    armR.rotation.set(0, 0, 0.12);
+    armL.rotation.set(0, 0, -0.1);
+    armR.rotation.set(0, 0, 0.1);
     this.head.rotation.set(0, 0, 0);
     this.torso.scale.set(1, 1, 1);
 
     const st = this.state;
     if (st === 'walk') {
-      this.walkPhase += dt * (6 + speed * 1.3);
+      this.walkPhase += dt * (5 + speed * 1.1);
       const p = this.walkPhase;
-      legL.rotation.x = Math.sin(p) * 0.75;
-      legR.rotation.x = -Math.sin(p) * 0.75;
-      armL.rotation.x = -Math.sin(p) * 0.65;
-      armR.rotation.x = Math.sin(p) * 0.65;
-      this.body.position.y = Math.abs(Math.sin(p)) * 0.09;
-      this.rig.rotation.x = 0.08;
+      legL.rotation.x = Math.sin(p) * 0.62;
+      legR.rotation.x = -Math.sin(p) * 0.62;
+      armL.rotation.x = -Math.sin(p) * 0.5;
+      armR.rotation.x = Math.sin(p) * 0.5;
+      this.body.position.y = Math.abs(Math.sin(p)) * 0.05;
+      this.rig.rotation.x = 0.06;
       this.head.rotation.z = Math.sin(p) * 0.04;
     } else if (st === 'sit') {
-      this.body.position.y = -0.36;
+      this.body.position.y = -0.6;
       legL.rotation.x = legR.rotation.x = -1.45;
       armL.rotation.x = armR.rotation.x = -0.5;
     } else if (st === 'ko') {
@@ -486,9 +510,9 @@ export class Avatar {
     } else {
       const br = Math.sin(t * 2.2);
       this.torso.scale.set(1 + br * 0.012, 1 + br * 0.02, 1);
-      this.head.position.y = 1.62 + br * 0.012;
-      armL.rotation.z = -0.12 - br * 0.03;
-      armR.rotation.z = 0.12 + br * 0.03;
+      this.head.position.y = HEAD_Y + br * 0.01;
+      armL.rotation.z = -0.1 - br * 0.03;
+      armR.rotation.z = 0.1 + br * 0.03;
       if (st === 'battle') {
         armR.rotation.x = -0.8;
         legL.rotation.x = 0.25;
@@ -517,6 +541,7 @@ export class Avatar {
           armL.rotation.x = a * 0.7;
           armL.rotation.z = 0.35;
           this.rig.rotation.x = k < 0.45 ? -0.08 : 0.18 * Math.sin(Math.PI * clamp01((k - 0.45) / 0.55));
+          this.rig.rotation.y = k < 0.45 ? -0.3 * ease(k / 0.45) : -0.3 + 0.6 * ease((k - 0.45) / 0.55);
           this.body.position.y = k > 0.45 && k < 0.7 ? -0.05 : 0;
           break;
         }

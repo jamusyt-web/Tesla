@@ -4,6 +4,7 @@ import { sfx } from '../util/sfx.js';
 import { Avatar } from '../scene/avatar.js';
 import { AVATAR_OPTIONS, DEFAULT_AVATAR, randomAvatar, NAME_RE } from '../../../shared/avatar.js';
 import { toon } from '../scene/toon.js';
+import { useGrade } from '../scene/grade.js';
 
 const LABELS = {
   skin: 'Skin', hairStyle: 'Hair', hairColor: 'Hair color', eyes: 'Eyes', eyeColor: 'Eye color',
@@ -19,14 +20,14 @@ export function openCreator(root, { mode = 'create', initial = null, onDone, onC
   const nameIn = h('input', { placeholder: 'Hero name', maxLength: 16, value: '' });
   const err = h('div.err');
   const opts = h('div');
-  const saveBtn = h('button.btn.green.big', { style: { flex: 1 } }, mode === 'create' ? '✨ Begin adventure' : '💾 Save look');
+  const saveBtn = h('button.btn.green.big', { style: { flex: 1 } }, mode === 'create' ? 'Begin your journey' : 'Save appearance');
   const el = h(
     'div.creator',
     canvasWrap,
     h(
       'div.side',
       h('div.scroll', h('h2', mode === 'create' ? 'Create your hero' : 'Customize your look'), mode === 'create' ? h('label.field', h('span', 'Name'), nameIn) : null, opts),
-      h('div.foot', h('button.btn.plain.big', { on: { click: () => ((cfg = randomAvatar()), rebuild(true)) } }, '🎲'), mode === 'edit' ? h('button.btn.plain.big', { on: { click: () => close(onCancel) } }, 'Cancel') : null, saveBtn),
+      h('div.foot', h('button.btn.plain.big', { 'aria-label': 'Random look', on: { click: () => ((cfg = randomAvatar()), rebuild(true)) } }, 'Random'), mode === 'edit' ? h('button.btn.plain.big', { on: { click: () => close(onCancel) } }, 'Cancel') : null, saveBtn),
     ),
   );
   canvasWrap.append(h('div.spin-hint', 'Drag to spin'));
@@ -36,25 +37,21 @@ export function openCreator(root, { mode = 'create', initial = null, onDone, onC
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
+  useGrade(renderer);
   canvasWrap.prepend(renderer.domElement);
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
-  scene.add(new THREE.HemisphereLight('#ffffff', '#c9a37a', 1.6));
-  const sun = new THREE.DirectionalLight('#fff3dc', 2);
+  scene.add(new THREE.HemisphereLight('#c8d8ec', '#6b5a48', 1.3));
+  const sun = new THREE.DirectionalLight('#ffe4bc', 2.7);
   sun.position.set(3, 6, 5);
   sun.castShadow = true;
   scene.add(sun);
-  const plat = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.7, 0.3, 32), toon('#9ed27a'));
+  const plat = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.7, 0.3, 32), toon('#7a6e5e'));
   plat.position.y = -0.15;
   plat.receiveShadow = true;
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.55, 0.08, 8, 40), toon('#f2d7a8'));
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.55, 0.08, 8, 40), toon('#8a6a3a'));
   rim.rotation.x = Math.PI / 2;
   scene.add(plat, rim);
-  for (let i = 0; i < 8; i++) {
-    const f = new THREE.Mesh(new THREE.SphereGeometry(0.08, 6, 5), toon(['#ff7aa2', '#ffd84a', '#ffffff'][i % 3]));
-    f.position.set(Math.cos(i * 0.8) * 1.25, 0.05, Math.sin(i * 0.8) * 1.25);
-    scene.add(f);
-  }
   let av = null;
   let yaw = 0.35;
   const rebuild = (anim) => {
@@ -74,8 +71,8 @@ export function openCreator(root, { mode = 'create', initial = null, onDone, onC
     renderer.setSize(w, hh);
     cam.aspect = w / hh;
     const narrow = w / hh < 0.8;
-    cam.position.set(0, 1.6, narrow ? 9 : 7.2);
-    cam.lookAt(0, 1.15, 0);
+    cam.position.set(0, 1.7, narrow ? 9.4 : 7.6);
+    cam.lookAt(0, 1.2, 0);
     cam.updateProjectionMatrix();
   };
   let drag = null;

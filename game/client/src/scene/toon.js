@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 // 3-band gradient = the soft cel-shaded "Shop Titans" look.
 const grad = (() => {
-  const data = new Uint8Array([150, 150, 150, 255, 215, 215, 215, 255, 255, 255, 255, 255]);
+  const data = new Uint8Array([136, 136, 136, 255, 206, 206, 206, 255, 255, 255, 255, 255]);
   const t = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat);
   t.minFilter = t.magFilter = THREE.NearestFilter;
   t.needsUpdate = true;
@@ -21,7 +21,7 @@ export function toon(color, opts = {}) {
 
 // Inverted-hull outline: push vertices along normals, draw back faces in ink.
 const outlineMats = new Map();
-export function outlineMat(thickness = 0.03, color = '#3a2414') {
+export function outlineMat(thickness = 0.03, color = '#1e140e') {
   const key = thickness + color;
   if (outlineMats.has(key)) return outlineMats.get(key);
   const m = new THREE.MeshBasicMaterial({ color, side: THREE.BackSide });

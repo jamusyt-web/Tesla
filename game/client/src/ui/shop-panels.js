@@ -113,7 +113,7 @@ export const SHOP_PANELS = {
       upd();
       const vs = s.price / it.value;
       c.body.append(
-        h('div.row', h('div', iconEl(s.item, '64px')), h('div.grow', h('div', { style: { color: RARITY[it.rarity].color, fontWeight: 700 } }, RARITY[it.rarity].label), h('div.muted', `${fmt(s.qty)} in stock · ${s.price} 🪙 each`), h('div.muted', vs <= 1.05 ? 'A fair price.' : vs <= 1.3 ? 'A little above its usual value.' : 'Pricey!'))),
+        h('div.row', h('div', iconEl(s.item, '64px')), h('div.grow', h('div', { style: { fontWeight: 700 } }, h('span', { style: { background: '#2a2018', color: RARITY[it.rarity].color, padding: '1px 6px', borderRadius: '3px' } }, RARITY[it.rarity].label)), h('div.muted', `${fmt(s.qty)} in stock · ${s.price} 🪙 each`), h('div.muted', vs <= 1.05 ? 'A fair price.' : vs <= 1.3 ? 'A little above its usual value.' : 'Pricey!'))),
         h('div.row.wrap', { style: { marginTop: '10px' } }, h('label.qty', 'Qty ', qty), h('span', 'Total '), total),
         h('button.btn.green', {
           style: { marginTop: '10px' },
@@ -140,7 +140,7 @@ export const SHOP_PANELS = {
 
   // Every shop in town; visit any of them.
   shops(c) {
-    this.title(c, '🏪 Shops');
+    this.title(c, 'Shops', 'village');
     c.body.append(h('div.empty', 'Loading…'));
     this.sock
       .rpc('shop.directory')
@@ -165,7 +165,7 @@ export const SHOP_PANELS = {
 
   // Owner: till, today's takings, the sales ledger, open/closed, shop name.
   ledger(c) {
-    this.title(c, '📒 Ledger');
+    this.title(c, 'Ledger', 'scroll');
     const draw = async () => {
       let L;
       let st;
@@ -184,7 +184,7 @@ export const SHOP_PANELS = {
         h('div.row.wrap', h('label.qty', 'Name ', name), h('button.btn.small', { on: { click: () => this.rpc('shop.setup', { name: name.value }, 'Renamed!').then(draw) } }, 'Rename'), h('button.btn.small' + (st.open ? '.red' : '.green'), { on: { click: () => this.rpc('shop.setup', { open: !st.open }, st.open ? 'Shop closed.' : 'Shop open!').then(draw) } }, st.open ? 'Close shop' : 'Open shop')),
         h('div.section-title', 'Recent sales'),
         ...(L.rows.length
-          ? L.rows.map((r) => h('div.rowcard', h('div.ic', iconEl(r.item, '32px')), h('div.grow', h('div.t', `${r.qty}× ${ITEMS[r.item]?.name || r.item}`), h('div.s', `${r.kind === 'player' ? '🧑 ' : ''}${r.buyer} · ${ago(r.ts)}`)), h('b.gold', `+${fmt(r.gross - r.fee)}`)))
+          ? L.rows.map((r) => h('div.rowcard', h('div.ic', iconEl(r.item, '32px')), h('div.grow', h('div.t', `${r.qty}× ${ITEMS[r.item]?.name || r.item}`), h('div.s', `${r.kind === 'player' ? '' : ''}${r.buyer} · ${ago(r.ts)}`)), h('b.gold', `+${fmt(r.gross - r.fee)}`)))
           : [h('div.empty', 'No sales yet. Stock a display and go adventuring!')]),
       );
     };
@@ -193,12 +193,12 @@ export const SHOP_PANELS = {
 
   // "While you were away".
   away(c, m) {
-    this.title(c, '🏪 While you were away');
+    this.title(c, 'While you were away', 'shop');
     const top = m.top.map((t) => h('div.kv', h('span', h('span', iconEl(t.item, '24px')), ` ${ITEMS[t.item]?.name} ×${fmt(t.qty)}`), h('b.gold', `+${fmt(t.gold)}`)));
     c.body.append(
       h('div', { style: { textAlign: 'center', margin: '4px 0 10px' } }, h('div.big.gold', `+${fmt(m.net)} 🪙`), h('div.muted', `${m.count} sale${m.count === 1 ? '' : 's'}`)),
       ...top,
-      ...m.players.map((p) => h('div.muted', `🧑 ${p.name} bought ${p.qty}× ${ITEMS[p.item]?.name}`)),
+      ...m.players.map((p) => h('div.muted', `${p.name} bought ${p.qty}× ${ITEMS[p.item]?.name}`)),
       m.paused ? h('div.warn', 'You were away a long time, so townsfolk stopped visiting after 12 hours. Friends could still buy.') : null,
       h('div.row', { style: { marginTop: '12px', justifyContent: 'center' } }, h('button.btn.green', { disabled: !m.till, on: { click: () => this.rpc('shop.collect', {}).then((r) => (sfx.coin(), this.hud.toast(`Collected ${fmt(r.gold)} 🪙`, 'gold'), this.hud.setTill?.(0), this.close())) } }, `Collect ${fmt(m.till)} 🪙`), h('button.btn', { on: { click: () => this.close() } }, 'Later')),
     );
