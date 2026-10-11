@@ -183,6 +183,10 @@ const MIGRATIONS = [
       UPDATE accounts SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM accounts);
     `);
   },
+  // 4: the waystones each hero has attuned to (fast travel), as a JSON list of ids.
+  (db) => {
+    db.exec(`ALTER TABLE heroes ADD COLUMN stones TEXT NOT NULL DEFAULT '[]';`);
+  },
 ];
 
 export function migrate(db) {

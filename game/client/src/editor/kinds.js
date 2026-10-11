@@ -89,6 +89,14 @@ export const KINDS = {
     hit: (e) => ({ w: 7 * (e.scale ?? 4.5), d: e.scale ?? 4.5 }),
     fields: () => [{ key: 'label', label: 'Name', type: 'text' }, ...XZ, num('scale', 'Size', 0.1, { min: 2, max: 8 })],
   },
+  stones: {
+    label: 'Waystone',
+    prefix: 'stone',
+    order: 2,
+    name: (e) => e.name || 'Waystone',
+    hit: () => ({ r: 1.2 }),
+    fields: () => [{ key: 'name', label: 'Name', type: 'text' }, ...XZ, { key: 'rot', label: 'Faces (°)', type: 'deg', help: 'Travellers arrive in front of it' }],
+  },
   fountains: { label: 'Fountain', prefix: 'fountain', order: 3, name: () => 'Fountain', hit: (e) => ({ r: e.r }), fields: () => [...XZ, num('r', 'Radius', 0.1, { min: 1.5, max: 6 })] },
   docks: { label: 'Dock', prefix: 'dock', order: 3, name: () => 'Dock', hit: (e) => ({ w: e.w, d: e.d }), fields: () => [...XZ, num('w', 'Width', 0.5, { min: 2 }), num('d', 'Length', 0.5, { min: 3 })] },
   spawns: {
@@ -159,6 +167,7 @@ export const PALETTE = [
     title: 'Buildings & areas',
     items: [
       { kind: 'buildings', label: 'Cottage', make: (x, z) => ({ x, z, w: 6, d: 5, face: 's', color: '#f1e1b6', roof: '#b4553f', deco: true }) },
+      { kind: 'stones', label: 'Waystone (fast travel)', make: (x, z) => ({ name: 'New Waystone', x, z, rot: 0 }) },
       { kind: 'docks', label: 'Dock', make: (x, z) => ({ x, z, w: 3, d: 8 }) },
       { kind: 'fountains', label: 'Fountain', make: (x, z) => ({ x, z, r: 2.6 }) },
       { kind: 'plazas', label: 'Plaza', make: (x, z) => ({ x, z, r: 8 }) },

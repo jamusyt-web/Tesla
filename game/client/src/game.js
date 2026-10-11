@@ -19,6 +19,7 @@ import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
   NODES, buildColliders, NavGrid, stepPath, approachPoint, doorPoint, zonesOfKind,
   BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, GATE, ZONES, SWING_GATE,
+  stoneById, stoneFront, STONE_RANGE,
 } from '../../shared/world.js';
 
 const INTERP_DELAY = 130; // ms behind real time we render other players
@@ -282,6 +283,7 @@ export class GameClient {
   }
   openInterior(p) {
     this.#fade();
+    this.hud.worldMap.close();
     if (this.room) this.closeInterior({ quiet: true });
     if (this.me) this.me.local.path = null;
     this.intent = null;
@@ -326,7 +328,9 @@ export class GameClient {
       const el =
         l.kind === 'place'
           ? h('div.place', { on: { click: (e) => (e.stopPropagation(), this.goBuilding(l.id)) } }, h('span.ic', l.glyph ? glyph(l.glyph) : l.icon), l.text)
-          : h('div.zone-tag', l.text);
+          : l.kind === 'stone'
+            ? h('div.place.stone', { on: { click: (e) => (e.stopPropagation(), this.goStone(l.id, { openMap: true })) } }, h('span.ic', glyph(l.glyph)), l.text)
+            : h('div.zone-tag', l.text);
       this.labelLayer.append(el);
       return { ...l, el };
     });
@@ -595,6 +599,8 @@ export class GameClient {
         this.hud.setOnline(this.players.size);
       }),
       s.on('s', (m) => this.onSnapshot(m)),
+      s.on('tp', (m) => this.onTeleport(m)),
+      s.on('attuned', (m) => this.onAttuned(m)),
       s.on('nh', (m) => this.onNodeHit(m)),
       s.on('node', (m) => this.onNode(m)),
       s.on('loot', (m) => this.onLoot(m)),
@@ -663,6 +669,7 @@ export class GameClient {
       }
     }
     this.channel = m.channel;
+    for (const [id, ws] of this.town.stones) ws.setAttuned((m.you.stones ?? []).includes(id));
     this.hud.onWelcome(m);
     this.#resumeCraft(m.you);
     if (this.lastRoom != null) {
@@ -767,6 +774,8 @@ export class GameClient {
         this.actionKey();
         return;
       }
+      if (k === 'm') return this.hud.worldMap.toggle();
+      if (k === 'escape' && this.hud.worldMap.isOpen) return this.hud.worldMap.close();
       if (k === 'q') this.cam.yaw += 0.3;
       if (k === 'r') this.cam.yaw -= 0.3;
       this.keys.add(k);
@@ -790,6 +799,7 @@ export class GameClient {
       if (u.player) return { kind: 'player', id: u.player, point: hit.point };
       if (u.node) return { kind: 'node', id: u.node, point: hit.point };
       if (u.station) return { kind: 'station', id: u.station, point: hit.point };
+      if (u.stone) return { kind: 'stone', id: u.stone, point: hit.point };
       if (u.building) return { kind: 'building', id: u.building, point: hit.point };
       if ((u.ground || u.water) && !ground) ground = { kind: 'ground', point: hit.point };
     }
@@ -824,6 +834,7 @@ export class GameClient {
     if (hit.kind === 'mob') return this.goMob(hit.id);
     if (hit.kind === 'player') return this.hud.openProfile(hit.id);
     if (hit.kind === 'station') return this.hud.panels.open('craft', { station: hit.id });
+    if (hit.kind === 'stone') return this.goStone(hit.id, { openMap: true });
     if (hit.kind === 'npc') {
       const info = hit.npc.info;
       const line = info.lines[Math.floor(Math.random() * info.lines.length)];
@@ -858,6 +869,7 @@ export class GameClient {
   walkTo(x, z, marker = false, onArrive = null) {
     if (this.hud.fight) return false; // mid reel-fight: stay put
     if (this.craft) return false; // working at a station
+    if (this.travelling) return false; // about to vanish to another waystone
     if (this.fishing) this.endFishing(); // the server cancels too when it gets the move
     const L = this.me.local;
     const path = STATIC.nav.findPath(L.x, L.z, x, z);
@@ -1198,6 +1210,84 @@ export class GameClient {
     this.walkTo(mv.x + (dx / d) * 3.2, mv.z + (dz / d) * 3.2, true, engage);
   }
 
+  // ── Waystones (fast travel) ──────────────────────────────────────────
+  // Walk up to a waystone; with openMap, open the world map on arrival to
+  // pick where to go. Returns false if there's no way there.
+  goStone(id, { openMap = false } = {}) {
+    const st = stoneById(id);
+    if (!st || this.battle) return false;
+    const L = this.me.local;
+    const arrive = () => openMap && this.hud.worldMap.open();
+    if (Math.hypot(L.x - st.x, L.z - st.z) < STONE_RANGE - 1) return arrive(), true;
+    this.stopGather();
+    const [fx, fz] = stoneFront(st, 2);
+    return this.walkTo(fx, fz, true, arrive);
+  }
+  async travelTo(id) {
+    if (this.travelling) return false;
+    this.travelling = true;
+    this.me.local.path = null;
+    this.intent = null;
+    try {
+      const r = await this.sock.rpc('travel', { to: id });
+      this.hud.toast(`Travelled to ${stoneById(r.to)?.name ?? 'the waystone'} (−${r.fee} 🪙)`, 'gold');
+      return true;
+    } catch (e) {
+      this.hud.toast(e.message, 'err');
+      return false;
+    } finally {
+      this.travelling = false;
+    }
+  }
+  // Someone travelled by waystone: they vanish in a flash and reappear.
+  onTeleport(m) {
+    const pv = this.players.get(m.id);
+    if (!pv) return;
+    const flash = (x, z) => {
+      const p = new THREE.Vector3(x, 1.2, z);
+      this.fx.puff.burst(p, { n: 18, color: ['#bff4ff', '#7fe0ff', '#ffffff'], speed: 2.2, up: 2.5, gravity: -1, size: 0.3, life: 0.9, drag: 0.8 });
+      this.rings.spawn({ x, z }, { color: '#8fe8ff', size: 2.2, life: 0.7 });
+    };
+    if (m.from) flash(m.from.x, m.from.z);
+    if (pv.isMe) {
+      const L = this.me.local;
+      this.stopGather();
+      if (this.fishing) this.endFishing();
+      Object.assign(L, { x: m.x, z: m.z, rot: m.rot, path: null });
+      pv.srv = { x: m.x, z: m.z, act: 'idle' };
+      this.intent = null;
+      this.marker.visible = false;
+      this.cam.target.set(m.x, 0, m.z);
+      this.cam.yaw = m.rot; // look back at you, with the waystone behind
+      this.cam.curYaw = this.cam.yaw;
+      this.me.av.root.position.set(m.x, 0, m.z);
+      this.me.av.root.rotation.y = m.rot;
+      this.town.focus(m.x, m.z, Infinity); // build where you land before the fade clears
+      this.#fade();
+      sfx.warp();
+    } else {
+      pv.body.buf = [];
+      pv.body.push(m.x, m.z, m.rot, 'idle');
+      pv.x = m.x;
+      pv.z = m.z;
+      pv.av.root.position.set(m.x, 0, m.z);
+    }
+    flash(m.x, m.z);
+  }
+  onAttuned(m) {
+    const me = this.hud.me;
+    me.stones = [...new Set([...(me.stones ?? []), m.id])];
+    this.town.stones.get(m.id)?.setAttuned(true);
+    const st = stoneById(m.id);
+    if (st) {
+      this.floatText(new THREE.Vector3(st.x, 4.6, st.z), `Waystone attuned: ${m.name}`, 'loot rare');
+      this.rings.spawn({ x: st.x, z: st.z }, { color: '#8fe8ff', size: 3, life: 0.9 });
+    }
+    sfx.rare();
+    if (me.stones.length > 1) this.hud.toast(`You can now fast-travel to ${m.name} from any waystone.`, 'good');
+    this.hud.worldMap.refresh();
+  }
+
   onBattle(b) {
     const mv = this.mobs.get(b.mob);
     if (mv) this.#mobState(mv, 'battle');
@@ -1523,7 +1613,7 @@ export class GameClient {
   #keyboardMove() {
     const k = this.keys;
     if (this.room) return this.room.keyboard(k);
-    if (this.battle || this.craft || !k.size) return;
+    if (this.battle || this.craft || !k.size || this.hud.worldMap.isOpen) return;
     let fx = 0;
     let fz = 0;
     if (k.has('w') || k.has('arrowup')) fz -= 1;

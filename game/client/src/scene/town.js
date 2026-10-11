@@ -3,9 +3,9 @@ import { mesh, toon, shade } from './toon.js';
 import * as assets from './assets.js';
 import { waterMaterial, seaMaterial, groundTexture } from './water.js';
 import { buildModular, buildGate } from './buildings.js';
-import { PROC_BUILDERS } from './procprops.js';
+import { PROC_BUILDERS, buildWaystone } from './procprops.js';
 import {
-  BUILDINGS, ZONES, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, LANDS, EXTENT, SPAWN, NODE_TYPES,
+  BUILDINGS, ZONES, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, LANDS, EXTENT, SPAWN, NODE_TYPES,
   pathSegments, zonesOfKind, landDistance, mulberry32,
 } from '../../../shared/world.js';
 
@@ -612,6 +612,23 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     });
   }
 
+  // Waystones (fast travel): tap one to walk up and open the world map.
+  const stones = new Map();
+  for (const st of STONES) {
+    const ws = buildWaystone(st, { fx, animate: (fn) => animated.push(fn) });
+    ws.group.position.set(st.x, 0, st.z);
+    ws.group.rotation.y = st.rot ?? 0;
+    ws.group.traverse((o) => {
+      if (!o.isMesh) return;
+      o.userData.stone = st.id;
+      if (o.material.side !== THREE.BackSide) o.castShadow = true;
+    });
+    root.add(ws.group);
+    pickables.push(ws.group);
+    stones.set(st.id, ws);
+    labels.push({ kind: 'stone', id: st.id, text: st.name, glyph: 'waystone', pos: new THREE.Vector3(st.x, 5, st.z) });
+  }
+
   // Lakes: water, reeds round the shore, lily pads (skipping any dock).
   for (const l of LAKES) {
     const water = new THREE.Mesh(new THREE.CircleGeometry(l.r + 0.6, 64), waterMaterial({ radius: l.r + 0.6, foamAt: l.r + 0.1, shallow: '#5fb3c4', deep: '#1f5f86', fog: scene.fog, opacity: 0.93 }));
@@ -885,6 +902,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     root,
     pickables,
     nodes,
+    stones,
     labels,
     fades,
     chunks,

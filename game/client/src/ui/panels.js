@@ -8,6 +8,7 @@ import { SKILLS, SKILL_IDS, levelProgress, levelFromXp } from '../../../shared/s
 import { MARKET_TAX as TAX } from '../../../shared/economy.js';
 import { SHOP_PANELS } from './shop-panels.js';
 import { glyph } from './glyphs.js';
+import { BUILDINGS, doorPoint } from '../../../shared/world.js';
 
 const NPC_RATE = 0.6;
 
@@ -52,15 +53,34 @@ export class Panels {
 
   open(name, args = {}) {
     this.close();
+    this.hud.worldMap?.close();
     const body = h('div.panel-body');
     const titleEl = h('h3');
-    const panel = h('div.panel' + (['profile', 'result'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, h('button.close', { 'aria-label': 'Close', on: { click: () => this.close() } }, '✕')), body);
+    const place = this.#placeFor(name);
+    const walk = place ? h('button.walk', { title: `Walk to the ${place.label}`, on: { click: () => (this.close(), this.hud.travel(place.id)) } }, glyph('run'), h('span', 'Walk there')) : null;
+    const panel = h('div.panel' + (['profile', 'result'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, walk, h('button.close', { 'aria-label': 'Close', on: { click: () => this.close() } }, '✕')), body);
     const scrim = h('div.scrim', { on: { pointerdown: (e) => e.target === scrim && this.close() } }, panel);
     this.hud.el.append(scrim);
     this.cur = { name, scrim, body, titleEl, args, refresh: null, onClose: null };
     const fn = this['p_' + name] || SHOP_PANELS[name];
     if (fn) fn.call(this, this.cur, args);
     sfx.pop();
+  }
+
+  // A building panel opened from afar (the dock opens them anywhere): the
+  // nearest building it belongs to, so you can still walk over.
+  #placeFor(name) {
+    const g = this.hud.game;
+    if (!g?.me || g.room) return null;
+    const p = g.myPos();
+    let best = null;
+    for (const b of BUILDINGS) {
+      if (b.deco || b.action !== name || b.action === 'shop') continue;
+      const [dx, dz] = doorPoint(b);
+      const d = Math.hypot(dx - p.x, dz - p.z);
+      if (!best || d < best.d) best = { b, d };
+    }
+    return best && best.d > 8 ? best.b : null;
   }
 
   close() {

@@ -49,6 +49,7 @@ export function mulberry32(seed) {
 //   paths     [{ id, pts: [[x, z], ...], w }]          dirt paths (w = half-width)
 //   nodes     [{ id, type, x, z, rot, s }]            gatherables (NODE_TYPES)
 //   spawns    [{ id, monster, x, z, r, count }]       monster camps
+//   stones    [{ id, name, x, z, rot }]                fast-travel waystones (you arrive in front)
 //   props     [{ id, slot, x, z, rot, r, s?, y?, v?, bob?, station? }]
 //             slot = model slot (client/src/scene/manifest.js) or a proc_* kind;
 //             r > 0 blocks movement; station marks a crafting station.
@@ -74,8 +75,9 @@ export let PATHS = [];
 export let NODES = [];
 export let SPAWNS = [];
 export let PROPS = [];
+export let STONES = [];
 
-const LISTS = ['lands', 'regions', 'buildings', 'gates', 'plazas', 'fountains', 'lakes', 'docks', 'zones', 'paths', 'nodes', 'spawns', 'props'];
+const LISTS = ['lands', 'regions', 'buildings', 'gates', 'plazas', 'fountains', 'lakes', 'docks', 'zones', 'paths', 'nodes', 'spawns', 'stones', 'props'];
 
 // Checks a map's shape and returns a list of problems (empty = fine).
 export function mapProblems(m) {
@@ -104,22 +106,37 @@ export function mapProblems(m) {
       if (k === 'props' && typeof e.slot !== 'string') out.push(`${where} needs a slot.`);
       if (k === 'buildings' && !(e.w > 0 && e.d > 0)) out.push(`${where} needs a positive w and d.`);
       if (k === 'lands' && !(e.r >= 5)) out.push(`${where} needs a radius r of at least 5.`);
+      if (k === 'stones' && (typeof e.name !== 'string' || !e.name.trim())) out.push(`${where} needs a name.`);
     });
   }
   return out;
 }
 
+// The waystones a map made before they existed gets (Hearthvale's two).
+const FIRST_STONES = [
+  { id: 'stone_square', name: 'Hearthvale Square', x: 6.2, z: 5.2, rot: -1.76 },
+  { id: 'stone_wildwatch', name: 'Wildwatch', x: 3, z: -40.5, rot: 3.14 },
+];
+
 // Older map files, brought up to the current format (a new object; the input is untouched).
 export function upgradeMap(m) {
-  if (m?.format !== 1) return m;
-  const { bounds, ...rest } = m;
-  const out = {};
-  for (const [k, v] of Object.entries(rest)) {
-    out[k] = k === 'format' ? 2 : v;
-    if (k === 'rev') out.lands = [{ id: 'island', x: 0, z: 0, r: bounds?.r ?? 96 }];
+  if (m?.format === 1) {
+    const { bounds, ...rest } = m;
+    const out = {};
+    for (const [k, v] of Object.entries(rest)) {
+      out[k] = k === 'format' ? 2 : v;
+      if (k === 'rev') out.lands = [{ id: 'island', x: 0, z: 0, r: bounds?.r ?? 96 }];
+    }
+    out.lands ??= [{ id: 'island', x: 0, z: 0, r: bounds?.r ?? 96 }];
+    m = out;
   }
-  out.lands ??= [{ id: 'island', x: 0, z: 0, r: bounds?.r ?? 96 }];
-  return out;
+  // Maps from before fast travel: add the starter waystones (unless something
+  // already uses their ids).
+  if (m?.format === 2 && !m.stones) {
+    const used = new Set(LISTS.flatMap((k) => (Array.isArray(m[k]) ? m[k].map((e) => e?.id) : [])));
+    m = { ...m, stones: FIRST_STONES.filter((s) => !used.has(s.id)).map((s) => ({ ...s })) };
+  }
+  return m;
 }
 
 // Make `m` the current world (upgrading an old file first) and return it.
@@ -153,6 +170,7 @@ export function setWorld(m) {
   NODES = m.nodes ?? [];
   SPAWNS = m.spawns ?? [];
   PROPS = (m.props ?? []).map((p) => ({ rot: 0, r: 0, ...p }));
+  STONES = (m.stones ?? []).map((st) => ({ rot: 0, ...st }));
   return m;
 }
 
@@ -174,6 +192,37 @@ export function formatMap(m) {
 }
 
 export const zoneById = (id) => ZONES.find((z) => z.id === id) ?? null;
+export const stoneById = (id) => STONES.find((st) => st.id === id) ?? null;
+
+// Where a point is: the smallest zone and region around it (either may be null).
+export function placeAt(x, z) {
+  const inner = (list) => {
+    let best = null;
+    for (const e of list) if (Math.hypot(x - e.x, z - e.z) < e.r && (!best || e.r < best.r)) best = e;
+    return best;
+  };
+  return { zone: inner(ZONES), region: inner(REGIONS) };
+}
+
+// ── Fast travel ────────────────────────────────────────────────────────
+// Walk up to a waystone to attune to it; then, standing at any waystone,
+// pay a fee to travel to any other you're attuned to.
+export const STONE_RANGE = 6; // how close counts as "at" a stone (and attunes you)
+export const STONE_R = 0.7; // its collision radius
+// The fee grows with the distance: a few gold across town, more across the world.
+export const travelFee = (a, b) => 5 + Math.round(Math.hypot(a.x - b.x, a.z - b.z) / 25);
+// Where you appear: a couple of metres in front of the stone.
+export const stoneFront = (st, d = 2.6) => [st.x + Math.sin(st.rot ?? 0) * d, st.z + Math.cos(st.rot ?? 0) * d];
+// The stone you're standing at (nearest within range), if any.
+export function stoneNear(x, z) {
+  let best = null;
+  let bd = STONE_RANGE;
+  for (const st of STONES) {
+    const d = Math.hypot(x - st.x, z - st.z);
+    if (d <= bd) (best = st), (bd = d);
+  }
+  return best;
+}
 export const zonesOfKind = (kind) => ZONES.filter((z) => (z.kind ?? z.id) === kind);
 
 // Signed distance to the coast: negative on land, positive out at sea.
@@ -243,6 +292,7 @@ export function buildColliders() {
     if (t.r > 0) circles.push({ x: n.x, z: n.z, r: t.r * n.s });
   }
   for (const p of PROPS) if (p.r > 0) circles.push({ x: p.x, z: p.z, r: p.r });
+  for (const st of STONES) circles.push({ x: st.x, z: st.z, r: STONE_R });
   return indexColliders({ rects, circles });
 }
 

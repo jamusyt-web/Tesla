@@ -91,3 +91,47 @@ export const PROC_BUILDERS = {
     return g;
   },
 };
+
+// A fast-travel waystone (map list `stones`, not a prop): a carved pillar on a
+// stepped base with glowing runes on its front (+z) and a floating crystal.
+// It glows brightly once you've attuned to it. Returns { group, setAttuned }.
+export function buildWaystone(st, { fx, animate }) {
+  const g = new THREE.Group();
+  const stone = (geo, color) => mesh(geo, color, { outline: OL, mat: toon(color, { flatShading: true }) });
+  g.add(at(stone(cyl(1.25, 1.35, 0.3, 8), '#6f6a62'), 0, 0.15, 0));
+  g.add(at(stone(cyl(0.95, 1.05, 0.3, 8), '#7d776e'), 0, 0.45, 0));
+  const pillar = stone(cyl(0.38, 0.56, 3, 4), '#5d6470');
+  pillar.rotation.y = Math.PI / 4;
+  g.add(at(pillar, 0, 2.1, 0));
+  g.add(at(stone(box(0.62, 0.16, 0.62), '#4f5560'), 0, 3.66, 0));
+  const glow = toon('#8fe8ff', { emissive: '#4fd0ff', emissiveIntensity: 0.2, unique: true });
+  // Rune marks down the front face (the face leans in a little as the pillar narrows).
+  for (const [y, w, hgt] of [[2.9, 0.22, 0.08], [2.55, 0.08, 0.3], [2.15, 0.26, 0.08], [1.75, 0.08, 0.36], [1.32, 0.2, 0.08]]) {
+    const r = at(new THREE.Mesh(box(w, hgt, 0.04), glow), 0, y, 0.56 - ((y - 0.6) / 3) * 0.18 + 0.03);
+    r.rotation.x = -0.04;
+    g.add(r);
+  }
+  const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), toon('#9ff0ff', { emissive: '#5fd8ff', emissiveIntensity: 0.25, flatShading: true, unique: true }));
+  crystal.scale.y = 1.5;
+  g.add(crystal);
+  let lit = false;
+  const v = new THREE.Vector3();
+  const ph = jitter(st.id, 'p') * 6;
+  animate((dt, t) => {
+    crystal.position.y = 4.35 + Math.sin(t * 1.6 + ph) * 0.12;
+    crystal.rotation.y += dt * (lit ? 1.2 : 0.4);
+    const pulse = lit ? 0.85 + Math.sin(t * 2.4 + ph) * 0.15 : 0.18;
+    glow.emissiveIntensity = pulse;
+    crystal.material.emissiveIntensity = pulse + (lit ? 0.2 : 0.05);
+    if (Math.random() < dt * (lit ? 3 : 0.6)) {
+      g.localToWorld(v.set((Math.random() - 0.5) * 1.4, 0.7, (Math.random() - 0.5) * 1.4));
+      fx.puff.burst(v, { n: 1, color: lit ? ['#bff4ff', '#7fe0ff'] : ['#c8d0d8'], speed: 0.15, up: 1.4, gravity: -0.6, size: 0.12, life: 1.6, drag: 0.4, jitter: 0.05, spin: 0 });
+    }
+  });
+  return {
+    group: g,
+    setAttuned(on) {
+      lit = !!on;
+    },
+  };
+}

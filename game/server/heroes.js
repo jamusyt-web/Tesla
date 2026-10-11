@@ -24,6 +24,7 @@ export class Heroes {
       avatar: db.prepare('UPDATE heroes SET avatar = ? WHERE account_id = ?'),
       pos: db.prepare('UPDATE heroes SET x = ?, z = ? WHERE account_id = ?'),
       tutorial: db.prepare('UPDATE heroes SET tutorial = ? WHERE account_id = ?'),
+      stones: db.prepare('UPDATE heroes SET stones = ? WHERE account_id = ?'),
       equipOf: db.prepare('SELECT equip FROM heroes WHERE account_id = ?'),
       feeMilli: db.prepare('SELECT fee_milli FROM heroes WHERE account_id = ?'),
       setFeeMilli: db.prepare('UPDATE heroes SET fee_milli = ? WHERE account_id = ?'),
@@ -58,6 +59,7 @@ export class Heroes {
       level: heroLevel(skills),
       equip: { ...STARTER_EQUIP, ...JSON.parse(r.equip) },
       tutorial: r.tutorial,
+      stones: JSON.parse(r.stones || '[]'),
       x: r.x ?? SPAWN.x,
       z: r.z ?? SPAWN.z,
     };
@@ -136,5 +138,12 @@ export class Heroes {
   setTutorial(hero, step) {
     hero.tutorial = step;
     this.q.tutorial.run(step, hero.id);
+  }
+  // Remember a waystone this hero has visited (fast travel).
+  attune(hero, stoneId) {
+    if (hero.stones.includes(stoneId)) return false;
+    hero.stones.push(stoneId);
+    this.q.stones.run(JSON.stringify(hero.stones), hero.id);
+    return true;
   }
 }

@@ -113,5 +113,6 @@ export const sfx = {
     tone(2093, 0.4, { type: 'sine', vol: 0.12, delay: 0.02 });
   },
   pop: () => tone(520, 0.08, { type: 'sine', vol: 0.25, slide: 400 }),
+  warp: () => [392, 587, 880].forEach((f, i) => tone(f, 0.4, { type: 'sine', vol: 0.16, slide: f, delay: i * 0.07 })),
   chat: () => tone(1046, 0.06, { type: 'sine', vol: 0.12 }),
 };

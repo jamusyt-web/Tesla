@@ -6,7 +6,7 @@ import * as assets from '../scene/assets.js';
 import { buildTown, disposeTown } from '../scene/town.js';
 import { Particles } from '../scene/fx.js';
 import { PROC_BUILDERS } from '../scene/procprops.js';
-import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES } from '../../../shared/world.js';
+import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES, stoneFront, STONE_RANGE } from '../../../shared/world.js';
 import { KINDS, KIND_KEYS, PALETTE, show, store } from './kinds.js';
 
 // The world editor: a top-down view of the real world where the server owner
@@ -333,6 +333,12 @@ class Editor {
     for (const s of this.map.spawns) {
       const p = nav.nearestOpen(s.x, s.z);
       if (!p || !nav.findPath(sp.x, sp.z, p[0], p[1])) out.push(`Monster camp ${s.id}`);
+    }
+    // Waystones: you arrive in front of them, and must be able to walk up to attune.
+    for (const st of this.map.stones) {
+      const [x, z] = stoneFront({ rot: 0, ...st });
+      const p = nav.nearestOpen(x, z);
+      if (!p || Math.hypot(p[0] - st.x, p[1] - st.z) > STONE_RANGE - 1 || !nav.findPath(sp.x, sp.z, p[0], p[1])) out.push(`Waystone ${st.name || st.id}`);
     }
     return out;
   }

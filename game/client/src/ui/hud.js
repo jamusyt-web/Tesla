@@ -4,9 +4,10 @@ import { sfx } from '../util/sfx.js';
 import { portrait } from './portrait.js';
 import { ITEMS } from '../../../shared/items.js';
 import { SKILLS, levelProgress } from '../../../shared/skills.js';
-import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, LANDS, EXTENT, SPAWNS, pathSegments, doorPoint, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
+import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, LANDS, EXTENT, SPAWNS, STONES, pathSegments, doorPoint, placeAt, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import { Panels } from './panels.js';
+import { WorldMap, tierLabel } from './worldmap.js';
 import { glyph, coin } from './glyphs.js';
 import { newFight, stepFight, FISH_TICK } from '../../../shared/fishing.js';
 
@@ -31,6 +32,7 @@ export class Hud {
     this.el = h('div.hud');
     root.append(this.el);
     this.panels = new Panels(this);
+    this.worldMap = new WorldMap(this);
     this.#build();
     this.#bindNet();
   }
@@ -51,11 +53,15 @@ export class Hud {
     const online = h('div.pill.online', { on: { click: () => this.panels.open('townhall', { tab: 'online' }) } }, h('span.dot'), this.onlineEl, ' here');
     this.chanEl = h('span.muted', '');
     this.mm = h('canvas', { width: 256, height: 256 });
-    const minimap = h('div.minimap', this.mm);
+    const minimap = h('div.minimap', { title: 'World map (M)', on: { click: () => this.worldMap.toggle() } }, this.mm);
     const muteIcon = () => this.muteBtn.replaceChildren(glyph(sfx.muted ? 'mute' : 'sound', '20px'));
     this.muteBtn = h('button.pill', { 'aria-label': 'Sound on/off', style: { padding: '8px 10px', color: 'var(--gold)' }, on: { click: () => (sfx.toggle(), muteIcon()) } });
     muteIcon();
-    this.el.append(h('div.topbar', chip, h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } }, gold, online), h('div.spacer'), this.muteBtn, minimap));
+    const mapBtn = h('button.pill', { 'aria-label': 'World map', title: 'World map (M)', style: { padding: '8px 10px', color: 'var(--gold)' }, on: { click: () => (sfx.tap(), this.worldMap.toggle()) } }, glyph('map', '20px'));
+    const col = (...k) => h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } }, ...k);
+    this.el.append(h('div.topbar', chip, col(gold, online), h('div.spacer'), col(this.muteBtn, mapBtn), minimap));
+    this.banner = h('div.region-banner.hidden');
+    this.el.append(this.banner);
 
     this.questEl = h('div.quest.hidden');
     this.arrowIcon = h('div.ga-icon', h('i'));
@@ -68,10 +74,11 @@ export class Hud {
     this.dock = h(
       'div.dock',
       dockBtn('bag', 'Bag', () => this.panels.open('bag')),
-      dockBtn('anvil', 'Craft', () => this.travel('workshop')),
-      dockBtn('scales', 'Market', () => this.travel('market')),
+      // These open straight away; the panel has a "Walk there" button too.
+      dockBtn('anvil', 'Craft', () => this.openPlace('workshop')),
+      dockBtn('scales', 'Market', () => this.openPlace('market')),
       dockBtn('shop', 'Shop', () => this.game?.enterShop(this.myId), this.shopBadge),
-      dockBtn('castle', 'Town', () => this.travel('townhall')),
+      dockBtn('castle', 'Town', () => this.openPlace('townhall')),
     );
     // Inside a shop the dock changes: leave, bag, the ledger (yours), other shops.
     this.ledgerBtn = dockBtn('scroll', 'Ledger', () => this.panels.open('ledger'));
@@ -180,6 +187,7 @@ export class Hud {
     this.hpFill.style.width = `${Math.round((100 * this.me.hp) / this.me.maxHp)}%`;
     if (m.equip && this.game?.me) this.game.me.av.setEquip(m.equip);
     this.panels.refresh();
+    this.worldMap.refresh();
   }
 
   setOnline(n) {
@@ -291,6 +299,12 @@ export class Hud {
   openBuilding(action) {
     this.panels.open(action);
   }
+  // A building's panel, right now, wherever you are (no walk).
+  openPlace(id) {
+    if (this.game?.battle) return this.toast("You're in a battle!", 'err');
+    const b = BUILDINGS.find((x) => x.id === id);
+    if (b) this.panels.open(b.action);
+  }
   openProfile(id) {
     this.panels.open('profile', { id });
   }
@@ -360,6 +374,7 @@ export class Hud {
     if (this.mapT > 0.15) {
       this.mapT = 0;
       this.#drawMap();
+      this.#updatePlace();
     }
     // Quest guide: in-world beacon + path trail, and an edge arrow when off-screen.
     const tg = this.game && !this.game.battle && !this.game.fishing ? this.#questTarget() : null;
@@ -607,6 +622,8 @@ export class Hud {
     };
     for (const mv of this.game.mobs.values()) if (mv.state !== 'dead') dot(mv.x, mv.z, MONSTERS[mv.type].boss ? '#a868e0' : '#e2574c', 5);
     for (const pv of this.game.players.values()) if (!pv.isMe) dot(pv.x, pv.z, '#ffffff', 7), dot(pv.x, pv.z, '#3b82c4', 5);
+    const known = new Set(this.me.stones ?? []);
+    for (const st of STONES) dot(st.x, st.z, '#14202a', 8), dot(st.x, st.z, known.has(st.id) ? '#8fe8ff' : '#9a9a9a', 5.5);
     x.restore();
     // Player arrow in the centre, pointing where the camera faces.
     x.save();
@@ -626,9 +643,43 @@ export class Hud {
     x.restore();
   }
 
+  // ── Region banner ──────────────────────────────────────────────────
+  // A title across the screen as you walk into a new region, and a smaller
+  // one for named zones inside it. A few metres of slack at the edges stop
+  // it flickering when you stand on a border.
+  #updatePlace() {
+    const g = this.game;
+    if (!g?.me || g.room) return;
+    const p = g.myPos();
+    const raw = placeAt(p.x, p.z);
+    const keep = (old, now) => (old && old !== now && Math.hypot(p.x - old.x, p.z - old.z) < old.r + 3 ? old : now);
+    const prev = this.place;
+    const zone = keep(prev?.zone, raw.zone);
+    const region = keep(prev?.region, raw.region);
+    this.place = { zone, region };
+    if (g.battle) return;
+    if (region && region !== prev?.region) {
+      const kind = { town: 'Town', wild: 'Wild lands', outlaw: 'Outlaw zone · full-loot PvP' }[region.kind];
+      this.showBanner(region.name, [tierLabel(region.tier), kind].filter(Boolean).join(' · '));
+    } else if (zone && zone !== prev?.zone) {
+      const what = { forest: 'Woodcutting', quarry: 'Mining', garden: 'Herb gathering', lake: 'Fishing', wilds: 'Monsters roam here' }[zone.kind ?? zone.id];
+      this.showBanner(zone.label, what || region?.name || '', true);
+    }
+  }
+  showBanner(title, sub, small = false) {
+    const b = this.banner;
+    b.className = 'region-banner' + (small ? ' small' : '');
+    b.replaceChildren(h('div.rb-rule'), h('div.rb-title', title), sub ? h('div.rb-sub', sub) : null, h('div.rb-rule'));
+    void b.offsetWidth; // restart the animation
+    b.classList.add('show');
+    clearTimeout(this.bannerT);
+    this.bannerT = setTimeout(() => b.classList.add('hidden'), 3600);
+  }
+
   // ── Battle UI ──────────────────────────────────────────────────────
   battleStart(b, def) {
     this.battleDef = def;
+    this.worldMap.close();
     this.dock.classList.add('hidden');
     this.chat.classList.add('hidden');
     this.questEl.style.visibility = 'hidden';

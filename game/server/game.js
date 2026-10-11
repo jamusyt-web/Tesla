@@ -6,6 +6,7 @@ import { MONSTERS, heroStats, damage } from '../shared/monsters.js';
 import {
   NODES, SPAWNS, buildColliders, NavGrid, NODE_TYPES, stepPath,
   INTERACT_RANGE, FISH_RANGE, SPAWN, isWalkable, WORLD_RADIUS, isDeepSpot, SWING_FLOOR, isPerfectSwing,
+  stoneById, stoneNear, stoneFront, travelFee,
 } from '../shared/world.js';
 import { rollFish, fishingGear, fightRating, replayFight, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
 import { GameError, fail } from './db.js';
@@ -30,6 +31,7 @@ const CHAT_MAX = 140;
 // INTEREST_DROP), so a big world doesn't flood every client with every mob.
 const INTEREST = 100;
 const INTEREST_DROP = 125;
+const TRAVEL_COOLDOWN_MS = 3000;
 
 // Collision and navigation for the current map (rebuilt when the map changes).
 const buildStatic = () => {
@@ -100,20 +102,22 @@ class Channel {
     for (const c of this.players.values()) if (c !== except) c.sendRaw(data);
   }
 
-  add(c) {
-    // Don't materialise inside another hero.
-    const e = c.ent;
-    const crowded = (x, z) => [...this.players.values()].some((o) => !o.room && Math.hypot(o.ent.x - x, o.ent.z - z) < 1.3);
-    for (let k = 0; k < 40 && crowded(e.x, e.z); k++) {
+  // A free spot at or near (x, z), so nobody materialises inside another hero.
+  freeSpot(x, z, except = null) {
+    const crowded = (px, pz) => [...this.players.values()].some((o) => o !== except && !o.room && Math.hypot(o.ent.x - px, o.ent.z - pz) < 1.3);
+    for (let k = 0; k < 40 && crowded(x, z); k++) {
       const a = Math.random() * Math.PI * 2;
       const d = 1.5 + Math.random() * 3.5;
-      const x = e.x + Math.cos(a) * d;
-      const z = e.z + Math.sin(a) * d;
-      if (isWalkable(x, z, STATIC.col) && !crowded(x, z)) {
-        e.x = x;
-        e.z = z;
-      }
+      const nx = x + Math.cos(a) * d;
+      const nz = z + Math.sin(a) * d;
+      if (isWalkable(nx, nz, STATIC.col) && !crowded(nx, nz)) [x, z] = [nx, nz];
     }
+    return [x, z];
+  }
+
+  add(c) {
+    const e = c.ent;
+    [e.x, e.z] = this.freeSpot(e.x, e.z, c);
     e.path = null;
     this.players.set(c.hero.id, c);
     c.ch = this;
@@ -158,8 +162,10 @@ class Channel {
 
   tick(now, dt) {
     this.tickNo++;
+    const attune = this.tickNo % 10 === 0; // twice a second is plenty
     for (const c of this.players.values()) {
       const e = c.ent;
+      if (attune && !c.room) c.attuneNearby();
       if (e.path) {
         stepPath(e, dt);
         if (!e.path && e.act === 'walk') e.act = 'idle';
@@ -260,6 +266,15 @@ class Channel {
       }
       if (p.length || m.length || add.length || rm.length) c.send({ t: 's', p, m, ...(add.length ? { add } : {}), ...(rm.length ? { rm } : {}) });
     }
+  }
+
+  // c was moved by fast travel: everyone sees them vanish and reappear (no
+  // sliding across the map), and they get a fresh view of where they are now.
+  teleported(c, from) {
+    const e = c.ent;
+    e.lastSnap = '';
+    this.#townOnly({ t: 'tp', id: c.hero.id, x: q2(e.x), z: q2(e.z), rot: q2(e.rot), from: { x: q2(from.x), z: q2(from.z) } });
+    c.send(this.fullSnapshot(c));
   }
 
   // Everything about the town, for someone stepping back out of a shop.
@@ -520,7 +535,7 @@ class Client {
   }
   publicSelf() {
     const shop = this.game.shops.info(this.hero.id);
-    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
+    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, stones: this.hero.stones.filter((id) => stoneById(id)), shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
   }
 
   pushInventory() {
@@ -538,6 +553,13 @@ class Client {
     this.game.heroes.setTutorial(this.hero, i + 1);
     this.send({ t: 'tutorial', step: i + 1, done: step.id, reward: step.reward });
     this.pushInventory();
+  }
+
+  // Standing at a waystone you haven't been to: attune to it.
+  attuneNearby() {
+    const st = stoneNear(this.ent.x, this.ent.z);
+    if (!st || !this.game.heroes.attune(this.hero, st.id)) return;
+    this.send({ t: 'attuned', id: st.id, name: st.name });
   }
 }
 
@@ -666,6 +688,38 @@ export class Game {
     c.ch.broadcast({ t: 'show', p: c.publicInfo() }, c);
     c.send(c.ch.fullSnapshot(c));
     return { x: q2(c.ent.x), z: q2(c.ent.z) };
+  }
+
+  // ── Fast travel ────────────────────────────────────────────────────
+  // From the waystone you're standing at to another you've attuned to, for a fee.
+  travel(c, to, now = Date.now()) {
+    if (c.room) fail('Leave the shop first.');
+    if (c.battle) fail("You can't travel in the middle of a battle!");
+    if (c.craft) fail('Finish your craft first.');
+    const dest = stoneById(to);
+    if (!dest) fail('No such waystone.');
+    const here = stoneNear(c.ent.x, c.ent.z);
+    if (!here) fail('Walk up to a waystone first.');
+    c.attuneNearby(); // just arrived and travelling straight on
+    if (here.id === dest.id) fail("You're already here.");
+    if (!c.hero.stones.includes(dest.id)) fail(`You haven't been to ${dest.name} yet. Walk there once to attune to it.`);
+    if (now - (c.lastTravel || 0) < TRAVEL_COOLDOWN_MS) fail('The stone is still humming. Try again in a moment.');
+    const fee = travelFee(here, dest);
+    if (this.heroes.gold(c.hero.id) < fee) fail(`Travelling to ${dest.name} costs ${fee} gold.`);
+    const [fx, fz] = stoneFront(dest);
+    const open = isWalkable(fx, fz, STATIC.col) ? [fx, fz] : STATIC.nav.nearestOpen(fx, fz);
+    if (!open) fail("That waystone's way is blocked.");
+    this.heroes.addGold(c.hero.id, -fee);
+    c.cancelFishing();
+    const e = c.ent;
+    const from = { x: e.x, z: e.z };
+    [e.x, e.z] = c.ch.freeSpot(open[0], open[1], c);
+    Object.assign(e, { path: null, act: 'idle', rot: dest.rot ?? 0 });
+    c.lastTravel = now;
+    this.heroes.savePos(c.hero.id, e.x, e.z);
+    c.ch.teleported(c, from);
+    c.pushInventory();
+    return { to: dest.id, fee, x: q2(e.x), z: q2(e.z) };
   }
 
   // Everyone who can see/hear c: their channel plus whoever is in their shop room.
@@ -979,6 +1033,7 @@ const HANDLERS = {
     if (c.battle || c.craft) return;
     if ((m.v === 'room') !== !!c.room) return; // a stale move from the other view
     if (now - (c.lastMove || 0) < 80) return; // pathfinding is the expensive bit; cap it
+    if (now - (c.lastTravel || 0) < 600) return; // sent before the client saw it travel: don't walk back
     c.lastMove = now;
     const x = num(m.x);
     const z = num(m.z);
@@ -1052,6 +1107,7 @@ const RPC = {
   'craft.cancel': (g, c, a) => g.crafting.cancel(c, a),
   'craft.quick': (g, c, a) => g.crafting.quick(c, a),
   npcSell: (g, c, a) => g.npcSell(c, a.item, a.qty),
+  travel: (g, c, a) => g.travel(c, String(a.to ?? '')),
   equip: (g, c, a) => g.equip(c, a.item),
   avatar(g, c, a) {
     g.heroes.setAvatar(c.hero, a.avatar);

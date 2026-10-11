@@ -22,6 +22,11 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
 - **Accounts & invites**: invite-only signup, and every player can create 5 invites (no admins). On first boot the server prints a founder invite code; `npm run invite` prints a fresh one any time.
 - **Character creator**: a full-body, stylised 3D hero with skin, 7 hairstyles, hair and eye colors, eye styles, 5 outfits, pants, 7 hats, and back items (cape, backpack, wings). Costumes are data in `shared/avatar.js`, so adding one is a single entry. You can re-customize any time from Bag → Hero.
 - **3D town, full-screen**: tap or click to move with A* pathfinding. WASD also works on PC. Drag to rotate, pinch or scroll to zoom. The camera follows you, buildings fade when they block your view, and you see an x-ray silhouette when you're behind trees. The town has a minimap, a fountain, a lake with a dock, a forest, a quarry, a herb garden, the Wilds, and butterflies.
+- **Getting around**:
+  - **Instant menus**: the Craft, Market and Town buttons open their menus straight away, wherever you are. Each one has a **Walk there** button if you'd rather go in person (tapping the building itself still walks you over).
+  - **World map**: press **M**, or tap the minimap or the map button. It shows every land, town, path and monster camp, where you and the other heroes are, and every waystone. Drag to pan, scroll or pinch to zoom. Tap a spot to **walk there**, or a waystone to travel.
+  - **Waystones (fast travel)**: glowing stones around the world. Walk up to one to **attune** to it. Then, standing at any waystone, open the map and travel to any other one you've attuned to, for a small gold fee that grows with distance. Hearthvale has two: Hearthvale Square and Wildwatch, just past the Wilds Gate.
+  - **Region names**: walking into a region shows its name and difficulty tier across the screen (for example *Hearthvale, Tier 1 · Starter · Town*); named areas inside it, like Whisperwood or the Wilds, get a smaller title.
 - **Gathering (Skyblock-style)**:
   - **Trees and rocks**: tap to walk over, then **tap to swing**. A shrinking timing ring shows the rhythm, and a swing right on the beat is a **PERFECT** hit for double damage. The server checks the timing, so it can't be faked.
   - **Node feedback**: each node shows an HP bar, wood chips, falling leaves, sparks and camera shake. Trees topple away from you with a thud, rocks shatter, and both regrow later.
@@ -105,7 +110,7 @@ server/   game.js   channels, 20Hz tick, movement, gathering, fishing, battles, 
 client/   src/game.js       renderer, camera, input, prediction, interpolation
           src/editor/       the world editor (owners only): editor.js, kinds.js
           src/scene/        town, avatar, tools, monsters, particles (three.js, toon-shaded)
-          src/ui/           HUD, menus (bag, workshop, market, shop, town hall), creator
+          src/ui/           HUD, menus (bag, workshop, market, shop, town hall), world map, creator
 scripts/  bots.js (populate the lobby), dev.js, invite.js, admin.js (server owners)
 ```
 
@@ -114,7 +119,8 @@ scripts/  bots.js (populate the lobby), dev.js, invite.js, admin.js (server owne
 Everything placed in the world lives in **`maps/world.json`**: the land itself (`lands`: circles that overlap into any coastline, so you can grow the island, join islands with land bridges, or start a new island far out at sea), buildings, the gate, plazas, fountains, lakes and docks, zones, dirt paths, gatherable nodes, monster camps (`spawns`), and every prop, tree and flower. The server loads it on start and sends it to each player's browser (`/api/map`), so both sides always build the same world. Small scatter (grass tufts, stepping stones, reeds, lily pads) is generated from it automatically.
 
 - **Format:** one entity per line, each with a unique `id`. The fields are documented at the top of `shared/world.js`. A prop's `slot` is a model from `client/src/scene/manifest.js` or a code-drawn kind from `client/src/scene/procprops.js` (`proc_…`).
-- **Regions and tiers:** `regions` lists the towns and areas with a difficulty `tier` (Hearthvale is tier 1, the starter town).
+- **Regions and tiers:** `regions` lists the towns and areas with a difficulty `tier` (Hearthvale is tier 1, the starter town). Their names appear on the world map and across the screen as you walk in.
+- **Waystones:** `stones` lists the fast-travel stones (`name`, position, and `rot`, the way it faces: travellers arrive in front of it). Maps made before waystones existed get Hearthvale's two automatically.
 - **Checks:** a broken map stops the server with a list of exactly what's wrong (duplicate ids, unknown node types or monsters, missing coordinates).
 - **Your own copy:** a map saved to `data/maps/world.json` (next to your saves) is used instead, unless the game ships a map with a higher `rev`.
 
@@ -124,10 +130,10 @@ The first account made on a server is its **owner**. Owners get an **Edit the wo
 
 - **Look around:** drag empty ground to pan, right-drag to turn the view, scroll (or pinch) to zoom. WASD and the arrow keys also pan.
 - **Select and move:** click something to select it; its details appear in the panel on the right, where you can type exact values. Drag it to move it. Big areas (zones, monster camps, regions, lakes) need a click first, so you can still pan across them. Clicking the same spot again picks the next thing underneath.
-- **Place:** open **Place**, pick something (plants, town props, resource nodes, monster camps, cottages, docks, fountains, plazas, lakes, zones, regions), then click the world. Plants and nodes keep placing until you press Esc. *Natural variety* gives plants a random turn and size.
+- **Place:** open **Place**, pick something (plants, town props, resource nodes, monster camps, cottages, waystones, docks, fountains, plazas, lakes, zones, regions), then click the world. Plants and nodes keep placing until you press Esc. *Natural variety* gives plants a random turn and size.
 - **Paths:** **Path**, click points, then double-click the last point (or press Enter). Select a path to drag its points, add more, or change its width.
 - **Keys:** Q / E turn the selection, Delete removes it, Ctrl+D copies it, Ctrl+Z / Ctrl+Y undo and redo, G turns grid snapping on and off, Ctrl+S saves.
-- **Saving:** **Save** checks the map, then checks that every resource node, door and monster camp can still be walked to from the spawn point, and tells you if something is cut off. Saving makes the change live straight away: anyone playing sees "The world was updated" and rejoins the new version a second later. The previous version is kept in `data/maps/backups/` (the last 30 saves).
+- **Saving:** **Save** checks the map, then checks that every resource node, door, monster camp and waystone can still be walked to from the spawn point, and tells you if something is cut off. Saving makes the change live straight away: anyone playing sees "The world was updated" and rejoins the new version a second later. The previous version is kept in `data/maps/backups/` (the last 30 saves).
 - **Drafts:** unsaved edits are kept in your browser; if you close the editor without saving, it offers them back next time.
 - **Export / Import:** **Export** downloads the map as a file, to keep a copy or send it over. **Import** loads one back in (then Save to make it live).
 - **More owners:** `npm run admin -- <username>` (Windows: `npm.cmd run admin -- <username>`) makes someone an owner, `npm run admin -- <username> off` removes them, and `npm run admin` lists the owners.
@@ -142,8 +148,8 @@ The big plan, one step at a time:
 2. **In-game map editor** (done): owners place, move and delete anything, draw paths, set monster camps, and save it live.
 3. **A much bigger world**, in three parts:
    - **3a, the engine** (done): land of any shape, collision checks that only look nearby, pathfinding that works out the map a tile at a time, the world drawn in 96 m tiles that load around the camera and drop behind, and monsters only sent to players within about 100 m.
-   - **3b, travel**: fast-travel stones between towns, a full world map, region names as you enter.
-   - **3c, editor extras** for building big: jump anywhere, place fast-travel stones.
+   - **3b, travel** (done): waystones you attune to by visiting, then fast-travel between for a gold fee; a full world map (M); region names as you enter. The Craft, Market and Town buttons also open their menus instantly now.
+   - **3c, editor extras** for building big: jump anywhere on the map (waystones can already be placed in the editor).
 4. **Four or five major towns**, from the starter town up through harder ones, each with its own biome, resources, monsters and market (prices differ between towns, so hauling goods pays).
 5. **Personal land and building** (Skyblock-style): your own plot with buildings that make money over time, using the editor's placement tools.
 6. **An outlaw zone**: opt-in full-loot PvP for what you carry, bandit NPCs, and the best rewards in the game.

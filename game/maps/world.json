@@ -167,6 +167,10 @@
     {"id":"spawn_skeleton","monster":"skeleton","x":16,"z":-86,"r":6,"count":3},
     {"id":"spawn_bear","monster":"bear","x":-28,"z":-78,"r":6,"count":2}
   ],
+  "stones": [
+    {"id":"stone_square","name":"Hearthvale Square","x":6.2,"z":5.2,"rot":-1.76},
+    {"id":"stone_wildwatch","name":"Wildwatch","x":3,"z":-40.5,"rot":3.14}
+  ],
   "props": [
     {"id":"p0","slot":"bench_park","x":3.97,"z":8.52,"rot":-2.705,"r":0.8},
     {"id":"p1","slot":"bench_park","x":-4.41,"z":8.3,"rot":2.653,"r":0.8},
