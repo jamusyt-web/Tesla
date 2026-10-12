@@ -162,6 +162,13 @@ The Workshop's five crafting stations and the four main buildings (Workshop, Mar
 
 ## Roadmap (next phases)
 
+**What we're aiming for** (the test for every step):
+
+- **A big world worth exploring**: expansive and good-looking, big enough that there's always somewhere new to go, with each place feeling different.
+- **Runs well on phones**: smooth on a mid-range phone, not just a PC. Anything that costs frames on mobile gets a cheaper version there.
+- **Always something to do**: whenever you open the game there's a clear next thing worth doing, whether that's a goal, a job, a fight, a craft, a trade or a place to explore. Never "now what?".
+- **Content that lasts**: enough places, monsters, gear, recipes, rare finds, collections and long goals that people want to keep playing for a long time.
+
 The big plan, one step at a time:
 
 1. **Map as data** (done): the world lives in `maps/world.json` instead of code.
@@ -170,7 +177,7 @@ The big plan, one step at a time:
    - **3a, the engine** (done): land of any shape, collision checks that only look nearby, pathfinding that works out the map a tile at a time, the world drawn in 96 m tiles that load around the camera and drop behind, and monsters only sent to players within about 100 m.
    - **3b, travel** (done): waystones you attune to by visiting, then fast-travel between for a gold fee; a full world map (M); region names as you enter. The Craft, Market and Town buttons also open their menus instantly now.
    - **3c, editor extras** (done): a whole-world map in the editor (click to jump there), go-to lists for regions, waystones and buildings, and owner teleport in the game.
-4. **Four or five major towns**, from the starter town up through harder ones, each with its own biome, resources, monsters and market (prices differ between towns, so hauling goods pays).
+4. **The wider world** (in progress): four or five major towns, from the starter town up through harder ones. Each has its own biome and look, resources, monsters, recipes, dungeon and market (prices differ between towns, so hauling goods pays). The land between them is worth crossing, and there's a steady stream of things to do at every level.
 5. **Personal land and building** (Skyblock-style): your own plot with buildings that make money over time, using the editor's placement tools.
 6. **An outlaw zone**: opt-in full-loot PvP for what you carry, bandit NPCs, and the best rewards in the game.
 7. **Procedurally generated dungeons** (done): the Hollow Crypt, a fresh layout every run, solo or with a party (parties, ready checks), harder and better-paying for groups, with tiers, daily twists and a weekly leaderboard. More dungeons can be added as data in `shared/dungeon.js`.
