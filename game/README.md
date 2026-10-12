@@ -57,6 +57,16 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
   - **Delivering**: hand in some or all of what's wanted and get paid on the spot, less the usual 4% tax. The goods go straight into the poster's bag, even while they're offline.
   - **Refunds**: cancel a job, or let it run out, and you get back the gold for whatever wasn't delivered.
 - **Co-op battles in the world**: monsters roam the Wilds (slimes, wolves, goblins, and a Ruinwarden Golem boss). Tap one to start a turn-based fight right where it stands. **Anyone nearby can tap the same monster to join** (up to 4). Each round has a 12 s timer and the actions are Attack, Special (charges up), Defend, Item (potions) and Flee. Other players can watch the fight happen.
+- **Dungeons: the Hollow Crypt**: a crypt door in the Wilds (marked with a tombstone on the map) leads to a new crypt every run, built from scratch by the server. Go in alone or with your party.
+  - **The crypt**: an Entry Hall, a chain of halls to the Pale Count's chamber, side halls, a Shrine and a locked Vault. Each room's monsters fight you as one pack, one after another, and its gates open when the room is clear. Rooms appear as you explore them. Spike traps guard the way to the Shrine and the Vault.
+  - **No health comes back on its own** down there. The brazier in the Entry Hall gives each hero one full heal (Last Light), praying at the Shrine heals the whole party once, and clearing a room gives back a little. Potions work outside fights too.
+  - **The elite** (a bigger monster with one or two powers: Armored, Frenzied, Vampiric, Thorny) carries the **Bone Key** to the Vault. **The Pale Count** gathers a Blood Mist that hits everyone the round after he warns you, so Defend.
+  - **Losing**: if everyone in a fight is knocked out, you all wake in the Entry Hall at half health and the monsters you'd already beaten stay down. The fourth wipe ends the run (you keep what you found).
+  - **Loot**: monsters drop gold and Grave Dust as you beat them. The Vault and the boss chest give every hero their own share: gold, potions, ore, gems and a chance at crypt gear (Wraithsteel Blade, Barrow Plate, Ghostlight Amulet), which can also be forged from Grave Dust. Your first clear of each tier each day gives double treasure.
+  - **Tiers, records and the day's twist**: clearing Tier 1 opens Tier 2, then Tier 3 (tougher monsters, better loot). Every day has a twist (Blood Moon: harder hits and more treasure; Restless Dead; Brittle Bones). Best times are kept per party size, and **This week's crypt** is the same layout for everyone, with a leaderboard.
+  - **Groups are harder, and pay more**: monsters have more health and act once for every hero standing, groups of three or four get more halls and nastier elites, and every hero earns more gold and treasure. Tuned with a simulator (`node scripts/dungeon-balance.js`): equal heroes clear about 90% of runs alone, 75% as two, 60% as three or four.
+  - **Underground controls**: the camera turns in quarter turns (drag sideways, or Q / R) and the near walls drop away so you can always see in. Tap things to use them, or use the round button (Rest, Pray, Open, Join your friend's fight, Leave). The Map button shows the crypt so far.
+- **Parties**: invite up to three friends from the Town Hall's Online list or their profile. Your party shows at the side of the screen with everyone's health. The leader starts a **ready check** at the crypt door and everyone who says yes goes in together; anyone who missed it can still join from the Party panel until the boss falls. Fights inside pull in everyone standing in the same room. A dropped connection keeps your place in the run for 3 minutes.
 - **Social**: channel chat with speech bubbles, emotes (wave, dance, cheer, heart, sit), player profiles, online list, leaderboards, and a shop directory.
 - **Onboarding quest**: chop → craft → fight → stock your shop, with gold rewards. A light pillar marks the target, glowing dots trace the walking path, an arrow around your hero points the way with the distance, and a **Take me there** button walks you over.
 
@@ -105,6 +115,8 @@ maps/     world.json  the world map: everything placed in the world (see below)
 shared/   rules & data used by BOTH server and client (items, recipes, skills,
           monsters, avatar options, world rules + the map loader, A* navigation)
 server/   game.js   channels, 20Hz tick, movement, gathering, fishing, battles, chat
+          channel.js a channel (one live copy of town) + the turn-based Battle
+          dungeons.js dungeon runs (a run is a private channel)   party.js parties
           market.js order book + matching + escrow     jobs.js bulletin board
           shop.js   player shops: displays, till, NPC customer simulation
           rooms.js  shop interiors (who's inside, movement)
@@ -113,9 +125,10 @@ server/   game.js   channels, 20Hz tick, movement, gathering, fishing, battles, 
           app.js    HTTP API + WebSocket upgrade        index.js entry point
 client/   src/game.js       renderer, camera, input, prediction, interpolation
           src/editor/       the world editor (owners only): editor.js, kinds.js
-          src/scene/        town, avatar, tools, monsters, particles (three.js, toon-shaded)
+          src/scene/        town, dungeon, avatar, tools, monsters, particles (three.js, toon-shaded)
           src/ui/           HUD, menus (bag, workshop, market, shop, town hall), world map, creator
-scripts/  bots.js (populate the lobby), dev.js, invite.js, admin.js (server owners)
+scripts/  bots.js (populate the lobby), dev.js, invite.js, admin.js (server owners),
+          dungeon-balance.js (simulates dungeon runs with the real numbers)
 ```
 
 ## The world map
@@ -124,6 +137,7 @@ Everything placed in the world lives in **`maps/world.json`**: the land itself (
 
 - **Format:** one entity per line, each with a unique `id`. The fields are documented at the top of `shared/world.js`. A prop's `slot` is a model from `client/src/scene/manifest.js` or a code-drawn kind from `client/src/scene/procprops.js` (`proc_…`).
 - **Regions and tiers:** `regions` lists the towns and areas with a difficulty `tier` (Hearthvale is tier 1, the starter town). Their names appear on the world map and across the screen as you walk in.
+- **Dungeon entrances:** `entrances` lists the crypt doors (`kind`, position, and `rot`, the way the door faces). The dungeons themselves aren't in the map: the server builds a new one for every run (`shared/dungeon.js`).
 - **Waystones:** `stones` lists the fast-travel stones (`name`, position, and `rot`, the way it faces: travellers arrive in front of it). Maps made before waystones existed get Hearthvale's two automatically.
 - **Checks:** a broken map stops the server with a list of exactly what's wrong (duplicate ids, unknown node types or monsters, missing coordinates).
 - **Your own copy:** a map saved to `data/maps/world.json` (next to your saves) is used instead, unless the game ships a map with a higher `rev`.
@@ -136,7 +150,7 @@ The first account made on a server is its **owner**. Owners get an **Edit the wo
 - **Jump anywhere:** **Map** (or M) shows the whole world from above, the same map players see; click anywhere to jump there. The **World** tab also lists every region, waystone and main building: click one to go to it.
 - **Owner teleport in the game:** owners get a **Teleport (owner)** button on the world map (tap any spot on land, or a waystone), free, to check their building work up close.
 - **Select and move:** click something to select it; its details appear in the panel on the right, where you can type exact values. Drag it to move it. Big areas (zones, monster camps, regions, lakes) need a click first, so you can still pan across them. Clicking the same spot again picks the next thing underneath.
-- **Place:** open **Place**, pick something (plants, town props, resource nodes, monster camps, cottages, waystones, docks, fountains, plazas, lakes, zones, regions), then click the world. Plants and nodes keep placing until you press Esc. *Natural variety* gives plants a random turn and size.
+- **Place:** open **Place**, pick something (plants, town props, resource nodes, monster camps, cottages, waystones, dungeon entrances, docks, fountains, plazas, lakes, zones, regions), then click the world. Plants and nodes keep placing until you press Esc. *Natural variety* gives plants a random turn and size.
 - **Paths:** **Path**, click points, then double-click the last point (or press Enter). Select a path to drag its points, add more, or change its width.
 - **Keys:** Q / E turn the selection, Delete removes it, Ctrl+D copies it, Ctrl+Z / Ctrl+Y undo and redo, G turns grid snapping on and off, Ctrl+S saves.
 - **Saving:** **Save** checks the map, then checks that every resource node, door, monster camp and waystone can still be walked to from the spawn point, and tells you if something is cut off. Saving makes the change live straight away: anyone playing sees "The world was updated" and rejoins the new version a second later. The previous version is kept in `data/maps/backups/` (the last 30 saves).
@@ -159,7 +173,7 @@ The big plan, one step at a time:
 4. **Four or five major towns**, from the starter town up through harder ones, each with its own biome, resources, monsters and market (prices differ between towns, so hauling goods pays).
 5. **Personal land and building** (Skyblock-style): your own plot with buildings that make money over time, using the editor's placement tools.
 6. **An outlaw zone**: opt-in full-loot PvP for what you carry, bandit NPCs, and the best rewards in the game.
-7. **Procedurally generated dungeons**: a fresh layout every run, played solo or with a party. Group runs are harder (more and tougher monsters, stronger bosses) and pay better loot to match.
+7. **Procedurally generated dungeons** (done): the Hollow Crypt, a fresh layout every run, solo or with a party (parties, ready checks), harder and better-paying for groups, with tiers, daily twists and a weekly leaderboard. More dungeons can be added as data in `shared/dungeon.js`.
 8. **A bulletin board** for paid jobs (done): post a task you'd rather not do ("collect 50 iron ore", "craft 10 health potions") with a gold reward. The gold is held when you post and paid to whoever hands in the goods.
 
 Also planned:

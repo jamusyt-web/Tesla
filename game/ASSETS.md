@@ -61,6 +61,17 @@ The Wilds gate is assembled from castle-kit pieces the same way.
 
 - **Replacing a building:** to use a single model of your own instead, have `buildModular()` return your model for that building id. Keep it inside the building's footprint (`w` × `d` in `maps/world.json`), because that footprint is what players collide with.
 
+### Dungeons
+
+Dungeon runs are built from Kenney's **Modular Dungeon Kit** (`client/public/models/modular-dungeon/`) by `client/src/scene/dungeon.js`, on a 4 m grid: `template-floor` (plus two detail variants) for every floor cell, `template-wall` / `template-wall-detail-a` on every floor edge that meets rock, `template-wall-corner` (scaled up) in the inside corners, `gate-metal-bars` in each doorway a room's monsters guard (its `gate` part is the bars that sink into the floor), `gate` as the open arch at the far end of each corridor, and `stairs` (squashed into one cell) as the way out.
+
+- **Pivots matter:** these pieces are loaded *raw* (no re-centering), because the wall's pivot sits on its face and the floor tile is centred. A replacement must keep the same size and pivot: a wall is 4 m wide with its face on z = 0 and its body behind it (towards −z), about 4.15 m tall.
+- **No ink outlines** on the kit pieces (`outline: false`): the walls are open panels, and an outline shell would cover their faces.
+- **Colours:** the kit's lavender stone is warmed to grey stone with a `remap` (`CRYPT_STONE` in the manifest); the graveyard fire baskets and lanterns get dark iron and a glowing flame (`CRYPT_IRON`).
+- **Dressing** uses the `dg_*` slots (brazier, altar, chests, coffins, pillars, urns, banners, rubble, traps, lanterns), mostly from the Graveyard Kit and Mini Dungeon. The generator in `shared/dungeon.js` decides where each goes; the manifest decides what it looks like.
+- **Monsters:** `mob_thrall` (graveyard zombie), `mob_crypt_skeleton`, `mob_crypt_wisp` (the ghost, tinted blue) and `mob_pale_count` (the vampire, the boss).
+- **The crypt door** in the overworld is `crypt_base` + `crypt_roof` + `crypt_door` (Graveyard Kit `crypt-large`), with `dg_fire` braziers and `crypt_grave` gravestones, built in `client/src/scene/town.js`.
+
 ## Re-importing asset packs
 
 The third-party models were copied in with:
@@ -83,4 +94,4 @@ This needs Playwright, as a dev tool only.
 
 The current packs are by Kenney (kenney.nl) and are **CC0**: free for commercial use, changes allowed, no credit required. We credit them anyway in `client/public/models/CREDITS.md`.
 
-The HUD icons in `client/public/ui/icons/` come from [game-icons.net](https://game-icons.net) (by Lorc, Delapouite and contributors) under **CC BY 3.0**, which requires credit. The credit line sits at the bottom of the Town Hall panel; keep it if you add or swap icons. To add one, take its SVG (any colour; the game recolours it), save it as `client/public/ui/icons/<name>.svg` and use `glyph('<name>')` from `client/src/ui/glyphs.js`.
+The HUD icons in `client/public/ui/icons/` come from [game-icons.net](https://game-icons.net) (by Lorc, Delapouite and contributors) under **CC BY 3.0**, which requires credit. The credit line sits at the bottom of the Town Hall panel; keep it if you add or swap icons. To add one, take its SVG (any colour; the game recolours it), save it as `client/public/ui/icons/<name>.svg` and use `glyph('<name>')` from `client/src/ui/glyphs.js`. (The `key`, `crypt`, `stairs` and `fire` icons were drawn for Hearthvale itself.)

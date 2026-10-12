@@ -1,7 +1,8 @@
 // Everything the world editor can place and edit, one entry per map list.
 // Each kind says how to show it in the inspector (fields), where you can click
 // it (hit), what a new one looks like (make), and how to label it.
-import { NODE_TYPES } from '../../../shared/world.js';
+import { NODE_TYPES, CRYPT } from '../../../shared/world.js';
+import { DUNGEONS } from '../../../shared/dungeon.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import { MODELS } from '../scene/manifest.js';
 import { PROC_BUILDERS } from '../scene/procprops.js';
@@ -97,6 +98,14 @@ export const KINDS = {
     hit: () => ({ r: 1.2 }),
     fields: () => [{ key: 'name', label: 'Name', type: 'text' }, ...XZ, { key: 'rot', label: 'Faces (°)', type: 'deg', help: 'Travellers arrive in front of it' }],
   },
+  entrances: {
+    label: 'Dungeon entrance',
+    prefix: 'crypt',
+    order: 2,
+    name: (e) => DUNGEONS[e.kind]?.name ?? 'Dungeon',
+    hit: () => ({ w: CRYPT.w, d: CRYPT.d }),
+    fields: () => [{ key: 'kind', label: 'Dungeon', type: 'select', options: Object.entries(DUNGEONS).map(([k, d]) => [k, d.name]) }, ...XZ, { key: 'rot', label: 'Door faces (°)', type: 'deg', help: 'Heroes go in at the door' }],
+  },
   fountains: { label: 'Fountain', prefix: 'fountain', order: 3, name: () => 'Fountain', hit: (e) => ({ r: e.r }), fields: () => [...XZ, num('r', 'Radius', 0.1, { min: 1.5, max: 6 })] },
   docks: { label: 'Dock', prefix: 'dock', order: 3, name: () => 'Dock', hit: (e) => ({ w: e.w, d: e.d }), fields: () => [...XZ, num('w', 'Width', 0.5, { min: 2 }), num('d', 'Length', 0.5, { min: 3 })] },
   spawns: {
@@ -168,6 +177,7 @@ export const PALETTE = [
     items: [
       { kind: 'buildings', label: 'Cottage', make: (x, z) => ({ x, z, w: 6, d: 5, face: 's', color: '#f1e1b6', roof: '#b4553f', deco: true }) },
       { kind: 'stones', label: 'Waystone (fast travel)', make: (x, z) => ({ name: 'New Waystone', x, z, rot: 0 }) },
+      { kind: 'entrances', label: 'Dungeon entrance (crypt)', make: (x, z) => ({ kind: 'hollow_crypt', x, z, rot: 0 }) },
       { kind: 'docks', label: 'Dock', make: (x, z) => ({ x, z, w: 3, d: 8 }) },
       { kind: 'fountains', label: 'Fountain', make: (x, z) => ({ x, z, r: 2.6 }) },
       { kind: 'plazas', label: 'Plaza', make: (x, z) => ({ x, z, r: 8 }) },

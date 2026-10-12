@@ -6,9 +6,10 @@ import * as assets from '../scene/assets.js';
 import { buildTown, disposeTown } from '../scene/town.js';
 import { Particles } from '../scene/fx.js';
 import { PROC_BUILDERS } from '../scene/procprops.js';
-import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES, stoneFront, STONE_RANGE, EXTENT } from '../../../shared/world.js';
+import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES, stoneFront, STONE_RANGE, EXTENT, entranceFront } from '../../../shared/world.js';
 import { paintWorld } from '../ui/mapdraw.js';
 import { KINDS, KIND_KEYS, PALETTE, show, store } from './kinds.js';
+import { DUNGEONS } from '../../../shared/dungeon.js';
 
 // The world editor: a top-down view of the real world where the server owner
 // places, moves and removes things, then saves the map back to the server.
@@ -342,6 +343,12 @@ class Editor {
       const [x, z] = stoneFront({ rot: 0, ...st });
       const p = nav.nearestOpen(x, z);
       if (!p || Math.hypot(p[0] - st.x, p[1] - st.z) > STONE_RANGE - 1 || !nav.findPath(sp.x, sp.z, p[0], p[1])) out.push(`Waystone ${st.name || st.id}`);
+    }
+    // Dungeon doors: you must be able to walk up to them.
+    for (const e of this.map.entrances ?? []) {
+      const [x, z] = entranceFront({ rot: 0, ...e });
+      const p = nav.nearestOpen(x, z);
+      if (!p || Math.hypot(p[0] - x, p[1] - z) > 4 || !nav.findPath(sp.x, sp.z, p[0], p[1])) out.push(`The door of ${DUNGEONS[e.kind]?.name ?? 'a dungeon'}`);
     }
     return out;
   }
@@ -855,6 +862,8 @@ class Editor {
       h('p.ed-muted', 'Regions are your towns and areas, each with a difficulty tier (1 = starter). Add one from Place → Buildings & areas.'),
       h('div.ed-sec', 'Waystones'),
       ...this.list('stones').map((st) => h('button.ed-item', { on: { click: () => (this.#jump(st), this.select({ kind: 'stones', id: st.id })) } }, st.name || st.id)),
+      h('div.ed-sec', 'Dungeons'),
+      ...this.list('entrances').map((e) => h('button.ed-item', { on: { click: () => (this.#jump(e), this.select({ kind: 'entrances', id: e.id })) } }, KINDS.entrances.name(e))),
       h('div.ed-sec', 'Buildings'),
       ...this.list('buildings').filter((b) => !b.deco).map((b) => h('button.ed-item', { on: { click: () => (this.#jump(b), this.select({ kind: 'buildings', id: b.id })) } }, b.label || b.id)),
       h('div.ed-sec', 'Land'),
