@@ -50,6 +50,7 @@ export const ITEMS = {
   wolf_pelt: { name: 'Wolf Pelt', icon: '🐺', cat: 'resource', value: 15, rarity: 'common' },
   goblin_coin: { name: 'Goblin Coin', icon: '🪙', cat: 'resource', value: 25, rarity: 'uncommon' },
   golem_core: { name: 'Golem Core', icon: '🔮', cat: 'resource', value: 80, rarity: 'rare' },
+  grave_dust: { name: 'Grave Dust', icon: '⚱️', cat: 'resource', value: 18, rarity: 'uncommon' },
 
   // ── Materials ───────────────────────────────────────────
   oak_plank: { name: 'Oak Plank', icon: '🟫', cat: 'material', value: 10, rarity: 'common' },
@@ -87,6 +88,11 @@ export const ITEMS = {
   armor_leather: { name: 'Leather Vest', icon: '🦺', cat: 'gear', slot: 'armor', def: 4, value: 90, rarity: 'uncommon' },
   armor_iron: { name: 'Iron Plate', icon: '🛡️', cat: 'gear', slot: 'armor', def: 10, value: 320, rarity: 'rare' },
   amulet_sapphire: { name: 'Sapphire Amulet', icon: '📿', cat: 'gear', slot: 'trinket', atk: 5, def: 5, hp: 40, value: 520, rarity: 'epic' },
+  // Dungeon gear: crafted from Grave Dust (the Hollow Crypt), now and then found in its chests.
+  // `perk`: Wraithsteel charges your special faster; the Ghostlight Amulet makes healing items heal more.
+  wraith_blade: { name: 'Wraithsteel Blade', icon: '🗡️', cat: 'gear', slot: 'weapon', atk: 19, value: 430, rarity: 'rare', perk: 'quickSpecial', skin: toolSkin('#2a2238', '#9aa6d8', '#dfe6ff', '#8fb0ff') },
+  barrow_plate: { name: 'Barrow Plate', icon: '🛡️', cat: 'gear', slot: 'armor', def: 8, hp: 35, value: 400, rarity: 'rare' },
+  ghostlight_amulet: { name: 'Ghostlight Amulet', icon: '🧿', cat: 'gear', slot: 'trinket', atk: 2, def: 2, hp: 20, value: 320, rarity: 'rare', perk: 'mender' },
 };
 
 // ── Crafted quality: Fine and Masterwork versions of tools and gear ──
@@ -98,7 +104,7 @@ export const QUALITY = [
   { key: 'fine', label: 'Fine', stat: 1.15, speed: 0.95, zone: 0.015, value: 1.4 },
   { key: 'master', label: 'Masterwork', stat: 1.3, speed: 0.9, zone: 0.03, value: 2.2 },
 ];
-export const QUALITY_BASES = ['axe_copper', 'axe_iron', 'axe_gold', 'pick_copper', 'pick_iron', 'pick_gold', 'rod_fine', 'rod_master', 'sword_copper', 'sword_iron', 'sword_gold', 'armor_leather', 'armor_iron', 'amulet_sapphire'];
+export const QUALITY_BASES = ['axe_copper', 'axe_iron', 'axe_gold', 'pick_copper', 'pick_iron', 'pick_gold', 'rod_fine', 'rod_master', 'sword_copper', 'sword_iron', 'sword_gold', 'armor_leather', 'armor_iron', 'amulet_sapphire', 'wraith_blade', 'barrow_plate', 'ghostlight_amulet'];
 export const qualityId = (base, q) => (q ? `${base}~${QUALITY[q].key}` : base);
 for (const base of QUALITY_BASES) {
   const it = ITEMS[base];

@@ -81,7 +81,8 @@ test('players see each other join, move, chat and leave in real time', async () 
   // he can walk straight to: where he spawned varies, and the plaza has benches.)
   const col = buildColliders();
   const nav = new NavGrid(col);
-  const [dx, dz] = [[6, 2], [-6, 2], [6, -2], [-6, -2], [2, 6], [2, -6]].find(([dx, dz]) => nav.clear(bStart.x, bStart.z, bStart.x + dx, bStart.z + dz));
+  const tries = [[6, 2], [-6, 2], [6, -2], [-6, -2], [2, 6], [2, -6], ...Array.from({ length: 24 }, (_, k) => [Math.round(Math.sin(k / 3.8) * (4 + (k % 3))), Math.round(Math.cos(k / 3.8) * (4 + (k % 3)))])];
+  const [dx, dz] = tries.find(([dx, dz]) => nav.clear(bStart.x, bStart.z, bStart.x + dx, bStart.z + dz));
   b.ws.send(JSON.stringify({ t: 'move', x: bStart.x + dx, z: bStart.z + dz }));
   const snap = await a.next((m) => m.t === 's' && m.p.some((r) => r[0] === b.id && r[4] === 'walk'));
   assert.ok(snap);

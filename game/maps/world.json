@@ -171,6 +171,9 @@
     {"id":"stone_square","name":"Hearthvale Square","x":6.2,"z":5.2,"rot":-1.76},
     {"id":"stone_wildwatch","name":"Wildwatch","x":3,"z":-40.5,"rot":3.14}
   ],
+  "entrances": [
+    {"id":"crypt_hollow","kind":"hollow_crypt","x":0,"z":-74,"rot":0}
+  ],
   "props": [
     {"id":"p0","slot":"bench_park","x":3.97,"z":8.52,"rot":-2.705,"r":0.8},
     {"id":"p1","slot":"bench_park","x":-4.41,"z":8.3,"rot":2.653,"r":0.8},

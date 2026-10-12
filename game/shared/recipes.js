@@ -30,6 +30,10 @@ export const RECIPES = [
   { id: 'sword_gold', out: 'sword_gold', qty: 1, in: { gold_bar: 5, iron_bar: 3, golem_core: 1 }, lvl: 10, xp: 160, station: 'anvil', pattern: 'forge_blade' },
   { id: 'armor_leather', out: 'armor_leather', qty: 1, in: { leather: 3 }, lvl: 3, xp: 30, station: 'workbench', pattern: 'stitch' },
   { id: 'armor_iron', out: 'armor_iron', qty: 1, in: { iron_bar: 6, leather: 2 }, lvl: 7, xp: 80, station: 'anvil', pattern: 'forge_plate' },
+  // From the Hollow Crypt's Grave Dust.
+  { id: 'wraith_blade', out: 'wraith_blade', qty: 1, in: { iron_bar: 4, grave_dust: 8, leather: 1 }, lvl: 7, xp: 100, station: 'anvil', pattern: 'forge_blade' },
+  { id: 'barrow_plate', out: 'barrow_plate', qty: 1, in: { iron_bar: 5, grave_dust: 6, leather: 1 }, lvl: 7, xp: 100, station: 'anvil', pattern: 'forge_plate' },
+  { id: 'ghostlight_amulet', out: 'ghostlight_amulet', qty: 1, in: { gold_bar: 1, grave_dust: 6, moonbloom: 2 }, lvl: 6, xp: 80, station: 'grindstone', pattern: 'facet' },
   { id: 'amulet_sapphire', out: 'amulet_sapphire', qty: 1, in: { sapphire: 1, gold_bar: 2, goblin_coin: 3 }, lvl: 9, xp: 120, station: 'grindstone', pattern: 'facet' },
 ];
 

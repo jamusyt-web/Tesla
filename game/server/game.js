@@ -6,7 +6,7 @@ import { MONSTERS, heroStats, damage } from '../shared/monsters.js';
 import {
   NODES, SPAWNS, buildColliders, NavGrid, NODE_TYPES, stepPath,
   INTERACT_RANGE, FISH_RANGE, SPAWN, isWalkable, WORLD_RADIUS, isDeepSpot, SWING_FLOOR, isPerfectSwing,
-  stoneById, stoneNear, stoneFront, travelFee, STONE_RANGE, landDistance,
+  stoneById, stoneNear, stoneFront, travelFee, STONE_RANGE, landDistance, ENTRANCES, entranceFront,
 } from '../shared/world.js';
 import { rollFish, fishingGear, fightRating, replayFight, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
 import { GameError, fail } from './db.js';
@@ -18,31 +18,21 @@ import { Crafting } from './crafting.js';
 import { Jobs, jobText } from './jobs.js';
 import { SHOP } from '../shared/shop.js';
 import { Auth } from './auth.js';
+import { Channel, Battle, rint, q2 } from './channel.js';
+import { DungeonRun } from './dungeons.js';
+import { Parties } from './party.js';
+import { DUNGEONS, TIERS, MODIFIERS, ENTRANCE_RANGE, MAX_RUN_HEROES, MAX_RUNS, READY_MS, ENTER_COOLDOWN_MS, ENGAGE_PATH, modifierFor, weeklySeed, weekIndex, dayIndex } from '../shared/dungeon.js';
+import { world, rebuildWorld } from './static.js';
 
 const GATHER_ACTS = new Set(['chop', 'mine', 'pick']);
 
 export const CHANNEL_CAP = Number(process.env.CHANNEL_CAP || 40);
 const TICK_MS = 50; // 20 Hz simulation
-const SNAP_EVERY = 2; // 10 Hz snapshots
-const ROUND_MS = 12000;
-const MOB_SPEED = 2.2;
 const NPC_SELL_RATE = 0.6; // instant-sell to the town merchant pays 60% of value
 const CHAT_MAX = 140;
-// Each hero is only told about monsters this close (and forgets them past
-// INTEREST_DROP), so a big world doesn't flood every client with every mob.
-const INTEREST = 100;
-const INTEREST_DROP = 125;
 const TRAVEL_COOLDOWN_MS = 3000;
 
-// Collision and navigation for the current map (rebuilt when the map changes).
-const buildStatic = () => {
-  const col = buildColliders();
-  return { nodes: NODES, col, nav: new NavGrid(col) };
-};
-let STATIC = buildStatic();
 
-const rint = (a, b, rng = Math.random) => a + Math.floor(rng() * (b - a + 1));
-const q2 = (v) => Math.round(v * 100) / 100;
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 // Tutorial: the core loop in one session.
@@ -52,437 +42,6 @@ export const TUTORIAL = [
   { id: 'fight', text: `Slay a ${MONSTERS.slime.name} beyond the Wilds Gate (north)`, reward: 50 },
   { id: 'stock', text: 'Put something on a display in Your Shop', reward: 60 },
 ];
-
-// ─────────────────────────────────────────────────────────────────────────
-// A Channel is one live copy of the town (like a lobby / server shard). All
-// players in it see each other move in real time.
-// ─────────────────────────────────────────────────────────────────────────
-class Channel {
-  constructor(game, id) {
-    this.game = game;
-    this.id = id;
-    this.players = new Map(); // accountId → Client
-    this.nodes = new Map(STATIC.nodes.map((n) => [n.id, { ...n, hp: NODE_TYPES[n.type].hp, alive: true, respawnAt: 0, hitters: new Set() }]));
-    this.mobs = new Map();
-    this.battles = new Map();
-    this.tickNo = 0;
-    this.seq = 0;
-    // Monster camps come from the map; each monster roams around its own camp.
-    for (const sp of SPAWNS)
-      for (let i = 0; i < sp.count; i++) {
-        const id = `m${this.mobs.size}`;
-        const mob = { id, type: sp.monster, sp, x: 0, z: 0, rot: 0, path: null, state: 'roam', next: 0, respawnAt: 0, battle: null };
-        this.#placeMob(mob);
-        this.mobs.set(id, mob);
-      }
-  }
-
-  #placeMob(mob) {
-    const sp = mob.sp;
-    for (let k = 0; k < 30; k++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = Math.sqrt(Math.random()) * sp.r;
-      const x = sp.x + Math.cos(a) * d;
-      const z = sp.z + Math.sin(a) * d;
-      if (isWalkable(x, z, STATIC.col)) {
-        mob.x = x;
-        mob.z = z;
-        return;
-      }
-    }
-    mob.x = sp.x;
-    mob.z = sp.z;
-  }
-
-  get size() {
-    return this.players.size;
-  }
-
-  broadcast(msg, except = null) {
-    const data = JSON.stringify(msg);
-    for (const c of this.players.values()) if (c !== except) c.sendRaw(data);
-  }
-
-  // A free spot at or near (x, z), so nobody materialises inside another hero.
-  // `ok` can veto candidate spots (the original spot is always allowed).
-  freeSpot(x, z, except = null, ok = () => true) {
-    const crowded = (px, pz) => [...this.players.values()].some((o) => o !== except && !o.room && Math.hypot(o.ent.x - px, o.ent.z - pz) < 1.3);
-    for (let k = 0; k < 40 && crowded(x, z); k++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = 1.5 + Math.random() * 3.5;
-      const nx = x + Math.cos(a) * d;
-      const nz = z + Math.sin(a) * d;
-      if (isWalkable(nx, nz, STATIC.col) && !crowded(nx, nz) && ok(nx, nz)) [x, z] = [nx, nz];
-    }
-    return [x, z];
-  }
-
-  add(c) {
-    const e = c.ent;
-    [e.x, e.z] = this.freeSpot(e.x, e.z, c);
-    e.path = null;
-    this.players.set(c.hero.id, c);
-    c.ch = this;
-    this.game.crafting.attach(c);
-    c.send({
-      t: 'welcome',
-      channel: this.id,
-      you: c.publicSelf(),
-      players: [...this.players.values()].filter((o) => o !== c).map((o) => o.publicInfo()),
-      nodes: [...this.nodes.values()].filter((n) => !n.alive || n.hp < NODE_TYPES[n.type].hp).map((n) => ({ id: n.id, hp: n.hp, alive: n.alive, respawnIn: n.alive ? 0 : Math.max(0, n.respawnAt - Date.now()) })),
-      mobs: this.#nearMobs(c),
-      battles: [...this.battles.values()].map((b) => b.publicState()),
-    });
-    this.broadcast({ t: 'join', p: c.publicInfo() }, c);
-  }
-
-  remove(c) {
-    if (c.battle) c.battle.leave(c, 'left');
-    this.game.crafting.releaseSpot(c);
-    if (c.craft) c.craft.spot = null;
-    this.players.delete(c.hero.id);
-    this.broadcast({ t: 'leave', id: c.hero.id });
-  }
-
-  mobInfo(m) {
-    return { id: m.id, type: m.type, x: q2(m.x), z: q2(m.z), rot: q2(m.rot), state: m.state };
-  }
-  #mobRow(m) {
-    return [m.id, q2(m.x), q2(m.z), q2(m.rot), m.state];
-  }
-  // Start a hero's view of the monsters afresh: everything within range.
-  #nearMobs(c) {
-    c.mobSeen = new Map();
-    const out = [];
-    for (const m of this.mobs.values())
-      if (Math.hypot(m.x - c.ent.x, m.z - c.ent.z) < INTEREST) {
-        c.mobSeen.set(m.id, this.#mobRow(m).join(','));
-        out.push(this.mobInfo(m));
-      }
-    return out;
-  }
-
-  tick(now, dt) {
-    this.tickNo++;
-    const attune = this.tickNo % 10 === 0; // twice a second is plenty
-    for (const c of this.players.values()) {
-      const e = c.ent;
-      if (attune && !c.room) c.attuneNearby();
-      if (e.path) {
-        stepPath(e, dt);
-        if (!e.path && e.act === 'walk') e.act = 'idle';
-      }
-      if (!c.battle && e.hp < e.maxHp) e.hp = Math.min(e.maxHp, e.hp + 4 * dt);
-      if (GATHER_ACTS.has(e.act) && now - e.lastSwing > 2500) e.act = 'idle'; // stopped swinging
-      if (c.craft) {
-        this.game.crafting.expire(c, now);
-        if (c.craft?.spot && !e.path) e.rot = c.craft.spot.rot; // face the station while working
-      }
-      const f = e.fishing;
-      if (f && f.state === 'wait' && now >= f.biteAt) {
-        // Decide what bit now; the client needs the fight parameters to play it.
-        f.state = 'bite';
-        const rod = ITEMS[c.hero.equip.rod];
-        const lvl = levelFromXp(c.hero.skills.fishing || 0);
-        f.fish = rollFish(Math.random, rod?.tier || 1, lvl, isDeepSpot(this.nodes.get(f.node)));
-        f.gear = fishingGear(rod?.tier || 1, lvl, rod?.rodZone || 0);
-        const { d, behavior, seed } = f.fish;
-        c.send({ t: 'bite', window: f.window, fish: { d, behavior, seed }, gear: f.gear, rating: fightRating(d, f.gear) });
-      }
-      if (f && f.state === 'bite' && now > f.biteAt + f.window + 600) {
-        e.fishing = null;
-        e.act = 'idle';
-        c.send({ t: 'fishResult', ok: false, reason: 'It got away…' });
-      }
-      if (f && f.state === 'fight' && now > f.fightAt + (FISH_MAX_TICKS / 60) * 1000 + 8000) {
-        e.fishing = null;
-        e.act = 'idle';
-        c.send({ t: 'fishResult', ok: false, reason: 'The line went slack — it got away.' });
-      }
-    }
-    for (const n of this.nodes.values()) {
-      if (!n.alive && now >= n.respawnAt) {
-        n.alive = true;
-        n.hp = NODE_TYPES[n.type].hp;
-        n.hitters.clear();
-        this.broadcast({ t: 'node', id: n.id, alive: true, hp: n.hp });
-      }
-    }
-    for (const m of this.mobs.values()) {
-      if (m.state === 'dead') {
-        if (now >= m.respawnAt) {
-          m.state = 'roam';
-          this.#placeMob(m);
-          m.next = now + 2000;
-        }
-        continue;
-      }
-      if (m.state !== 'roam') continue;
-      if (m.path) stepPath(m, dt, MOB_SPEED);
-      else if (now >= m.next) {
-        m.next = now + 2500 + Math.random() * 5000;
-        const sp = m.sp;
-        const a = Math.random() * Math.PI * 2;
-        const d = Math.random() * sp.r;
-        const tx = sp.x + Math.cos(a) * d;
-        const tz = sp.z + Math.sin(a) * d;
-        if (isWalkable(tx, tz, STATIC.col) && STATIC.nav.clear(m.x, m.z, tx, tz)) m.path = [[tx, tz]];
-      }
-    }
-    for (const b of this.battles.values()) b.tick(now);
-    if (this.tickNo % SNAP_EVERY === 0) this.snapshot();
-  }
-
-  // Delta snapshot: only entities whose quantized state changed, plus a full
-  // refresh every 3 s so late packets can't leave anyone stuck. Every hero
-  // sees every other hero; monsters only near them (add / rm as they come
-  // into and out of range).
-  snapshot() {
-    const full = this.tickNo % 60 === 0;
-    const p = [];
-    for (const c of this.players.values()) {
-      if (c.room) continue; // inside a shop: not in the town
-      const e = c.ent;
-      const row = [c.hero.id, q2(e.x), q2(e.z), q2(e.rot), e.act];
-      const key = row.join(',');
-      if (full || key !== e.lastSnap) {
-        e.lastSnap = key;
-        p.push(row);
-      }
-    }
-    const rows = [...this.mobs.values()].map((mob) => [mob, this.#mobRow(mob)]);
-    for (const c of this.players.values()) {
-      if (c.room) continue;
-      const seen = (c.mobSeen ??= new Map());
-      const m = [];
-      const add = [];
-      const rm = [];
-      for (const [mob, row] of rows) {
-        const d = Math.hypot(mob.x - c.ent.x, mob.z - c.ent.z);
-        const key = row.join(',');
-        if (seen.has(mob.id) ? d < INTEREST_DROP : d < INTEREST) {
-          if (!seen.has(mob.id)) add.push(this.mobInfo(mob));
-          else if (full || seen.get(mob.id) !== key) m.push(row);
-          seen.set(mob.id, key);
-        } else if (seen.delete(mob.id)) rm.push(mob.id);
-      }
-      if (p.length || m.length || add.length || rm.length) c.send({ t: 's', p, m, ...(add.length ? { add } : {}), ...(rm.length ? { rm } : {}) });
-    }
-  }
-
-  // c was moved by fast travel: everyone sees them vanish and reappear (no
-  // sliding across the map), and they get a fresh view of where they are now.
-  teleported(c, from) {
-    const e = c.ent;
-    e.lastSnap = '';
-    this.#townOnly({ t: 'tp', id: c.hero.id, x: q2(e.x), z: q2(e.z), rot: q2(e.rot), from: { x: q2(from.x), z: q2(from.z) } });
-    c.send(this.fullSnapshot(c));
-  }
-
-  // Everything about the town, for someone stepping back out of a shop.
-  fullSnapshot(c) {
-    const p = [...this.players.values()].filter((o) => !o.room).map((o) => [o.hero.id, q2(o.ent.x), q2(o.ent.z), q2(o.ent.rot), o.ent.act]);
-    return { t: 's', p, m: [], add: this.#nearMobs(c), full: true };
-  }
-
-  #townOnly(msg) {
-    const data = JSON.stringify(msg);
-    for (const c of this.players.values()) if (!c.room) c.sendRaw(data);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Turn-based co-op battle, fought *in the world* where the monster stands.
-// Up to 4 heroes; anyone nearby can tap the monster to join mid-fight.
-// ─────────────────────────────────────────────────────────────────────────
-class Battle {
-  constructor(ch, mob) {
-    this.ch = ch;
-    this.id = `b${++ch.seq}`;
-    this.mob = mob;
-    this.def = MONSTERS[mob.type];
-    this.mobMax = this.def.hp;
-    this.mobHp = this.def.hp;
-    this.fighters = new Map(); // id → {c, hp, max, atk, def, charge, choice, alive}
-    this.round = 1;
-    this.deadline = Date.now() + ROUND_MS;
-    this.over = false;
-    mob.state = 'battle';
-    mob.path = null;
-    mob.battle = this;
-  }
-
-  publicState() {
-    return {
-      id: this.id,
-      mob: this.mob.id,
-      mobHp: this.mobHp,
-      mobMax: this.mobMax,
-      round: this.round,
-      endsIn: Math.max(0, this.deadline - Date.now()),
-      fighters: [...this.fighters.entries()].map(([id, f]) => ({ id, name: f.c.hero.name, hp: Math.round(f.hp), max: f.max, charge: f.charge, alive: f.alive, ready: !!f.choice })),
-    };
-  }
-
-  push(extra = {}) {
-    this.ch.broadcast({ t: 'battle', b: this.publicState(), ...extra });
-  }
-
-  join(c) {
-    if (this.over) fail('That battle just ended.');
-    if (this.fighters.size >= 4) fail('This battle is full (4 heroes).');
-    const st = c.stats();
-    this.fighters.set(c.hero.id, { c, hp: Math.max(1, Math.min(c.ent.hp, st.hp)), max: st.hp, atk: st.atk, def: st.def, charge: 0, choice: null, alive: true });
-    c.cancelFishing();
-    c.battle = this;
-    c.ent.act = 'battle';
-    // Line up facing the monster in a little arc.
-    const n = this.fighters.size - 1;
-    const ang = Math.atan2(c.ent.x - this.mob.x, c.ent.z - this.mob.z);
-    const spread = [0, 0.55, -0.55, 1.1][n];
-    const tx = this.mob.x + Math.sin(ang + spread) * 3.4;
-    const tz = this.mob.z + Math.cos(ang + spread) * 3.4;
-    c.ent.path = isWalkable(tx, tz, STATIC.col) ? [[tx, tz]] : null;
-    this.mob.rot = Math.atan2(c.ent.x - this.mob.x, c.ent.z - this.mob.z);
-    this.push({ joined: c.hero.id });
-  }
-
-  leave(c, why) {
-    const f = this.fighters.get(c.hero.id);
-    if (!f) return;
-    c.ent.hp = Math.max(1, f.hp);
-    this.fighters.delete(c.hero.id);
-    c.battle = null;
-    c.ent.act = 'idle';
-    if (!this.over && ![...this.fighters.values()].some((x) => x.alive)) this.end(false);
-    else this.push({ left: c.hero.id, why });
-  }
-
-  choose(c, a, itemId) {
-    const f = this.fighters.get(c.hero.id);
-    if (!f || !f.alive || this.over) return;
-    if (!['attack', 'skill', 'defend', 'potion', 'flee'].includes(a)) return;
-    if (a === 'skill' && f.charge < 3) fail('Your special is not charged yet.');
-    if (a === 'potion') {
-      if (!isItem(itemId) || !ITEMS[itemId].heal) fail('Pick a healing item.');
-      if (this.ch.game.heroes.count(c.hero.id, itemId) < 1) fail(`No ${ITEMS[itemId].name} left.`);
-    }
-    if (a === 'flee') {
-      this.ch.broadcast({ t: 'bres', id: this.id, mob: this.mob.id, ev: [{ k: 'flee', who: c.hero.id }] });
-      this.leave(c, 'fled');
-      return;
-    }
-    f.choice = { a, itemId };
-    const alive = [...this.fighters.values()].filter((x) => x.alive);
-    if (alive.every((x) => x.choice)) this.deadline = Math.min(this.deadline, Date.now() + 250);
-    else this.push();
-  }
-
-  tick(now) {
-    if (!this.over && now >= this.deadline) this.resolve();
-  }
-
-  resolve() {
-    const ev = [];
-    const H = this.ch.game.heroes;
-    for (const [id, f] of this.fighters) {
-      if (!f.alive) continue;
-      const ch = f.choice || { a: 'attack' }; // idle heroes auto-attack so nobody stalls the party
-      f.defending = false;
-      if (ch.a === 'attack' || ch.a === 'skill') {
-        const skill = ch.a === 'skill' && f.charge >= 3;
-        const crit = Math.random() < 0.12;
-        let dmg = damage(f.atk, this.def.def, skill ? 2.4 : 1);
-        if (crit) dmg = Math.round(dmg * 1.6);
-        this.mobHp = Math.max(0, this.mobHp - dmg);
-        f.charge = skill ? 0 : Math.min(3, f.charge + 1);
-        ev.push({ k: 'hit', from: id, to: 'mob', dmg, crit, skill });
-        if (this.mobHp <= 0) break;
-      } else if (ch.a === 'defend') {
-        f.defending = true;
-        f.charge = Math.min(3, f.charge + 1);
-        ev.push({ k: 'defend', who: id });
-      } else if (ch.a === 'potion') {
-        try {
-          H.takeItem(id, ch.itemId, 1);
-          const heal = Math.min(f.max - f.hp, ITEMS[ch.itemId].heal);
-          f.hp += heal;
-          ev.push({ k: 'heal', who: id, amt: Math.round(heal), item: ch.itemId });
-          f.c.pushInventory();
-        } catch {
-          ev.push({ k: 'defend', who: id });
-          f.defending = true;
-        }
-      }
-    }
-    if (this.mobHp <= 0) {
-      ev.push({ k: 'mobDown' });
-      this.ch.broadcast({ t: 'bres', id: this.id, mob: this.mob.id, ev });
-      this.end(true);
-      return;
-    }
-    // Monster's turn.
-    const move = this.def.moves[Math.floor(Math.random() * this.def.moves.length)];
-    const alive = [...this.fighters.entries()].filter(([, f]) => f.alive);
-    const targets = move.aoe ? alive : [alive[Math.floor(Math.random() * alive.length)]];
-    for (const [id, f] of targets) {
-      let dmg = damage(this.def.atk, f.def, move.mult * (move.aoe ? 0.7 : 1));
-      if (f.defending) dmg = Math.max(1, Math.round(dmg * 0.35));
-      f.hp = Math.max(0, f.hp - dmg);
-      ev.push({ k: 'hit', from: 'mob', to: id, dmg, move: move.name, blocked: !!f.defending });
-      if (f.hp <= 0) {
-        f.alive = false;
-        ev.push({ k: 'ko', who: id });
-      }
-    }
-    for (const f of this.fighters.values()) f.choice = null;
-    this.round++;
-    this.deadline = Date.now() + ROUND_MS;
-    this.ch.broadcast({ t: 'bres', id: this.id, mob: this.mob.id, ev });
-    if (![...this.fighters.values()].some((f) => f.alive)) this.end(false);
-    else this.push();
-  }
-
-  end(victory) {
-    if (this.over) return;
-    this.over = true;
-    const g = this.ch.game;
-    const results = {};
-    for (const [id, f] of this.fighters) {
-      const c = f.c;
-      c.battle = null;
-      c.ent.act = 'idle';
-      c.ent.hp = f.alive ? Math.max(1, f.hp) : Math.round(f.max * 0.3);
-      if (!victory) {
-        results[id] = { victory: false };
-        continue;
-      }
-      const gold = rint(...this.def.gold);
-      const loot = {};
-      for (const d of this.def.drops) if (Math.random() < d.p) loot[d.id] = (loot[d.id] || 0) + rint(d.min, d.max);
-      try {
-        g.heroes.addGold(id, gold);
-        for (const [it, n] of Object.entries(loot)) g.heroes.addItem(id, it, n);
-      } catch (e) {
-        console.error('battle reward failed', e);
-      }
-      const xp = g.heroes.addXp(c.hero, 'combat', this.def.xp);
-      results[id] = { victory: true, gold, loot, xp };
-      c.pushInventory();
-      c.advanceTutorial('fight');
-    }
-    this.mob.battle = null;
-    if (victory) {
-      this.mob.state = 'dead';
-      this.mob.respawnAt = Date.now() + (this.def.boss ? 90_000 : 25_000);
-      if (this.def.boss) g.announce(`${[...this.fighters.values()].map((f) => f.c.hero.name).join(', ')} defeated the ${this.def.name}!`);
-    } else {
-      this.mob.state = 'roam';
-    }
-    this.ch.battles.delete(this.id);
-    this.ch.broadcast({ t: 'battleEnd', id: this.id, mob: this.mob.id, victory, results });
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────
 // One connected player.
@@ -511,7 +70,7 @@ class Client {
     this.bucket = { t: Date.now(), n: 0 };
     const st = this.stats();
     this.ent = { x: hero.x, z: hero.z, rot: 0, path: null, act: 'idle', hp: st.hp, maxHp: st.hp, lastSwing: 0, lastNode: null, fishing: null, lastSnap: '' };
-    if (!isWalkable(this.ent.x, this.ent.z, STATIC.col)) Object.assign(this.ent, { x: SPAWN.x, z: SPAWN.z });
+    if (!isWalkable(this.ent.x, this.ent.z, world().col)) Object.assign(this.ent, { x: SPAWN.x, z: SPAWN.z });
   }
 
   send(msg) {
@@ -519,6 +78,11 @@ class Client {
   }
   sendRaw(data) {
     if (this.ws.readyState === 1) this.ws.send(data);
+  }
+
+  // Special abilities from equipped gear (e.g. Wraithsteel's quick special).
+  perks() {
+    return new Set(['weapon', 'armor', 'trinket'].map((s) => ITEMS[this.hero.equip[s]]?.perk).filter(Boolean));
   }
 
   stats() {
@@ -576,6 +140,9 @@ export class Game {
     this.shops = new Shops(db, this.heroes);
     this.crafting = new Crafting(this);
     this.jobs = new Jobs(db, this.heroes);
+    this.parties = new Parties(this);
+    this.runs = new Map(); // dungeon runs (id → DungeonRun)
+    this.runSeq = 0;
     this.auth = new Auth(db);
     this.channels = [];
     this.online = new Map(); // accountId → Client
@@ -584,6 +151,7 @@ export class Game {
     this.buyNonces = new Map(); // buyer → Map(nonce → result): a retried purchase can't buy twice
     this.seq = 0;
     this.last = Date.now();
+    this.tickNo = 0;
     this.timer = null;
     this.shopTimer = null;
   }
@@ -614,6 +182,7 @@ export class Game {
     clearInterval(this.shopTimer);
     clearInterval(this.saveTimer);
     clearInterval(this.jobTimer);
+    this.endAllRuns();
     this.savePositions();
   }
 
@@ -635,11 +204,26 @@ export class Game {
         console.error('room tick error', e);
       }
     }
+    for (const run of [...this.runs.values()]) {
+      try {
+        run.tick(now, dt);
+        if (run.expired(now)) this.closeRun(run);
+      } catch (e) {
+        console.error('dungeon tick error', e);
+      }
+    }
+    if (++this.tickNo % 40 === 0) {
+      this.parties.sweep(now);
+      for (const p of this.parties.parties.values()) if (p.ready) this.#checkReady(p, now);
+      // Party frames show each other's health in a dungeon.
+      for (const p of this.parties.parties.values()) if (p.members.some((id) => this.online.get(id)?.ch?.isRun)) this.parties.push(p);
+    }
   }
 
   savePositions() {
     for (const c of this.online.values()) {
-      this.heroes.savePos(c.hero.id, c.ent.x, c.ent.z);
+      const p = this.townPos(c);
+      this.heroes.savePos(c.hero.id, p.x, p.z);
       this.heroes.saveActive(c.hero.id, c.lastInput);
     }
   }
@@ -683,6 +267,7 @@ export class Game {
     if (!info) fail('No such shop.');
     if (c.battle) fail("You're in a battle!");
     if (c.craft) fail('Finish your craft first.');
+    if (c.ch?.isRun) fail('Leave the dungeon first.');
     if (c.room?.owner === owner) return c.room.payload(c); // already here (e.g. reconnecting)
     if (now - c.roomAt < SHOP.ENTER_COOLDOWN_MS) fail('Slow down a little!');
     const isOwner = owner === c.hero.id;
@@ -713,6 +298,7 @@ export class Game {
   // From the waystone you're standing at to another you've attuned to, for a fee.
   travel(c, to, now = Date.now()) {
     if (c.room) fail('Leave the shop first.');
+    if (c.ch?.isRun) fail("Waystones don't work underground. Leave the dungeon first.");
     if (c.battle) fail("You can't travel in the middle of a battle!");
     if (c.craft) fail('Finish your craft first.');
     const dest = stoneById(to);
@@ -726,14 +312,14 @@ export class Game {
     const fee = travelFee(here, dest);
     if (this.heroes.gold(c.hero.id) < fee) fail(`Travelling to ${dest.name} costs ${fee} gold.`);
     const [fx, fz] = stoneFront(dest);
-    const open = isWalkable(fx, fz, STATIC.col) ? [fx, fz] : STATIC.nav.nearestOpen(fx, fz);
+    const open = isWalkable(fx, fz, world().col) ? [fx, fz] : world().nav.nearestOpen(fx, fz);
     if (!open || Math.hypot(open[0] - dest.x, open[1] - dest.z) > STONE_RANGE) fail("That waystone's way is blocked.");
     this.heroes.addGold(c.hero.id, -fee);
     c.cancelFishing();
     const e = c.ent;
     const from = { x: e.x, z: e.z };
     // Make room if someone's standing there, but stay at the stone, on this side of any wall.
-    [e.x, e.z] = c.ch.freeSpot(open[0], open[1], c, (nx, nz) => Math.hypot(nx - dest.x, nz - dest.z) <= STONE_RANGE - 1 && STATIC.nav.clear(open[0], open[1], nx, nz));
+    [e.x, e.z] = c.ch.freeSpot(open[0], open[1], c, (nx, nz) => Math.hypot(nx - dest.x, nz - dest.z) <= STONE_RANGE - 1 && world().nav.clear(open[0], open[1], nx, nz));
     Object.assign(e, { path: null, act: 'idle', rot: dest.rot ?? 0 });
     c.lastTravel = now;
     this.heroes.savePos(c.hero.id, e.x, e.z);
@@ -746,12 +332,13 @@ export class Game {
   ownerTeleport(c, x, z) {
     if (!this.auth.isAdmin(c.hero.id)) fail('Only server owners can do that.');
     if (c.room) fail('Leave the shop first.');
+    if (c.ch?.isRun) fail('Leave the dungeon first.');
     if (c.battle) fail("You can't travel in the middle of a battle!");
     if (c.craft) fail('Finish your craft first.');
     x = Number(x);
     z = Number(z);
     if (!Number.isFinite(x) || !Number.isFinite(z) || landDistance(x, z) > 0) fail("That's not on land.");
-    const open = isWalkable(x, z, STATIC.col) ? [x, z] : STATIC.nav.nearestOpen(x, z);
+    const open = isWalkable(x, z, world().col) ? [x, z] : world().nav.nearestOpen(x, z);
     if (!open) fail("There's no room to stand there.");
     c.cancelFishing();
     const e = c.ent;
@@ -791,7 +378,8 @@ export class Game {
   // navigation, then send everyone back in: their clients reload to build the
   // new world, and they rejoin fresh channels (nodes and monsters reset).
   reloadWorld() {
-    STATIC = buildStatic();
+    this.endAllRuns(); // runs never outlive the map they were built under
+    rebuildWorld();
     for (const c of [...this.online.values()]) {
       c.send({ t: 'kicked', reason: 'The world was updated.' });
       this.disconnect(c);
@@ -821,7 +409,11 @@ export class Game {
     const c = new Client(this, ws, hero);
     this.online.set(accountId, c);
     const leftover = this.crafting.onConnect(c);
-    this.pickChannel().add(c);
+    // Dropped out of a dungeon a moment ago? Back into the same run.
+    const seat = [...this.runs.values()].map((run) => [run, run.seatFor(accountId)]).find(([, m]) => m);
+    if (seat) seat[0].enter(c, seat[1]);
+    else this.pickChannel().add(c);
+    this.parties.online(c);
     if (leftover) {
       c.send({ t: 'craftResult', ...leftover });
       c.pushInventory();
@@ -838,10 +430,205 @@ export class Game {
     if (this.online.get(c.hero.id) !== c) return;
     this.online.delete(c.hero.id);
     c.room?.remove(c, 'left');
-    this.heroes.savePos(c.hero.id, c.ent.x, c.ent.z);
+    const p = this.townPos(c);
+    this.heroes.savePos(c.hero.id, p.x, p.z);
     this.heroes.saveActive(c.hero.id, c.lastInput);
     this.lastActive.set(c.hero.id, c.lastInput);
+    if (c.ch?.isRun) c.ch.depart(c, { keepSeat: true }); // you can reconnect into the run for a while
+    else c.ch?.remove(c);
+    this.parties.offline(c.hero.id);
+  }
+
+  // Where a hero is in the overworld (inside a dungeon: where they went in).
+  townPos(c) {
+    return c.ch?.isRun && c.townPos ? c.townPos : { x: c.ent.x, z: c.ent.z };
+  }
+
+  // ── Dungeons ───────────────────────────────────────────────────────
+  // (server/dungeons.js runs them; shared/dungeon.js has the rules.)
+  runForParty(partyId) {
+    for (const r of this.runs.values()) if (partyId && r.partyId === partyId && !r.ended) return r;
+    return null;
+  }
+  #notBusy(c, who = 'You') {
+    const you = who === 'You';
+    if (c.battle) fail(you ? "You're in a battle!" : `${who} is in a battle.`);
+    if (c.room) fail(you ? 'Leave the shop first.' : `${who} is in a shop.`);
+    if (c.craft) fail(you ? 'Finish your craft first.' : `${who} is crafting.`);
+    if (c.ch?.isRun) fail(you ? "You're already in a dungeon." : `${who} is already in a dungeon.`);
+  }
+  // The highest tier a hero has cleared (unlocks the next).
+  bestTier(heroId, kind) {
+    return this.db.prepare('SELECT MAX(r.tier) AS t FROM dungeon_runs r, json_each(r.hero_ids) j WHERE r.kind = ? AND j.value = ?').get(kind, heroId)?.t ?? 0;
+  }
+  #checkEntry(c, kind, tier, mode) {
+    if (!DUNGEONS[kind]) fail('No such dungeon.');
+    if (!TIERS[tier]) fail('No such tier.');
+    if (mode !== 'random' && mode !== 'weekly') fail('Bad mode.');
+    this.#notBusy(c);
+    if (!ENTRANCES.some((e) => e.kind === kind && Math.hypot(c.ent.x - e.x, c.ent.z - e.z) <= ENTRANCE_RANGE + 4)) fail('Walk up to the crypt door first.');
+    if (tier > 1 && this.bestTier(c.hero.id, kind) < tier - 1) fail(`Clear ${TIERS[tier - 1].name} first.`);
+    if (Date.now() - (c.lastRunAt || 0) < ENTER_COOLDOWN_MS) fail('Catch your breath a moment first.');
+    if ([...this.runs.values()].filter((r) => !r.ended).length >= MAX_RUNS) fail('The crypt is crowded right now. Try again in a minute.');
+  }
+  #newRun(kind, tier, mode, size, partyId) {
+    const now = Date.now();
+    const seed = mode === 'weekly' ? weeklySeed(kind, tier, now) : (Math.random() * 2 ** 32) >>> 0;
+    const run = new DungeonRun(this, { id: `r${++this.runSeq}`, kind, tier, mode, mod: modifierFor(now), seed, size, partyId });
+    this.runs.set(run.id, run);
+    return run;
+  }
+  // Go in alone; or (the party leader) start a ready check: everyone who says
+  // yes in time goes in together.
+  enterDungeon(c, kind, { tier = 1, mode = 'random', party = false } = {}) {
+    tier = Number(tier) || 1;
+    this.#checkEntry(c, kind, tier, mode);
+    if (!party) {
+      const run = this.#newRun(kind, tier, mode, 1, null);
+      c.lastRunAt = Date.now();
+      this.#intoRun(c, run);
+      return { run: run.id };
+    }
+    const p = this.parties.get(c.hero.id);
+    if (!p) fail("You're not in a party.");
+    if (p.leader !== c.hero.id) fail('Only the party leader can lead the party in.');
+    if (this.runForParty(p.id)) fail('Your party is already inside: join them.');
+    if (p.ready) fail('A ready check is already running.');
+    for (const id of p.members) {
+      if (id === c.hero.id) continue;
+      const o = this.online.get(id);
+      if (o && tier > 1 && this.bestTier(id, kind) < tier - 1) fail(`${o.hero.name} hasn't cleared ${TIERS[tier - 1].name} yet.`);
+    }
+    p.ready = { kind, tier, mode, leader: c.hero.id, yes: new Set([c.hero.id]), no: new Set(), until: Date.now() + READY_MS };
+    for (const id of p.members) if (id !== c.hero.id) this.online.get(id)?.send({ t: 'dready', from: c.hero.name, kind, tier, mode, expiresIn: READY_MS });
+    this.parties.push(p);
+    this.#checkReady(p);
+    return { ready: true, expiresIn: READY_MS };
+  }
+  readyAnswer(c, yes) {
+    const p = this.parties.get(c.hero.id);
+    if (!p?.ready) fail('There is no ready check right now.');
+    if (yes) {
+      this.#notBusy(c);
+      p.ready.yes.add(c.hero.id);
+    } else p.ready.no.add(c.hero.id);
+    this.#checkReady(p);
+    return { ok: true };
+  }
+  // When everyone online has answered (or time's up), in they go.
+  #checkReady(p, now = Date.now()) {
+    const R = p.ready;
+    if (!R) return;
+    const online = p.members.filter((id) => this.online.has(id));
+    const answered = online.every((id) => R.yes.has(id) || R.no.has(id));
+    if (!answered && now < R.until) return;
+    p.ready = null;
+    const leader = this.online.get(R.leader);
+    const going = [...R.yes].map((id) => this.online.get(id)).filter((o) => o && !o.battle && !o.room && !o.craft && !o.ch?.isRun);
+    if (!leader || !going.includes(leader)) {
+      for (const id of online) this.online.get(id)?.send({ t: 'toast', kind: 'err', text: 'The ready check was called off.' });
+      this.parties.push(p);
+      return;
+    }
+    const run = this.#newRun(R.kind, R.tier, R.mode, Math.min(MAX_RUN_HEROES, going.length), p.id);
+    leader.lastRunAt = Date.now();
+    for (const o of going.slice(0, MAX_RUN_HEROES)) this.#intoRun(o, run);
+    for (const id of R.no) this.online.get(id)?.send({ t: 'toast', text: 'Your party went in without you. You can still join them from the Party panel.' });
+    this.parties.push(p);
+  }
+  // Join your party's run late (from anywhere), until the boss falls.
+  joinRun(c, runId) {
+    const run = this.runs.get(String(runId));
+    if (!run || run.ended) fail('That run is over.');
+    const p = this.parties.get(c.hero.id);
+    if (!run.partyId || p?.id !== run.partyId) fail("That isn't your party's run.");
+    this.#notBusy(c);
+    if (!run.canJoin(c.hero.id)) fail(run.bossDown ? 'They have already beaten the boss.' : run.full ? 'That run is full.' : "You can't rejoin a run you left.");
+    this.#intoRun(c, run);
+    this.parties.push(p);
+    return { run: run.id };
+  }
+  #intoRun(c, run) {
+    c.cancelFishing();
+    const townPos = { x: c.ent.x, z: c.ent.z };
+    const channel = c.ch?.isRun ? null : (c.ch?.id ?? null);
+    this.heroes.savePos(c.hero.id, townPos.x, townPos.z); // a crash inside never strands you underground
     c.ch?.remove(c);
+    run.enter(c, { townPos, channel });
+  }
+  // Leave a run: back where you were before you went in.
+  leaveRun(c) {
+    const run = c.ch?.isRun ? c.ch : null;
+    if (!run) fail("You're not in a dungeon.");
+    if (c.battle) fail('Finish (or flee) your battle first.');
+    const m = run.depart(c);
+    this.#outOfRun(c, run, m);
+    const p = this.parties.get(c.hero.id);
+    if (p) this.parties.push(p);
+    return { left: true };
+  }
+  #outOfRun(c, run, m) {
+    const door = ENTRANCES.find((e) => e.kind === run.kind);
+    const pos = m?.townPos && isWalkable(m.townPos.x, m.townPos.z, world().col) ? m.townPos : door ? { x: entranceFront(door)[0], z: entranceFront(door)[1] } : SPAWN;
+    Object.assign(c.ent, { x: pos.x, z: pos.z, path: null, act: 'idle' });
+    c.ent.hp = Math.max(1, Math.min(c.ent.hp, c.ent.maxHp));
+    c.townPos = null;
+    // Friends come back out together: to the party leader's channel if we can.
+    const p = run.partyId && this.parties.parties.get(run.partyId);
+    const lead = p ? this.online.get(p.leader) : null;
+    this.pickChannel(lead?.ch && !lead.ch.isRun ? lead.ch.id : m?.channel).add(c);
+  }
+  // The fourth wipe: the crypt throws you out (you keep what you won).
+  failRun(run) {
+    run.ended = true;
+    setImmediate(() => this.closeRun(run, `The dead of ${run.def.name} have had enough of you. You keep what you found; the chests stay shut.`));
+  }
+  closeRun(run, text = `${run.def.name} closes behind you.`) {
+    run.ended = true;
+    for (const c of [...run.players.values()]) {
+      if (c.battle) {
+        const b = c.battle;
+        b.fighters.delete(c.hero.id);
+        c.battle = null;
+        if (!b.fighters.size) b.over = true;
+      }
+      const m = run.depart(c);
+      c.send({ t: 'toast', kind: 'err', text });
+      this.#outOfRun(c, run, m);
+    }
+    this.runs.delete(run.id);
+    const p = run.partyId && this.parties.parties.get(run.partyId);
+    if (p) this.parties.push(p);
+  }
+  endAllRuns() {
+    for (const run of [...this.runs.values()]) this.closeRun(run, 'The crypt is being rebuilt. Back to the surface!');
+  }
+  dungeonInfo(c, kind) {
+    const K = DUNGEONS[kind];
+    if (!K) fail('No such dungeon.');
+    const now = Date.now();
+    const db = this.db;
+    const tierRows = Object.keys(TIERS).map(Number).map((t) => ({
+      tier: t,
+      ...TIERS[t],
+      unlocked: t === 1 || this.bestTier(c.hero.id, kind) >= t - 1,
+      best: db.prepare("SELECT party, MIN(seconds) AS seconds FROM dungeon_runs WHERE kind = ? AND tier = ? AND mode = 'random' GROUP BY party").all(kind, t),
+      weekly: db.prepare("SELECT party, heroes, seconds FROM dungeon_runs WHERE kind = ? AND tier = ? AND mode = 'weekly' AND week = ? ORDER BY seconds LIMIT 5").all(kind, t, weekIndex(now)).map((r) => ({ ...r, heroes: JSON.parse(r.heroes) })),
+      firstToday: db.prepare('SELECT day FROM dungeon_daily WHERE account_id = ? AND kind = ? AND tier = ?').get(c.hero.id, kind, t)?.day !== dayIndex(now),
+    }));
+    const p = this.parties.get(c.hero.id);
+    const run = p ? this.runForParty(p.id) : null;
+    const mod = modifierFor(now);
+    return {
+      kind,
+      name: K.name,
+      blurb: K.blurb,
+      tiers: tierRows,
+      mod: { id: mod, ...MODIFIERS[mod] },
+      party: p ? this.parties.view(p) : null,
+      partyRun: run ? { id: run.id, inside: run.players.size, tier: run.tier, canJoin: run.canJoin(c.hero.id) } : null,
+      nextWeekIn: (weekIndex(now) + 1) * 7 * 86_400_000 - 3 * 86_400_000 - now,
+    };
   }
 
   onMessage(c, buf) {
@@ -860,6 +647,8 @@ export class Game {
     try {
       const h = HANDLERS[m.t];
       if (!h) return;
+      // Inside a dungeon only some things make sense (no fishing, travel, shops…).
+      if (c.ch?.isRun && !RUN_OK.has(m.t) && !(m.t === 'rpc' && RUN_RPC_OK(String(m.m)))) fail('Not inside the crypt.');
       const res = h(this, c, m, now);
       if (m.rid) c.send({ t: 'res', rid: m.rid, ok: true, data: res ?? null });
     } catch (e) {
@@ -1078,8 +867,8 @@ const HANDLERS = {
     const x = num(m.x);
     const z = num(m.z);
     if (c.room) return c.room.move(c, x, z);
-    if (Math.hypot(x, z) > WORLD_RADIUS + 10) return;
-    const path = STATIC.nav.findPath(c.ent.x, c.ent.z, x, z);
+    if (!c.ch.inBounds(x, z)) return;
+    const path = c.ch.nav.findPath(c.ent.x, c.ent.z, x, z);
     c.cancelFishing();
     if (path) {
       c.ent.path = path;
@@ -1099,17 +888,27 @@ const HANDLERS = {
     if (!mob || mob.state === 'dead') fail('It ran off.');
     if (c.battle) fail('Already fighting!');
     if (dist(c.ent, mob) > 6) fail('Get closer first.');
+    if (c.ch.isRun) {
+      // No fighting through bars: you must be able to walk to it.
+      const path = c.ch.nav.findPath(c.ent.x, c.ent.z, mob.x, mob.z);
+      let len = 0;
+      let [px, pz] = [c.ent.x, c.ent.z];
+      for (const [x, z] of path ?? []) (len += Math.hypot(x - px, z - pz)), ([px, pz] = [x, z]);
+      if (!path || len > ENGAGE_PATH) fail("You can't reach it from here.");
+    }
     let b = mob.battle;
+    const fresh = !b;
     if (!b) {
       b = new Battle(c.ch, mob);
       c.ch.battles.set(b.id, b);
     }
     b.join(c);
+    if (fresh) c.ch.battleStarted?.(b, c); // in a dungeon, everyone in the room joins the fight
   },
 
   bact(g, c, m) {
     if (!c.battle) return;
-    c.battle.choose(c, String(m.a), m.item ? String(m.item) : null);
+    c.battle.choose(c, String(m.a), m.item ? String(m.item) : null, m.to ?? null);
   },
 
   chat(g, c, m, now) {
@@ -1139,6 +938,11 @@ const HANDLERS = {
   },
 };
 
+const RUN_OK = new Set(['ping', 'move', 'engage', 'bact', 'chat', 'emote']);
+const RUN_RPC_OK = (name) =>
+  /^(dungeon|party|market)\./.test(name) ||
+  ['equip', 'avatar', 'profile', 'town.info', 'jobs.list', 'drink', 'craft.info', 'invite.create', 'tutorialSkip', 'shop.state', 'shop.ledger', 'shop.collect', 'shop.ack', 'shop.directory'].includes(name);
+
 const RPC = {
   craft: () => fail('Crafting is hands-on now — pick a recipe and head to its station!'),
   'craft.info': (g, c) => g.crafting.info(c),
@@ -1147,6 +951,18 @@ const RPC = {
   'craft.cancel': (g, c, a) => g.crafting.cancel(c, a),
   'craft.quick': (g, c, a) => g.crafting.quick(c, a),
   npcSell: (g, c, a) => g.npcSell(c, a.item, a.qty),
+  // Drink a healing item outside a battle (in a dungeon nothing heals on its own).
+  drink(g, c, a) {
+    const it = ITEMS[a.item];
+    if (!it?.heal) fail('Pick a healing item.');
+    if (c.battle) fail('Use it from the battle menu.');
+    if (c.ent.hp >= c.ent.maxHp) fail("You're already at full health.");
+    g.heroes.takeItem(c.hero.id, String(a.item), 1);
+    const heal = Math.min(c.ent.maxHp - c.ent.hp, Math.round(it.heal * (c.perks().has('mender') ? 1.4 : 1)));
+    c.ent.hp += heal;
+    c.pushInventory();
+    return { heal, hp: Math.round(c.ent.hp) };
+  },
   travel: (g, c, a) => g.travel(c, String(a.to ?? '')),
   'owner.teleport': (g, c, a) => g.ownerTeleport(c, a.x, a.z),
   equip: (g, c, a) => g.equip(c, a.item),
@@ -1159,7 +975,9 @@ const RPC = {
     if (!h) fail('No such hero.');
     const on = g.online.get(h.id);
     const shop = g.shops.info(h.id);
-    return { id: h.id, name: h.name, avatar: h.avatar, level: h.level, skills: h.skills, equip: h.equip, online: !!on, channel: on?.ch?.id ?? null, shop: g.shops.slots(h.id).length, shopOpen: shop ? !!shop.open : false, inside: on?.room?.owner ?? null };
+    const party = g.parties.get(h.id);
+    const mine = g.parties.get(c.hero.id);
+    return { id: h.id, name: h.name, avatar: h.avatar, level: h.level, skills: h.skills, equip: h.equip, online: !!on, channel: on?.ch?.isRun ? null : (on?.ch?.id ?? null), dungeon: on?.ch?.isRun ? on.ch.def.name : null, shop: g.shops.slots(h.id).length, shopOpen: shop ? !!shop.open : false, inside: on?.room?.owner ?? null, inParty: !!party, sameParty: !!party && party === mine, canInvite: !!on && h.id !== c.hero.id && !party && (!mine || (mine.leader === c.hero.id && mine.members.length < 4)) };
   },
 
   // Market
@@ -1263,7 +1081,7 @@ const RPC = {
       .slice(0, 10);
     return {
       channels: g.channels.map((ch) => ({ id: ch.id, players: ch.size, cap: CHANNEL_CAP })),
-      online: [...g.online.values()].map((o) => ({ id: o.hero.id, name: o.hero.name, level: o.hero.level, channel: o.ch?.id })),
+      online: [...g.online.values()].map((o) => ({ id: o.hero.id, name: o.hero.name, level: o.hero.level, channel: o.ch?.isRun ? null : o.ch?.id, dungeon: o.ch?.isRun ? o.ch.def.name : null, party: g.parties.get(o.hero.id)?.id ?? null })),
       rich,
       levels,
       invites: g.auth.myInvites(c.hero.id),
@@ -1271,6 +1089,26 @@ const RPC = {
     };
   },
   'invite.create': (g, c) => ({ code: g.auth.createInvite(c.hero.id) }),
+
+  // Dungeons (server/dungeons.js) and parties (server/party.js)
+  'dungeon.info': (g, c, a) => g.dungeonInfo(c, String(a.kind ?? 'hollow_crypt')),
+  'dungeon.enter': (g, c, a) => g.enterDungeon(c, String(a.kind ?? ''), { tier: a.tier, mode: a.mode === 'weekly' ? 'weekly' : 'random', party: !!a.party }),
+  'dungeon.ready': (g, c, a) => g.readyAnswer(c, !!a.yes),
+  'dungeon.join': (g, c, a) => g.joinRun(c, a.run),
+  'dungeon.leave': (g, c) => g.leaveRun(c),
+  'dungeon.use'(g, c, a) {
+    if (!c.ch?.isRun) fail("You're not in a dungeon.");
+    return c.ch.use(c, String(a.what ?? ''));
+  },
+  'party.get': (g, c) => {
+    const p = g.parties.get(c.hero.id);
+    return p ? g.parties.view(p) : null;
+  },
+  'party.invite': (g, c, a) => g.parties.invite(c, a.id),
+  'party.answer': (g, c, a) => g.parties.answer(c, !!a.accept),
+  'party.leave': (g, c) => g.parties.leave(c.hero.id, 'left'),
+  'party.kick': (g, c, a) => g.parties.kick(c, a.id),
+  'party.promote': (g, c, a) => g.parties.promote(c, a.id),
 
   // Bulletin board (server/jobs.js)
   'jobs.list': (g, c) => ({ open: g.jobs.list(), mine: g.jobs.mine(c.hero.id), now: Date.now() }),
@@ -1299,6 +1137,7 @@ const RPC = {
     const target = g.channels.find((ch) => ch.id === Number(a.id));
     if (!target) fail('No such channel.');
     if (target === c.ch) fail("You're already here.");
+    if (c.ch?.isRun) fail('Leave the dungeon first.');
     if (target.size >= CHANNEL_CAP) fail('That channel is full.');
     if (c.battle) fail('Finish your battle first.');
     if (c.room) fail('Leave the shop first.');
@@ -1311,4 +1150,3 @@ const RPC = {
   },
 };
 
-export { STATIC };

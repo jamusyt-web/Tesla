@@ -206,6 +206,32 @@ const MIGRATIONS = [
       CREATE INDEX idx_jobs_poster ON jobs(poster, status);
     `);
   },
+  // 6: dungeons: cleared runs (records, tier unlocks, the weekly board) and
+  // the day each hero last had a tier's first-clear bonus.
+  (db) => {
+    db.exec(`
+      CREATE TABLE dungeon_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        tier INTEGER NOT NULL,
+        mode TEXT NOT NULL,
+        week INTEGER NOT NULL,
+        party INTEGER NOT NULL,
+        heroes TEXT NOT NULL,
+        hero_ids TEXT NOT NULL,
+        seconds INTEGER NOT NULL,
+        finished_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_dungeon_runs ON dungeon_runs(kind, tier, mode, party, seconds);
+      CREATE TABLE dungeon_daily (
+        account_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        tier INTEGER NOT NULL,
+        day INTEGER NOT NULL,
+        PRIMARY KEY (account_id, kind, tier)
+      );
+    `);
+  },
 ];
 
 export function migrate(db) {

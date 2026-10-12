@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { setWorld, mapProblems, formatMap, upgradeMap } from '../shared/world.js';
 import { MONSTERS } from '../shared/monsters.js';
+import { DUNGEONS } from '../shared/dungeon.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SHIPPED_MAP = path.join(ROOT, 'maps', 'world.json');
@@ -29,6 +30,7 @@ function read(file) {
 export function serverMapProblems(m) {
   m = upgradeMap(m);
   const out = mapProblems(m);
+  for (const e of m?.entrances ?? []) if (!DUNGEONS[e.kind]) out.push(`entrances (${e.id}): unknown dungeon "${e.kind}".`);
   for (const s of m?.spawns ?? []) {
     if (!MONSTERS[s.monster]) out.push(`spawns (${s.id}): unknown monster "${s.monster}".`);
     if (!(s.r > 0) || !(s.count >= 0)) out.push(`spawns (${s.id}) needs r > 0 and a count.`);

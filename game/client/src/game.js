@@ -1433,6 +1433,14 @@ export class GameClient {
       }
     }
     if (mv && !m.victory) this.#mobState(mv, 'roam');
+    if (!r && this.battle?.id === m.id) {
+      // It ended without us (we'd already left it): never leave the battle screen up.
+      this.battle = null;
+      this.me.av.setState('idle');
+      this.me.av.hold(null);
+      this.hud.battleEnd({ fled: true });
+      return;
+    }
     if (!r || !this.battle || this.battle.id !== m.id) return;
     setTimeout(() => {
       this.battle = null;

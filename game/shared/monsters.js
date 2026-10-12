@@ -47,6 +47,31 @@ export const MONSTERS = {
     drops: [{ id: 'iron_ore', p: 0.7, min: 1, max: 3 }, { id: 'goblin_coin', p: 0.5, min: 1, max: 2 }],
     moves: [{ name: 'Rusted Cleave', mult: 1 }, { name: 'Grave Slash', mult: 1.45 }],
   },
+  // ── Dungeon monsters (the Hollow Crypt). Base stats for one hero; a run
+  // scales them for the party, the tier and the day (shared/dungeon.js).
+  thrall: {
+    name: 'Rotting Thrall', lvl: 4, hp: 80, atk: 12, def: 3, xp: 24, gold: [6, 12], color: '#6f9a5a', dungeon: true,
+    drops: [{ id: 'grave_dust', p: 0.35, min: 1, max: 1 }],
+    moves: [{ name: 'Claw', mult: 1 }, { name: 'Putrid Bite', mult: 1.3 }],
+  },
+  crypt_skeleton: {
+    name: 'Crypt Skeleton', lvl: 5, hp: 100, atk: 14, def: 6, xp: 30, gold: [8, 15], color: '#e8d9b0', dungeon: true,
+    drops: [{ id: 'grave_dust', p: 0.35, min: 1, max: 1 }, { id: 'iron_ore', p: 0.2, min: 1, max: 1 }],
+    moves: [{ name: 'Rusted Cleave', mult: 1 }, { name: 'Bone Rattle', mult: 1.35 }],
+  },
+  crypt_wisp: {
+    name: 'Crypt Wisp', lvl: 5, hp: 95, atk: 15, def: 3, xp: 30, gold: [9, 16], color: '#b8d4ff', dungeon: true,
+    drops: [{ id: 'grave_dust', p: 0.35, min: 1, max: 1 }],
+    moves: [{ name: 'Chill Touch', mult: 1 }, { name: 'Grave Wail', mult: 1.5 }],
+  },
+  pale_count: {
+    name: 'The Pale Count', lvl: 8, hp: 360, atk: 20, def: 7, xp: 160, gold: [80, 120], color: '#b03a48', dungeon: true, boss: true,
+    drops: [{ id: 'grave_dust', p: 1, min: 1, max: 2 }],
+    moves: [{ name: 'Night Claw', mult: 1 }, { name: 'Drain', mult: 1.1, drain: 0.5 }],
+    // Every third round from the second, he gathers a Blood Mist that lands
+    // on everyone the next round. Defend!
+    telegraph: { start: 2, every: 3, move: { name: 'Blood Mist', mult: 1.8, aoe: true, full: true } },
+  },
   bear: {
     name: 'Rimefang Bear', lvl: 10, hp: 300, atk: 27, def: 11, xp: 125, gold: [32, 55], color: '#f2f6fa',
     drops: [{ id: 'wolf_pelt', p: 0.9, min: 2, max: 3 }, { id: 'golem_core', p: 0.08, min: 1, max: 1 }],

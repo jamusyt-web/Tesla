@@ -50,6 +50,7 @@ export function mulberry32(seed) {
 //   nodes     [{ id, type, x, z, rot, s }]            gatherables (NODE_TYPES)
 //   spawns    [{ id, monster, x, z, r, count }]       monster camps
 //   stones    [{ id, name, x, z, rot }]                fast-travel waystones (you arrive in front)
+//   entrances [{ id, kind, x, z, rot }]                dungeon doors (kind: shared/dungeon.js DUNGEONS)
 //   props     [{ id, slot, x, z, rot, r, s?, y?, v?, bob?, station? }]
 //             slot = model slot (client/src/scene/manifest.js) or a proc_* kind;
 //             r > 0 blocks movement; station marks a crafting station.
@@ -76,8 +77,9 @@ export let NODES = [];
 export let SPAWNS = [];
 export let PROPS = [];
 export let STONES = [];
+export let ENTRANCES = [];
 
-const LISTS = ['lands', 'regions', 'buildings', 'gates', 'plazas', 'fountains', 'lakes', 'docks', 'zones', 'paths', 'nodes', 'spawns', 'stones', 'props'];
+const LISTS = ['lands', 'regions', 'buildings', 'gates', 'plazas', 'fountains', 'lakes', 'docks', 'zones', 'paths', 'nodes', 'spawns', 'stones', 'entrances', 'props'];
 
 // Checks a map's shape and returns a list of problems (empty = fine).
 export function mapProblems(m) {
@@ -107,7 +109,8 @@ export function mapProblems(m) {
       if (k === 'buildings' && !(e.w > 0 && e.d > 0)) out.push(`${where} needs a positive w and d.`);
       if (k === 'lands' && !(e.r >= 5)) out.push(`${where} needs a radius r of at least 5.`);
       if (k === 'stones' && (typeof e.name !== 'string' || !e.name.trim())) out.push(`${where} needs a name.`);
-      if (k === 'stones' && e.rot != null && !Number.isFinite(e.rot)) out.push(`${where} needs a numeric rot (the way it faces, in radians).`);
+      if ((k === 'stones' || k === 'entrances') && e.rot != null && !Number.isFinite(e.rot)) out.push(`${where} needs a numeric rot (the way it faces, in radians).`);
+      if (k === 'entrances' && typeof e.kind !== 'string') out.push(`${where} needs a dungeon kind.`);
     });
   }
   return out;
@@ -118,6 +121,9 @@ const FIRST_STONES = [
   { id: 'stone_square', name: 'Hearthvale Square', x: 6.2, z: 5.2, rot: -1.76 },
   { id: 'stone_wildwatch', name: 'Wildwatch', x: 3, z: -40.5, rot: 3.14 },
 ];
+
+// …and the Hollow Crypt's door, in the Wilds.
+const FIRST_ENTRANCES = [{ id: 'crypt_hollow', kind: 'hollow_crypt', x: 0, z: -74, rot: 0 }];
 
 // Older map files, brought up to the current format (a new object; the input is untouched).
 export function upgradeMap(m) {
@@ -140,6 +146,14 @@ export function upgradeMap(m) {
     const fits = (x, z) => lands.some((l) => Math.hypot(x - l.x, z - l.z) < l.r - 3) && !builds.some((b) => inRect(x, z, b, 2));
     const ok = (s) => !used.has(s.id) && fits(s.x, s.z) && fits(...stoneFront(s));
     m = { ...m, stones: FIRST_STONES.filter(ok).map((s) => ({ ...s })) };
+  }
+  // …and from before dungeons: the Hollow Crypt, where it still fits.
+  if (m?.format === 2 && !m.entrances) {
+    const used = new Set(LISTS.flatMap((k) => (Array.isArray(m[k]) ? m[k].map((e) => e?.id) : [])));
+    const lands = Array.isArray(m.lands) ? m.lands : [];
+    const builds = Array.isArray(m.buildings) ? m.buildings : [];
+    const fits = (e) => lands.some((l) => Math.hypot(e.x - l.x, e.z - l.z) < l.r - 8) && !builds.some((b) => inRect(e.x, e.z, b, 6));
+    m = { ...m, entrances: FIRST_ENTRANCES.filter((e) => !used.has(e.id) && fits(e)).map((e) => ({ ...e })) };
   }
   return m;
 }
@@ -176,6 +190,7 @@ export function setWorld(m) {
   SPAWNS = m.spawns ?? [];
   PROPS = (m.props ?? []).map((p) => ({ rot: 0, r: 0, ...p }));
   STONES = (m.stones ?? []).map((st) => ({ rot: 0, ...st }));
+  ENTRANCES = (m.entrances ?? []).map((e) => ({ rot: 0, ...e }));
   return m;
 }
 
@@ -218,6 +233,12 @@ export const STONE_R = 0.7; // its collision radius
 export const travelFee = (a, b) => 5 + Math.round(Math.hypot(a.x - b.x, a.z - b.z) / 25);
 // Where you appear: a couple of metres in front of the stone.
 export const stoneFront = (st, d = 2.6) => [st.x + Math.sin(st.rot ?? 0) * d, st.z + Math.cos(st.rot ?? 0) * d];
+// Dungeon entrances: a crypt about 6 m wide and 7.6 m deep, its door on the
+// front (the way `rot` faces). You stand in front of the door to go in.
+export const CRYPT = { w: 6, d: 7.6 };
+const quarter = (rot) => Math.round((rot ?? 0) / (Math.PI / 2)) & 1; // 1 when turned sideways
+export const entranceFront = (e, d = 2.2) => [e.x + Math.sin(e.rot ?? 0) * (CRYPT.d / 2 + d), e.z + Math.cos(e.rot ?? 0) * (CRYPT.d / 2 + d)];
+
 // The stone you're standing at (nearest within range), if any.
 export function stoneNear(x, z) {
   let best = null;
@@ -290,7 +311,9 @@ const inRect = (x, z, b, pad = 0) => Math.abs(x - b.x) < b.w / 2 + pad && Math.a
 // They're indexed in a coarse grid, so a walkability test only looks at what's
 // nearby however big the world gets.
 export function buildColliders() {
-  const rects = BUILDINGS.map((b) => ({ x: b.x, z: b.z, w: b.w, d: b.d })).concat(GATES.flatMap((g) => gateColliders(g)));
+  const rects = BUILDINGS.map((b) => ({ x: b.x, z: b.z, w: b.w, d: b.d }))
+    .concat(GATES.flatMap((g) => gateColliders(g)))
+    .concat(ENTRANCES.map((e) => (quarter(e.rot) ? { x: e.x, z: e.z, w: CRYPT.d, d: CRYPT.w } : { x: e.x, z: e.z, w: CRYPT.w, d: CRYPT.d })));
   const circles = FOUNTAINS.map((f) => ({ x: f.x, z: f.z, r: f.r }));
   for (const n of NODES) {
     const t = NODE_TYPES[n.type];
@@ -369,6 +392,10 @@ export class NavGrid {
         const ok = w(x, z) && w(x - m, z - m) && w(x + m, z - m) && w(x - m, z + m) && w(x + m, z + m);
         this.block[j * this.nx + i] = ok ? 0 : 1;
       }
+  }
+  // Forget what's been worked out (something solid moved, e.g. a gate opened).
+  invalidate() {
+    this.done.fill(0);
   }
   center(i, j) {
     return [this.ox + (i + 0.5) * this.cs, this.oz + (j + 0.5) * this.cs];
