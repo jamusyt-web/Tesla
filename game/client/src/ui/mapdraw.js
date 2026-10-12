@@ -1,5 +1,6 @@
 import { MONSTERS } from '../../../shared/monsters.js';
-import { LANDS, REGIONS, ZONES, LAKES, PLAZAS, BUILDINGS, GATES, DOCKS, SPAWNS, STONES, pathSegments } from '../../../shared/world.js';
+import { LANDS, REGIONS, ZONES, LAKES, PLAZAS, BUILDINGS, GATES, DOCKS, SPAWNS, STONES, ENTRANCES, pathSegments } from '../../../shared/world.js';
+import { DUNGEONS } from '../../../shared/dungeon.js';
 
 export const TIER_NAMES = ['', 'Starter', 'Novice', 'Adept', 'Veteran', 'Elite'];
 export const tierLabel = (t) => `Tier ${t}${TIER_NAMES[t] ? ` · ${TIER_NAMES[t]}` : ''}`;
@@ -161,6 +162,31 @@ export function paintWorld(x, v, mark = {}) {
       }
       x.restore();
       if (on || s > 2.2) text(on ? st.name : '?', sx, sy + 19, '700 12px "Alegreya Sans", sans-serif', on ? '#dff8ff' : '#c8c8c8', 'rgba(10, 20, 28, 0.9)');
+    }
+    // Dungeon entrances: a dark tombstone with a red glow.
+    for (const e of ENTRANCES) {
+      const [sx, sy] = toScreen(e.x, e.z);
+      x.save();
+      x.translate(sx, sy);
+      x.shadowColor = '#ff4a5a';
+      x.shadowBlur = 10;
+      x.beginPath();
+      x.moveTo(-8, 9);
+      x.lineTo(-8, -3);
+      x.arc(0, -3, 8, Math.PI, 0);
+      x.lineTo(8, 9);
+      x.closePath();
+      x.fillStyle = '#4a3550';
+      x.fill();
+      x.shadowBlur = 0;
+      x.lineWidth = 2;
+      x.strokeStyle = '#f0c8d0';
+      x.stroke();
+      x.fillStyle = '#f0c8d0';
+      x.fillRect(-1.2, -6, 2.4, 9);
+      x.fillRect(-4, -3.5, 8, 2.4);
+      x.restore();
+      text(DUNGEONS[e.kind]?.name ?? 'Crypt', sx, sy + 20, '700 12px "Alegreya Sans", sans-serif', '#ffd8de', 'rgba(30, 10, 20, 0.9)');
     }
   return text;
 }

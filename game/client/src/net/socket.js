@@ -32,32 +32,58 @@ export class Socket {
       this.pingTimer = setInterval(() => this.send({ t: 'ping', c: performance.now() }), 4000);
     };
     ws.onmessage = (ev) => {
-      let m;
-      try {
-        m = JSON.parse(ev.data);
-      } catch {
-        return;
-      }
-      if (m.t === 'res') {
-        const p = this.pending.get(m.rid);
-        if (p) {
-          this.pending.delete(m.rid);
-          m.ok ? p.resolve(m.data) : p.reject(new Error(m.err));
-        }
-        return;
-      }
-      if (m.t === 'pong') this.rtt = this.rtt * 0.7 + (performance.now() - m.c) * 0.3;
-      this.emit(m.t, m);
+      // Held while the game builds a new scene (a dungeon): replayed in order after.
+      if (this.held) return void this.held.push(ev.data);
+      this.#handle(ev.data);
     };
-    ws.onclose = (ev) => {
-      clearInterval(this.pingTimer);
-      for (const p of this.pending.values()) p.reject(new Error('Disconnected'));
-      this.pending.clear();
-      this.emit('_close', ev);
-      if (this.closedByUs || ev.code === 4001 || ev.code === 4002 || ev.code === 4003) return; // 4003: world updated, the page reloads
-      const wait = Math.min(8000, 500 * 2 ** this.retry++);
-      setTimeout(() => this.connect(), wait);
-    };
+    ws.onclose = (ev) => this.#closed(ev);
+  }
+
+  // Hold incoming messages (in order) until resume().
+  pause() {
+    this.held ??= [];
+  }
+  resume() {
+    const q = this.held;
+    this.held = null;
+    for (const d of q ?? []) this.#handle(d);
+  }
+
+  #handle(data) {
+    let m;
+    try {
+      m = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (m.t === 'res') {
+      const p = this.pending.get(m.rid);
+      if (p) {
+        this.pending.delete(m.rid);
+        m.ok ? p.resolve(m.data) : p.reject(new Error(m.err));
+      }
+      return;
+    }
+    if (m.t === 'pong') {
+      const rtt = performance.now() - m.c;
+      this.rtt = this.rtt * 0.7 + rtt * 0.3;
+      // The server's clock (spike traps keep time with it).
+      if (m.s) this.clockOffset = this.clockOffset == null ? m.s + rtt / 2 - Date.now() : this.clockOffset * 0.8 + (m.s + rtt / 2 - Date.now()) * 0.2;
+    }
+    this.emit(m.t, m);
+  }
+  serverNow() {
+    return Date.now() + (this.clockOffset ?? 0);
+  }
+
+  #closed(ev) {
+    clearInterval(this.pingTimer);
+    for (const p of this.pending.values()) p.reject(new Error('Disconnected'));
+    this.pending.clear();
+    this.emit('_close', ev);
+    if (this.closedByUs || ev.code === 4001 || ev.code === 4002 || ev.code === 4003) return; // 4003: world updated, the page reloads
+    const wait = Math.min(8000, 500 * 2 ** this.retry++);
+    setTimeout(() => this.connect(), wait);
   }
 
   send(msg) {

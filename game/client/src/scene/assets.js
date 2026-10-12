@@ -298,7 +298,7 @@ export function make(slot, { variant = 0, tint = null, outline = true, castShado
 
 // Many copies of one model as InstancedMeshes (one per sub-mesh, plus its
 // outline) — for scenery like trees, bushes and flowers.
-// placements: [{ x, z, y?, rot?, s? }]. Returns a Group or null.
+// placements: [{ x, z, y?, rot?, s?, sv?: [x, y, z] }]. Returns a Group or null.
 export function instanced(slot, placements, { variant = 0, tint = null, outline = true, castShadow = true } = {}) {
   const list = ready.get(slot);
   if (!list || !placements.length) return null;
@@ -319,7 +319,8 @@ export function instanced(slot, placements, { variant = 0, tint = null, outline 
     placements.forEach((pl, i) => {
       o.position.set(pl.x, pl.y ?? 0, pl.z);
       o.rotation.set(0, pl.rot ?? 0, 0);
-      o.scale.setScalar(pl.s ?? 1);
+      if (pl.sv) o.scale.set(...pl.sv);
+      else o.scale.setScalar(pl.s ?? 1);
       o.updateMatrix();
       const mtx = new THREE.Matrix4().multiplyMatrices(o.matrix, local);
       im.setMatrixAt(i, mtx);

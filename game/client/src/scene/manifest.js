@@ -29,7 +29,12 @@ const FOR = K('mini-forest');
 const FOOD = K('food-kit');
 const FTK = K('fantasy-town-kit');
 const CST = K('castle-kit');
+const MDK = K('modular-dungeon');
 
+// (No ink outline: the kit's walls are open panels, and an outline shell would cover their faces.)
+const CRYPT_STONE = { remap: [{ band: 'metal', to: '#9a9288', ref: 0.5 }], outline: false };
+// Graveyard fire baskets and lanterns are cast in green: make them old iron, the flame glowing.
+const CRYPT_IRON = { remap: [{ band: 'green', to: '#5b514a', ref: 0.5 }], glowBand: { band: 'yellow', color: '#ffb347', amount: 0.8 } };
 // Lighter, warmer iron and glowing glass for every lantern.
 const WARM_LAMP = { remap: [{ band: 'metal', to: '#7d7570', ref: 0.42 }], glowBand: { band: 'yellow', color: '#ffb347', amount: 0.6 } };
 
@@ -73,6 +78,9 @@ export const MODULE_PACKS = {
     'stall-red', 'stall-green', 'banner-green', 'banner-red', 'lantern', 'wheel', 'cart',
   ],
   'castle-kit': ['tower-square-arch', 'tower-square-mid', 'tower-square-top-roof-high-windows', 'metal-gate', 'flag-banner-short', 'wall', 'tower-square-base', 'tower-square-mid-windows', 'tower-square-top-roof'],
+  // Dungeon runs (client/src/scene/dungeon.js): 4 m floor tiles and walls
+  // whose pivot is on the wall's face, gates and the way back up.
+  'modular-dungeon': ['template-wall', 'template-wall-detail-a', 'template-wall-corner', 'gate', 'gate-metal-bars', 'stairs'],
 };
 
 // Palette-swapped copies of a kit's colour atlas (same layout, recoloured
@@ -181,6 +189,44 @@ export const MODELS = {
   mob_boar: { url: PET('animal-hog'), height: 1.2 },
   mob_skeleton: { url: GRV('character-skeleton'), height: 1.9 },
   mob_bear: { url: PET('animal-polar'), height: 2.2 },
+  // The Hollow Crypt
+  mob_thrall: { url: GRV('character-zombie'), height: 1.85 },
+  mob_crypt_skeleton: { url: GRV('character-skeleton'), height: 1.9 },
+  mob_crypt_wisp: { url: GRV('character-ghost'), height: 1.6, tint: { color: '#a9c8ff', amount: 0.35, emissive: '#3f6bff', glow: 0.3 } },
+  mob_pale_count: { url: GRV('character-vampire'), height: 2.7 },
+
+  // ── Dungeon dressing (dg_* slots, placed by shared/dungeon.js) ──────
+  // The kit's lavender stone, warmed to old grey stone.
+  'modular-dungeon:template-floor': { url: MDK('template-floor'), raw: true, outline: false, ...CRYPT_STONE },
+  'modular-dungeon:template-floor-detail': { url: MDK('template-floor-detail'), raw: true, outline: false, ...CRYPT_STONE },
+  'modular-dungeon:template-floor-detail-a': { url: MDK('template-floor-detail-a'), raw: true, outline: false, ...CRYPT_STONE },
+  'modular-dungeon:template-wall': { url: MDK('template-wall'), raw: true, ...CRYPT_STONE },
+  'modular-dungeon:template-wall-detail-a': { url: MDK('template-wall-detail-a'), raw: true, ...CRYPT_STONE },
+  'modular-dungeon:template-wall-corner': { url: MDK('template-wall-corner'), raw: true, ...CRYPT_STONE },
+  'modular-dungeon:gate': { url: MDK('gate'), raw: true, ...CRYPT_STONE },
+  'modular-dungeon:gate-metal-bars': { url: MDK('gate-metal-bars'), raw: true, ...CRYPT_STONE },
+  'modular-dungeon:stairs': { url: MDK('stairs'), raw: true, ...CRYPT_STONE },
+  dg_barrel: { url: DUN('barrel'), height: 1.0 },
+  dg_pillar: { url: GRV('column-large'), height: 4.2 },
+  dg_fire: { url: GRV('fire-basket'), width: 1.1, ...CRYPT_IRON },
+  dg_brazier: { url: GRV('fire-basket'), width: 1.8, ...CRYPT_IRON },
+  dg_coffin: { url: [GRV('coffin'), GRV('coffin-old')], width: 2.0 },
+  dg_altar: { url: GRV('altar-stone'), width: 2.2 },
+  dg_candles: { url: [GRV('candle-multiple'), GRV('candle')], heights: [0.5, 0.45] },
+  dg_chest: { url: DUN('chest'), height: 1.0 },
+  dg_pot: { url: DUN('pot'), height: 0.8 },
+  dg_urn: { url: [GRV('urn-round'), GRV('urn-square')], height: 0.95 },
+  dg_banner: { url: DUN('banner'), height: 1.9, outline: false },
+  dg_rack: { url: [DUN('table'), DUN('wood-support')], width: 1.8 },
+  dg_rubble: { url: [DUN('rocks'), DUN('stones'), GRV('debris'), GRV('rocks-tall')], width: 1.9 },
+  dg_trap: { url: DUN('trap'), width: 3.4 },
+  dg_lantern: { url: GRV('lantern-candle'), height: 0.75, ...CRYPT_IRON },
+  dg_key: { url: DUN('key'), width: 0.9 },
+  // The crypt door in the overworld (base, roof, door; built in town.js)
+  crypt_base: { url: GRV('crypt-large'), fit: [6, 7.6] },
+  crypt_roof: { url: GRV('crypt-large-roof'), fit: [6.4, 7.9] },
+  crypt_door: { url: GRV('crypt-large-door'), width: 2.0 },
+  crypt_grave: { url: [GRV('gravestone-broken'), GRV('debris')], width: 1.1 },
 
   // ── Item icons: rendered once into small pictures for the bag, market and
   // workshop (client/src/ui/portrait.js). `pose: [x, y, z]` turns the model

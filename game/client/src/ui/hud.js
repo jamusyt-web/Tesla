@@ -4,7 +4,8 @@ import { sfx } from '../util/sfx.js';
 import { portrait } from './portrait.js';
 import { ITEMS } from '../../../shared/items.js';
 import { SKILLS, levelProgress } from '../../../shared/skills.js';
-import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, LANDS, EXTENT, SPAWNS, STONES, pathSegments, doorPoint, placeAt, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
+import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, LANDS, EXTENT, SPAWNS, STONES, ENTRANCES, pathSegments, doorPoint, placeAt, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
+import { DUNGEONS, TIERS } from '../../../shared/dungeon.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import { Panels } from './panels.js';
 import { WorldMap, tierLabel } from './worldmap.js';
@@ -15,6 +16,7 @@ const RATING = { easy: ['Easy', '#437a36'], fair: ['Fair', '#8a6a2a'], tough: ['
 const sizeHint = (d) => (d < 20 ? 'A light tug' : d < 45 ? 'A steady pull' : d < 70 ? 'A heavy line' : 'The line screams — something massive');
 
 const isTouchDevice = () => matchMedia('(pointer: coarse)').matches;
+const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 const TUTORIAL_TEXT = [
   { text: 'Fell an oak in Whisperwood', hint: 'Tap a tree, then strike as the ring closes.', target: 'tree' },
@@ -46,28 +48,36 @@ export class Hud {
     this.lv = h('span.lv', '1');
     this.nameEl = h('div.nm', '');
     this.hpFill = h('i', { style: { width: '100%' } });
-    const chip = h('div.hero-chip', { on: { click: () => this.panels.open('bag') } }, h('div', { style: { position: 'relative' } }, this.face, this.lv), h('div', this.nameEl, h('div.hpbar', this.hpFill)));
+    this.hpNum = h('span.hpnum', '');
+    const chip = h('div.hero-chip', { on: { click: () => this.panels.open('bag') } }, h('div', { style: { position: 'relative' } }, this.face, this.lv), h('div', this.nameEl, h('div.hpbar', this.hpFill, this.hpNum)));
     this.goldEl = h('b', '0');
     const gold = h('div.pill', coin(), this.goldEl);
     this.onlineEl = h('span', '1');
     const online = h('div.pill.online', { on: { click: () => this.panels.open('townhall', { tab: 'online' }) } }, h('span.dot'), this.onlineEl, ' here');
+    // Underground the "here" pill becomes the run's clock: time, rooms, the key.
+    this.runTime = h('b', '0:00');
+    this.runRooms = h('span.muted', '');
+    this.runKey = h('span.rkey.hidden', glyph('key'));
+    this.runChip = h('div.pill.runchip.hidden', { on: { click: () => this.panels.open('dmap') } }, glyph('hourglass'), this.runTime, this.runRooms, this.runKey);
     this.chanEl = h('span.muted', '');
     this.mm = h('canvas', { width: 256, height: 256 });
-    const minimap = h('div.minimap', { title: 'World map (M)', on: { click: () => this.worldMap.toggle() } }, this.mm);
+    const minimap = h('div.minimap', { title: 'World map (M)', on: { click: () => this.toggleMap() } }, this.mm);
     const muteIcon = () => this.muteBtn.replaceChildren(glyph(sfx.muted ? 'mute' : 'sound', '20px'));
     this.muteBtn = h('button.pill', { 'aria-label': 'Sound on/off', style: { padding: '8px 10px', color: 'var(--gold)' }, on: { click: () => (sfx.toggle(), muteIcon()) } });
     muteIcon();
-    const mapBtn = h('button.pill', { 'aria-label': 'World map', title: 'World map (M)', style: { padding: '8px 10px', color: 'var(--gold)' }, on: { click: () => (sfx.tap(), this.worldMap.toggle()) } }, glyph('map', '20px'));
+    const mapBtn = h('button.pill', { 'aria-label': 'World map', title: 'World map (M)', style: { padding: '8px 10px', color: 'var(--gold)' }, on: { click: () => (sfx.tap(), this.toggleMap()) } }, glyph('map', '20px'));
     const col = (...k) => h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } }, ...k);
-    this.el.append(h('div.topbar', chip, col(gold, online), h('div.spacer'), col(this.muteBtn, mapBtn), minimap));
+    this.onlinePill = online;
+    this.el.append(h('div.topbar', chip, col(gold, online, this.runChip), h('div.spacer'), col(this.muteBtn, mapBtn), minimap));
     this.banner = h('div.region-banner.hidden');
     this.el.append(this.banner);
 
     this.questEl = h('div.quest.hidden');
+    this.partyFrame = h('div.partyframe.hidden');
     this.arrowIcon = h('div.ga-icon', h('i'));
     this.arrowLabel = h('div.ga-label');
     this.arrow = h('div.guide-arrow.hidden', this.arrowIcon, this.arrowLabel);
-    this.el.append(this.questEl, this.arrow);
+    this.el.append(h('div.leftcol', this.questEl, this.partyFrame), this.arrow);
 
     const dockBtn = (ic, label, fn, badge) => h('button', { 'aria-label': label, on: { click: () => (sfx.tap(), fn()) } }, glyph(ic), h('span', label), badge);
     this.shopBadge = h('i.badge.hidden', '0');
@@ -89,7 +99,22 @@ export class Hud {
       this.ledgerBtn,
       dockBtn('village', 'Shops', () => this.panels.open('shops')),
     );
-    this.el.append(this.dock, this.roomDock);
+    // In a dungeon: the way out, your bag, the crypt's map, your party.
+    this.dungeonDock = h(
+      'div.dock.hidden',
+      (this.leaveBtn = dockBtn('door', 'Leave', () => this.panels.open('dleave'))),
+      dockBtn('bag', 'Bag', () => this.panels.open('bag')),
+      dockBtn('map', 'Map', () => this.panels.open('dmap')),
+      dockBtn('people', 'Party', () => this.panels.open('party')),
+    );
+    this.el.append(this.dock, this.roomDock, this.dungeonDock);
+    // The round button above the dock: the best thing to do right here.
+    this.ctxBtn = h('button.ctxbtn.hidden', { on: { click: () => (sfx.tap(), this.ctx?.fn()) } });
+    this.el.append(this.ctxBtn);
+    this.prompts = h('div.prompts');
+    this.el.append(this.prompts);
+    this.lowHp = h('div.lowhp.hidden');
+    this.el.append(this.lowHp);
 
     this.log = h('div.log');
     this.input = h('input', { placeholder: 'Say something…', maxLength: 140, enterKeyHint: 'send' });
@@ -146,6 +171,10 @@ export class Hud {
       this.sock.rpc('shop.ack', { upto: Math.max(...b.map((x) => x.id)) }, { auto: true }).catch(() => {});
     });
     s.on('kicked', (m) => this.toast(m.reason, 'err'));
+    // Parties and dungeon ready checks
+    s.on('party', (m) => this.setParty(m.party));
+    s.on('partyInvite', (m) => this.#invitePrompt(m));
+    s.on('dready', (m) => this.#readyPrompt(m));
   }
 
   onWelcome(m) {
@@ -160,8 +189,10 @@ export class Hud {
     this.setTill(y.shop?.till || 0);
     this.#renderFace();
     this.#renderQuest();
-    this.#drawMapBase();
-    this.chatLine({ sys: true, text: `Welcome to Hearthvale — Channel ${m.channel}. ${m.players.length ? `${m.players.length} other ${m.players.length === 1 ? 'hero is' : 'heroes are'} here!` : 'Invite friends from the Town Hall!'}` });
+    if (!this.mapBase) this.#drawMapBase(); // the island never changes while you play
+    if (m.dungeon) this.chatLine({ sys: true, text: `${m.dungeon.layout.name} · ${TIERS[m.dungeon.layout.tier]?.name ?? ''}${m.players.length ? ` · with ${m.players.map((p) => p.name).join(', ')}` : ''}` });
+    else this.chatLine({ sys: true, text: `Welcome to Hearthvale — Channel ${m.channel}. ${m.players.length ? `${m.players.length} other ${m.players.length === 1 ? 'hero is' : 'heroes are'} here!` : 'Invite friends from the Town Hall!'}` });
+    this.sock.rpc('party.get', {}, { auto: true }).then((p) => this.setParty(p)).catch(() => {});
   }
 
   #renderFace() {
@@ -185,6 +216,7 @@ export class Hud {
     }
     this.lv.textContent = this.me.level;
     this.hpFill.style.width = `${Math.round((100 * this.me.hp) / this.me.maxHp)}%`;
+    this.hpNum.textContent = `${Math.round(this.me.hp)}/${this.me.maxHp}`;
     if (m.equip && this.game?.me) this.game.me.av.setEquip(m.equip);
     this.panels.refresh();
     this.worldMap.refresh();
@@ -200,6 +232,7 @@ export class Hud {
     this.toast(`${sk.icon} +${xp.amount} ${sk.name} XP`);
     if (xp.leveled) {
       this.levelUp(`${sk.name} ${xp.level}!`, sk.perk);
+      if (xp.skill === 'combat' && xp.level === 5 && ENTRANCES.length) setTimeout(() => this.toast('Strong enough for the Hollow Crypt now. Look for the skull on your map!', 'good'), 2800);
     }
   }
 
@@ -248,13 +281,133 @@ export class Hud {
     this.shopBadge.textContent = this.till >= 1000 ? `${(this.till / 1000).toFixed(this.till >= 10000 ? 0 : 1)}k` : String(this.till);
     this.shopBadge.classList.toggle('hidden', !this.till);
   }
-  // Town vs inside a shop: swap the dock, hide the town-only bits.
+  // Town, inside a shop, or down a dungeon: swap the dock, hide what doesn't apply.
   setMode(mode, { isOwner = false } = {}) {
+    this.mode = mode;
     const room = mode === 'room';
-    this.dock.classList.toggle('hidden', room);
-    this.roomDock.classList.toggle('hidden', !room);
+    const dun = mode === 'dungeon';
+    this.#showDock();
     this.ledgerBtn.style.display = isOwner ? '' : 'none';
     this.el.classList.toggle('in-room', room);
+    this.el.classList.toggle('in-dungeon', dun);
+    this.onlinePill.classList.toggle('hidden', dun);
+    this.runChip.classList.toggle('hidden', !dun);
+    if (!dun) {
+      this.ctxBtn.classList.add('hidden');
+      this.lowHp.classList.add('hidden');
+    }
+    this.runUpdate();
+  }
+  #showDock() {
+    const m = this.mode ?? 'town';
+    const fighting = !!this.battleTop;
+    this.dock.classList.toggle('hidden', fighting || m !== 'town');
+    this.roomDock.classList.toggle('hidden', fighting || m !== 'room');
+    this.dungeonDock.classList.toggle('hidden', fighting || m !== 'dungeon');
+  }
+  toggleMap() {
+    if (this.game?.dungeon) return this.panels.cur?.name === 'dmap' ? this.panels.close() : this.panels.open('dmap');
+    this.worldMap.toggle();
+  }
+
+  // ── Dungeon run ────────────────────────────────────────────────────
+  // The clock, rooms cleared and the Bone Key on the run chip.
+  runUpdate() {
+    const run = this.game?.run;
+    if (!run) return;
+    const st = run.state;
+    const total = run.layout.rooms.length;
+    this.runRooms.textContent = ` · ${st.cleared.length}/${total}`;
+    this.runKey.classList.toggle('hidden', !st.key);
+    this.#tickRun();
+  }
+  #tickRun() {
+    const run = this.game?.run;
+    if (!run) return;
+    const secs = run.done ?? Math.max(0, (this.sock.serverNow() - run.state.startedAt) / 1000);
+    this.runTime.textContent = fmtTime(secs);
+    this.runChip.classList.toggle('done', run.done != null);
+  }
+  // The round button: join a friend's fight, rest, pray, open a chest, leave.
+  #updateContext() {
+    const ctx = this.game?.dungeon && !this.game.battle ? this.game.contextAction() : null;
+    this.ctx = ctx;
+    this.ctxBtn.classList.toggle('hidden', !ctx);
+    if (!ctx) return;
+    const key = ctx.label + ctx.glyph;
+    if (this.ctxBtn.dataset.k === key) return;
+    this.ctxBtn.dataset.k = key;
+    this.ctxBtn.replaceChildren(glyph(ctx.glyph), h('span', ctx.label));
+  }
+
+  // ── Party ──────────────────────────────────────────────────────────
+  setParty(p) {
+    const prev = this.party;
+    this.party = p || null;
+    if (!p && prev) this.chatLine({ sys: true, text: 'You are no longer in a party.' });
+    this.#renderPartyFrame();
+    this.panels.refresh('party');
+    this.panels.refresh('dungeon');
+    this.panels.refresh('townhall');
+    // The ready check finished (or was called off): drop its prompt.
+    if (!p?.ready) this.prompts.querySelector('.prompt.ready')?.remove();
+  }
+  #renderPartyFrame() {
+    const p = this.party;
+    const f = this.partyFrame;
+    f.classList.toggle('hidden', !p);
+    if (!p) return;
+    clear(f);
+    for (const m of p.members) {
+      if (m.id === this.myId) continue;
+      const pct = m.hp != null && m.maxHp ? Math.round((100 * m.hp) / m.maxHp) : 0;
+      const status = !m.online ? 'offline' : m.where === 'dungeon' ? (this.game?.run && m.run === this.game.run.id ? '' : 'in a dungeon') : this.game?.dungeon ? 'in town' : m.where === 'shop' ? 'in a shop' : '';
+      f.append(
+        h(
+          'div.pmember' + (m.online ? '' : '.off') + (pct > 0 && pct < 30 ? '.low' : ''),
+          { on: { click: () => this.#tapMember(m) } },
+          h('div.pm-top', p.leader === m.id ? h('span.crown', '♛') : null, h('span.pm-nm', m.name), m.level ? h('span.muted', ` ${m.level}`) : null),
+          m.online ? h('div.hpbar', h('i', { style: { width: `${pct}%` } })) : null,
+          status ? h('div.pm-st', status) : null,
+        ),
+      );
+    }
+  }
+  // Tap a party member: join their fight if they're in one near you; else their profile.
+  #tapMember(m) {
+    const g = this.game;
+    for (const b of g?.battles.values() ?? []) if (b.fighters.some((f) => f.id === m.id) && !b.fighters.some((f) => f.id === this.myId)) return g.goMob(b.mob);
+    this.panels.open('party');
+  }
+
+  // Non-modal prompts under the toasts, with a countdown.
+  #prompt(cls, text, ms, yes, no, yesLabel = 'Join', noLabel = 'Not now') {
+    this.prompts.querySelector('.prompt.' + cls)?.remove();
+    const bar = h('i');
+    const close = () => el.remove();
+    const el = h(
+      'div.prompt.' + cls,
+      h('div.pr-text', text),
+      h('div.pr-bar', bar),
+      h('div.pr-btns', h('button.btn.green', { on: { click: () => (close(), yes()) } }, yesLabel), h('button.btn.plain', { on: { click: () => (close(), no()) } }, noLabel)),
+    );
+    bar.animate([{ width: '100%' }, { width: '0%' }], { duration: ms, fill: 'forwards' });
+    setTimeout(close, ms);
+    this.prompts.append(el);
+    sfx.bell();
+    if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
+    return el;
+  }
+  #invitePrompt(m) {
+    this.#prompt('invite', `${m.from.name} invites you to their party.`, m.expiresIn ?? 60000,
+      () => this.sock.rpc('party.answer', { accept: true }).then(() => this.toast(`You joined ${m.from.name}'s party.`, 'good')).catch((e) => this.toast(e.message, 'err')),
+      () => this.sock.rpc('party.answer', { accept: false }).catch(() => {}));
+  }
+  #readyPrompt(m) {
+    const name = DUNGEONS[m.kind]?.name ?? 'the dungeon';
+    this.#prompt('ready', `${m.from} is heading into ${name} (${TIERS[m.tier]?.name ?? ''}${m.mode === 'weekly' ? ', this week’s crypt' : ''}). Ready?`, m.expiresIn ?? 15000,
+      () => this.sock.rpc('dungeon.ready', { yes: true }).catch((e) => this.toast(e.message, 'err')),
+      () => this.sock.rpc('dungeon.ready', { yes: false }).catch(() => {}), 'Ready!', 'Not now');
   }
 
   toast(text, kind = '') {
@@ -375,9 +528,14 @@ export class Hud {
       this.mapT = 0;
       this.#drawMap();
       this.#updatePlace();
+      if (this.game?.dungeon) {
+        this.#tickRun();
+        this.#updateContext();
+        this.lowHp.classList.toggle('hidden', !(this.me.hp > 0 && this.me.hp < this.me.maxHp * 0.3));
+      }
     }
     // Quest guide: in-world beacon + path trail, and an edge arrow when off-screen.
-    const tg = this.game && !this.game.battle && !this.game.fishing ? this.#questTarget() : null;
+    const tg = this.game && !this.game.battle && !this.game.fishing && !this.game.dungeon ? this.#questTarget() : null;
     this.game?.setGuide(tg);
     if (tg) {
       const p = this.game.myPos();
@@ -602,6 +760,7 @@ export class Hud {
     this.mapO = [ox, oz];
   }
   #drawMap() {
+    if (this.game?.dungeon && this.game.me) return this.#drawDungeonMap(this.mm, { radius: 26 });
     if (!this.mapBase || !this.game?.me) return;
     const x = this.mm.getContext('2d');
     const S = this.mapS;
@@ -625,6 +784,7 @@ export class Hud {
     for (const pv of this.game.players.values()) if (!pv.isMe) dot(pv.x, pv.z, '#ffffff', 7), dot(pv.x, pv.z, '#3b82c4', 5);
     const known = new Set(this.me.stones ?? []);
     for (const st of STONES) dot(st.x, st.z, '#14202a', 8), dot(st.x, st.z, known.has(st.id) ? '#8fe8ff' : '#9a9a9a', 5.5);
+    for (const e of ENTRANCES) dot(e.x, e.z, '#f0c8d0', 8), dot(e.x, e.z, '#4a3550', 6);
     x.restore();
     // Player arrow in the centre, pointing where the camera faces.
     x.save();
@@ -644,13 +804,97 @@ export class Hud {
     x.restore();
   }
 
+  // The crypt as far as it's been explored: floors, open and shut gates,
+  // monsters, friends and you. `radius` metres around you, or the whole map.
+  drawDungeonMap(cv, opts) {
+    this.#drawDungeonMap(cv, opts);
+  }
+  #drawDungeonMap(cv, { radius = null, onlyBase = false } = {}) {
+    const g = this.game;
+    const v = g.dungeon;
+    const L = v.layout;
+    const x = cv.getContext('2d');
+    const W = cv.width;
+    const me = g.myPos();
+    const span = radius ? radius * 2 : Math.max(L.w, L.h) * L.cell;
+    const S = W / span;
+    // Fit the explored part when showing everything.
+    let cx = me.x;
+    let cz = me.z;
+    if (!radius) {
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const r of L.rooms) {
+        if (!v.isRevealed(r.id)) continue;
+        x0 = Math.min(x0, r.x);
+        z0 = Math.min(z0, r.y);
+        x1 = Math.max(x1, r.x + r.w);
+        z1 = Math.max(z1, r.y + r.h);
+      }
+      cx = L.ox + ((x0 + x1) / 2) * L.cell;
+      cz = L.oz + ((z0 + z1) / 2) * L.cell;
+    }
+    const PX = (wx) => W / 2 + (wx - cx) * S;
+    const PZ = (wz) => W / 2 + (wz - cz) * S;
+    x.fillStyle = '#14161d';
+    x.fillRect(0, 0, W, W);
+    for (let j = 0; j < L.h; j++)
+      for (let i = 0; i < L.w; i++) {
+        const c = L.cells[j][i];
+        if (c === '#') continue;
+        const wx = L.ox + (i + 0.5) * L.cell;
+        const wz = L.oz + (j + 0.5) * L.cell;
+        const room = v.roomOfPoint(wx, wz);
+        if (!v.isRevealed(room)) continue;
+        const r = L.rooms[room];
+        x.fillStyle = c === 'c' ? '#5a5248' : r.kind === 'boss' ? '#6e3a40' : r.kind === 'vault' ? '#6e5a30' : r.kind === 'shrine' ? '#3e5470' : r.kind === 'entry' ? '#4e5a44' : g.run.state.cleared.includes(room) ? '#6a625a' : '#7a6a58';
+        x.fillRect(PX(L.ox + i * L.cell) - 0.5, PZ(L.oz + j * L.cell) - 0.5, L.cell * S + 1, L.cell * S + 1);
+      }
+    for (const gv of v.gates.values()) {
+      if (gv.open || !gv.obj.visible) continue;
+      x.fillStyle = gv.g.key ? '#e8c25a' : '#c94a3a';
+      const along = gv.g.dir === 'n' || gv.g.dir === 's';
+      const w = (along ? L.cell : 0.8) * S;
+      const hgt = (along ? 0.8 : L.cell) * S;
+      x.fillRect(PX(gv.g.x) - w / 2, PZ(gv.g.z) - hgt / 2, w, hgt);
+    }
+    if (onlyBase) return { PX, PZ, S, cx, cz };
+    const dot = (wx, wz, col, r) => {
+      x.fillStyle = col;
+      x.beginPath();
+      x.arc(PX(wx), PZ(wz), r, 0, Math.PI * 2);
+      x.fill();
+    };
+    const R = W / 64;
+    for (const l of v.labels) if (!l.hidden && !l.lock && v.isRevealed(l.room)) dot(l.x, l.z, l.what === 'exit' ? '#9fe08a' : l.what === 'rest' ? '#ffb347' : l.what === 'shrine' ? '#8fc4ff' : '#ffd84a', R * 1.3);
+    for (const mv of g.mobs.values()) if (mv.state !== 'dead' && (mv.room == null || v.isRevealed(mv.room))) dot(mv.x, mv.z, mv.def?.boss ? '#c070ff' : mv.def?.elite ? '#ffb020' : '#e2574c', R * (mv.def?.boss ? 1.6 : 1.1));
+    for (const pv of g.players.values()) if (!pv.isMe) dot(pv.x, pv.z, '#ffffff', R * 1.5), dot(pv.x, pv.z, '#3b82c4', R * 1.1);
+    // You: an arrow pointing where the camera looks.
+    x.save();
+    x.translate(PX(me.x), PZ(me.z));
+    x.rotate(-(g.cam.curYaw ?? g.cam.yaw));
+    x.fillStyle = '#ffd84a';
+    x.strokeStyle = '#7a3f1c';
+    x.lineWidth = Math.max(2, R * 0.6);
+    const a = R * 3.2;
+    x.beginPath();
+    x.moveTo(0, -a);
+    x.lineTo(a * 0.7, a * 0.75);
+    x.lineTo(0, a * 0.4);
+    x.lineTo(-a * 0.7, a * 0.75);
+    x.closePath();
+    x.fill();
+    x.stroke();
+    x.restore();
+    return { PX, PZ, S, cx, cz };
+  }
+
   // ── Region banner ──────────────────────────────────────────────────
   // A title across the screen as you walk into a new region, and a smaller
   // one for named zones inside it. A few metres of slack at the edges stop
   // it flickering when you stand on a border.
   #updatePlace() {
     const g = this.game;
-    if (!g?.me || g.room) return;
+    if (!g?.me || g.room || g.dungeon) return;
     const p = g.myPos();
     const raw = placeAt(p.x, p.z);
     // Slack only when leaving for somewhere bigger (or nowhere): a smaller area inside is announced at once.
@@ -682,23 +926,57 @@ export class Hud {
   battleStart(b, def) {
     this.battleDef = def;
     this.worldMap.close();
-    this.dock.classList.add('hidden');
+    if (this.panels.cur?.name !== 'result') this.panels.close();
+    this.el.classList.add('fighting');
     this.chat.classList.add('hidden');
     this.questEl.style.visibility = 'hidden';
+    this.ctxBtn.classList.add('hidden');
     this.mobName = h('div.nm');
     this.mobHp = h('i');
     this.timerFill = h('i');
-    this.battleTop = h('div.battle-top', h('div.mobbar', this.mobName, h('div.hp', this.mobHp), h('div.timer', this.timerFill)));
+    this.mobNote = h('div.mobnote.hidden');
+    this.battleTop = h('div.battle-top', h('div.mobbar', this.mobName, h('div.hp', this.mobHp), h('div.timer', this.timerFill), this.mobNote));
+    this.#showDock();
     this.partyEl = h('div.party');
     this.waitEl = h('div.waiting.hidden', 'Waiting for your party…');
     const act = (a, e, label, cls) => h('button.btn.' + cls, { on: { click: () => this.#battleAct(a) } }, h('span.e', glyph(e)), label);
     this.skillBtn = act('skill', 'spark', 'Special', 'purple');
-    this.actionsEl = h('div.actions', act('attack', 'swords', 'Attack', 'red'), this.skillBtn, act('defend', 'shield', 'Defend', 'blue'), act('potion', 'flask', 'Item', 'green'), act('flee', 'run', 'Flee', 'plain'));
+    this.defendBtn = act('defend', 'shield', 'Defend', 'blue');
+    this.actionsEl = h('div.actions', act('attack', 'swords', 'Attack', 'red'), this.skillBtn, this.defendBtn, act('potion', 'flask', 'Item', 'green'), act('flee', 'run', 'Flee', 'plain'));
     this.battleUi = h('div.battle-ui', this.partyEl, this.waitEl, this.actionsEl);
     this.el.append(this.battleTop, this.battleUi);
-    const splash = h('div.levelup', h('div.big', def.name), h('div.sm', `Level ${def.lvl}${def.boss ? ' · Boss' : ''}`));
+    this.#battleSplash(def);
+  }
+  #battleSplash(def) {
+    const tags = [`Level ${def.lvl}`, def.elite ? 'Elite' : null, ...(def.affixes ?? []).map((a) => a[0].toUpperCase() + a.slice(1)), def.boss ? 'Boss' : null].filter(Boolean);
+    const splash = h('div.levelup' + (def.elite ? '.elite' : ''), h('div.big', def.name), h('div.sm', tags.join(' · ')));
     this.el.append(splash);
     setTimeout(() => splash.remove(), 1800);
+  }
+  // The next monster of a room's pack steps in.
+  battleNext(def) {
+    this.battleDef = def;
+    this.battleWarnOff();
+    this.#battleSplash(def);
+  }
+  // A big move is coming next round: say so, and point at Defend.
+  battleWarn(move, name) {
+    if (!this.mobNote) return;
+    this.mobNote.textContent = `${name ?? 'It'} gathers ${move}: it hits everyone next round. Defend!`;
+    this.mobNote.classList.remove('hidden');
+    this.defendBtn?.classList.add('pulse');
+    sfx.bite();
+  }
+  battleWarnOff() {
+    this.mobNote?.classList.add('hidden');
+    this.defendBtn?.classList.remove('pulse');
+  }
+  // PC: 1–5 for Attack, Special, Defend, Item, Flee.
+  battleKey(n) {
+    if (!this.actionsEl || this.actionsEl.classList.contains('hidden')) return;
+    const a = ['attack', 'skill', 'defend', 'potion', 'flee'][n - 1];
+    if (a === 'skill' && this.skillBtn.disabled) return;
+    this.#battleAct(a);
   }
 
   battleUpdate(b) {
@@ -706,15 +984,19 @@ export class Hud {
     this.battleState = b;
     this.battleDeadline = performance.now() + b.endsIn;
     this.battleRoundMs = 12000;
-    this.mobName.textContent = `${this.battleDef.name} — ${b.mobHp}/${b.mobMax}`;
+    const more = b.queue?.length ? ` · ${b.queue.length} more waiting` : '';
+    this.mobName.textContent = `${this.battleDef.name} — ${b.mobHp}/${b.mobMax}${more}`;
     this.mobHp.style.width = `${(100 * b.mobHp) / b.mobMax}%`;
+    if (!b.warn) this.battleWarnOff();
     clear(this.partyEl);
+    this.partyEl.classList.toggle('many', b.fighters.length > 2);
     const mine = b.fighters.find((f) => f.id === this.myId);
     for (const f of b.fighters) {
+      const need = f.need ?? 3;
       this.partyEl.append(
         h(
           'div.pcard' + (f.id === this.myId ? '.me' : '') + (f.alive ? '' : '.ko'),
-          h('div', f.name, f.ready ? ' ✅' : '', h('span.pips', ...[0, 1, 2].map((i) => h('i' + (i < f.charge ? '.on' : ''))))),
+          h('div', f.name, f.ready ? ' ✅' : '', f.alive ? '' : ' · KO', h('span.pips', ...Array.from({ length: need }, (_, i) => h('i' + (i < f.charge ? '.on' : ''))))),
           h('div.hpbar', h('i', { style: { width: `${(100 * f.hp) / f.max}%` } })),
           h('div.muted', `${f.hp}/${f.max}`),
         ),
@@ -726,8 +1008,8 @@ export class Hud {
       const waiting = mine.ready || !mine.alive;
       this.actionsEl.classList.toggle('hidden', waiting);
       this.waitEl.classList.toggle('hidden', !waiting);
-      this.waitEl.textContent = mine.alive ? 'Waiting for your party…' : 'Knocked out — your party fights on!';
-      this.skillBtn.disabled = mine.charge < 3;
+      this.waitEl.textContent = mine.alive ? 'Waiting for your party…' : 'Knocked out: your party fights on (a potion can bring you back up)';
+      this.skillBtn.disabled = mine.charge < (mine.need ?? 3);
     }
     clearInterval(this.timerInt);
     this.timerInt = setInterval(() => {
@@ -738,14 +1020,17 @@ export class Hud {
 
   battleLog() {}
 
-  #battleAct(a) {
+  #battleAct(a, to = undefined) {
     sfx.tap();
     if (a === 'potion') {
       const heals = Object.entries(this.me.inv).filter(([id, n]) => n > 0 && ITEMS[id]?.heal);
       if (!heals.length) return this.toast('No healing items! Craft potions or grilled fish.', 'err');
+      // A friend is down: heal yourself, or help them back up?
+      const down = (this.battleState?.fighters ?? []).filter((f) => !f.alive && f.id !== this.myId);
+      if (down.length && to === undefined) return this.#reviveMenu(down);
       heals.sort((x, y) => ITEMS[x[0]].heal - ITEMS[y[0]].heal);
-      const [id] = heals.find(([hid]) => ITEMS[hid].heal >= this.me.maxHp - this.me.hp) || heals[heals.length - 1];
-      this.sock.send({ t: 'bact', a, item: id });
+      const [id] = to != null ? heals[heals.length - 1] : heals.find(([hid]) => ITEMS[hid].heal >= this.me.maxHp - this.me.hp) || heals[heals.length - 1];
+      this.sock.send({ t: 'bact', a, item: id, ...(to != null ? { to } : {}) });
     } else this.sock.send({ t: 'bact', a });
     if (a !== 'flee') {
       this.actionsEl.classList.add('hidden');
@@ -753,15 +1038,37 @@ export class Hud {
     }
   }
 
+  #reviveMenu(down) {
+    const box = h(
+      'div.actions.revive',
+      h('button.btn.green', { on: { click: () => (box.remove(), this.actionsEl.classList.remove('hidden'), this.#battleAct('potion', null)) } }, h('span.e', glyph('flask')), 'Heal me'),
+      ...down.map((f) => h('button.btn.green', { on: { click: () => (box.remove(), this.actionsEl.classList.remove('hidden'), this.#battleAct('potion', f.id)) } }, h('span.e', glyph('spark')), `Revive ${f.name}`)),
+      h('button.btn.plain', { on: { click: () => (box.remove(), this.actionsEl.classList.remove('hidden')) } }, 'Back'),
+    );
+    this.actionsEl.classList.add('hidden');
+    this.actionsEl.after(box);
+  }
+
   battleEnd(r) {
     clearInterval(this.timerInt);
     this.battleTop?.remove();
     this.battleUi?.remove();
-    this.battleTop = this.battleUi = null;
-    this.dock.classList.remove('hidden');
+    this.battleTop = this.battleUi = this.mobNote = null;
+    this.el.classList.remove('fighting');
+    this.#showDock();
     this.chat.classList.remove('hidden');
     this.questEl.style.visibility = '';
     if (r.fled) return this.toast('You got away safely.');
+    if (r.inRun) {
+      // Underground: no panel between rooms, just what you won (or the wipe banner).
+      if (r.victory) {
+        sfx.victory();
+        const loot = Object.entries(r.loot || {}).map(([id, n]) => `${n}× ${ITEMS[id]?.name ?? id}`);
+        this.toast(`Room won: +${r.gold} 🪙 · +${r.xp?.amount || 0} XP${loot.length ? ' · ' + loot.join(', ') : ''}`, 'gold');
+        if (r.xp?.leveled) setTimeout(() => this.levelUp(`Combat ${r.xp.level}!`, SKILLS.combat.perk), 600);
+      } else sfx.defeat();
+      return;
+    }
     if (r.victory) {
       sfx.victory();
       this.confetti(80);

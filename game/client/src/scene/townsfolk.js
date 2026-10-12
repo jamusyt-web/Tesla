@@ -92,6 +92,10 @@ class Walker {
 export class Townsfolk {
   constructor(scene, nav, { low = false } = {}) {
     this.walkers = [];
+    // One group for everyone, so the town's folk can be hidden all at once (in a dungeon).
+    this.root = new THREE.Group();
+    scene.add(this.root);
+    scene = this.root;
     // Villagers stroll between doors, plaza corners, the foot of each dock and garden edges.
     const stops = [
       ...BUILDINGS.map((b) => doorPoint(b)),

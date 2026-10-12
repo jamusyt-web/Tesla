@@ -562,3 +562,79 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .jobf { display: flex; flex-direction: column; gap: 4px; font-weight: 700; font-size: 13px; color: var(--ink-soft); flex: 1; min-width: 0; }
 .jobf select, .jobf input { font-size: 16px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--parch-edge); background: #f4ead4; width: 100%; }
 .rowcard .row input { width: 64px; padding: 6px; border-radius: 5px; border: 1px solid var(--parch-edge); background: #f4ead4; font-size: 15px; }
+
+/* ── Dungeons & parties ─────────────────────────────────────────────── */
+.veil { position: absolute; inset: 0; z-index: 90; background: #0d0e12; display: grid; place-items: center; transition: opacity 0.32s ease-out; }
+.veil.out { opacity: 0; pointer-events: none; }
+.veil-text { font-family: var(--font-display); font-size: clamp(20px, 4.5vw, 30px); color: #d9c7a3; letter-spacing: 0.06em; text-shadow: 0 2px 0 #000; animation: veilin 0.6s ease-out; }
+@keyframes veilin { from { opacity: 0; transform: translateY(6px); } }
+#game.in-dungeon .vignette { opacity: 0.5; }
+
+.leftcol { position: absolute; top: calc(78px + var(--safe-top)); left: 8px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; pointer-events: none; z-index: 5; }
+.leftcol > * { pointer-events: auto; }
+.leftcol .quest { position: static; }
+.hud.in-dungeon .quest, .hud.in-dungeon .guide-arrow { display: none !important; }
+.hud.fighting .partyframe, .hud.fighting .runchip, .hud.fighting .ctxbtn, .hud.fighting .prompts .prompt.ready { display: none !important; }
+.partyframe { display: flex; flex-direction: column; gap: 4px; }
+.pmember { width: 136px; border-radius: 6px; padding: 4px 7px 5px; font-size: 13px; font-weight: 800; cursor: pointer; background: linear-gradient(rgba(40, 30, 22, 0.92), rgba(26, 19, 14, 0.92)); border: 1px solid #5a4630; color: var(--bone); box-shadow: var(--shadow); }
+.pmember.off { opacity: 0.55; }
+.pmember.low { border-color: #c0392b; box-shadow: 0 0 8px rgba(224, 64, 46, 0.55); }
+.pmember .pm-top { display: flex; align-items: baseline; gap: 3px; white-space: nowrap; overflow: hidden; }
+.pmember .pm-nm { overflow: hidden; text-overflow: ellipsis; }
+.pmember .crown { color: var(--gold); }
+.pmember .hpbar { width: 100%; height: 7px; }
+.pmember .pm-st { font-size: 11px; font-weight: 600; color: var(--bone-soft); }
+
+.runchip { font-size: 14px; padding: 5px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.runchip .g { color: var(--gold); }
+.runchip.done b { color: #9fe08a; }
+.runchip .rkey { color: #f3d589; display: inline-flex; }
+.hpnum { display: none; position: absolute; inset: 0; font-size: 9px; line-height: 10px; text-align: center; color: #fff; font-weight: 800; text-shadow: 0 1px 0 #000; z-index: 1; }
+.hud.in-dungeon .hero-chip .hpbar { height: 12px; }
+.hud.in-dungeon .hpnum { display: block; line-height: 12px; }
+
+.ctxbtn { position: absolute; right: 12px; bottom: calc(84px + var(--safe-bottom)); z-index: 15; min-height: 54px; max-width: 46vw; padding: 8px 16px 8px 12px; border-radius: 28px; display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; color: #1b1511; background: linear-gradient(#f3d589, #c99a3a); border: 2px solid #6b4a1c; box-shadow: 0 4px 0 #3a2410, 0 0 18px rgba(240, 190, 90, 0.45); animation: ctxin 0.25s ease-out; }
+.ctxbtn .g { font-size: 24px; }
+.ctxbtn:active { transform: translateY(2px); box-shadow: 0 2px 0 #3a2410; }
+@keyframes ctxin { from { transform: scale(0.8); opacity: 0; } }
+
+.prompts { position: absolute; top: calc(150px + var(--safe-top)); left: 50%; transform: translateX(-50%); width: min(360px, 92vw); display: flex; flex-direction: column; gap: 8px; z-index: 55; }
+.prompt { border-radius: 8px; padding: 10px 12px; background: linear-gradient(rgba(44, 33, 24, 0.97), rgba(26, 19, 14, 0.97)); border: 1px solid var(--gold); color: var(--bone); box-shadow: var(--shadow), 0 0 16px rgba(240, 190, 90, 0.3); animation: ctxin 0.25s ease-out; }
+.prompt .pr-text { font-weight: 700; font-size: 15px; }
+.prompt .pr-bar { height: 4px; background: #2a1e17; border-radius: 2px; margin: 8px 0; overflow: hidden; }
+.prompt .pr-bar i { display: block; height: 100%; width: 100%; background: var(--gold); }
+.prompt .pr-btns { display: flex; gap: 8px; }
+.prompt .pr-btns .btn { flex: 1; min-height: 44px; }
+
+.lowhp { position: absolute; inset: 0; pointer-events: none; z-index: 4; box-shadow: inset 0 0 90px rgba(200, 20, 20, 0.55); animation: lowhp 1.2s ease-in-out infinite; }
+@keyframes lowhp { 50% { opacity: 0.35; } }
+
+.place.dplace .ic { color: #ffcf8a; }
+.place.dplace.lock { border-color: #e8c25a; }
+.place.dplace.lock .ic { color: #e8c25a; }
+.place.crypt { border-color: #b06a7a; }
+.place.crypt .ic { color: #f0a0b0; }
+.tag.mob.elite .nm { color: #ffc24a !important; }
+.tag.mob.elite .lvl { border-color: #e0402e; color: #ffc24a; }
+.tag.mob .affix { font-size: 10px; font-weight: 800; color: #ffb4a0; text-transform: uppercase; letter-spacing: 0.08em; text-align: center; }
+.mobnote { margin-top: 6px; font-weight: 800; font-size: 14px; color: #ff8a7a; text-shadow: 0 1px 0 #000; animation: lowhp 0.9s ease-in-out infinite; }
+.btn.pulse { animation: pulse 0.8s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(1.08); box-shadow: 0 0 18px #6fb8ff; } }
+.levelup.elite .big { color: #ffc24a; }
+.actions.revive { grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); }
+.party.many { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; width: min(420px, 100%); }
+.party.many .pcard { min-width: 0; padding: 3px 7px; }
+.party.many .pcard .muted { display: none; }
+
+.dmap { width: 100%; height: auto; aspect-ratio: 1; display: block; border-radius: 6px; border: 1px solid var(--parch-edge); background: #14161d; cursor: pointer; touch-action: manipulation; }
+.dlegend { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; font-size: 13px; font-weight: 700; }
+.dlegend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+.wm-legend .lg-crypt { background: #4a3550; border: 2px solid #f0c8d0; border-radius: 4px 4px 1px 1px; }
+.tabs button.locked { opacity: 0.55; }
+.tabs button.locked .g { font-size: 12px; margin-right: 3px; }
+.rowcard.dmod { background: #d6c4b8; }
+.rowcard.dmod .ic { color: #6b2a3a; }
+@media (max-height: 500px) and (orientation: landscape) {
+  .prompts { top: calc(70px + var(--safe-top)); }
+  .ctxbtn { bottom: calc(70px + var(--safe-bottom)); }
+}

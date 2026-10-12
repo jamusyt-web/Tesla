@@ -2,7 +2,7 @@ import { h, clear, fmt } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
 import { glyph } from './glyphs.js';
 import { paintWorld, tierLabel } from './mapdraw.js';
-import { LANDS, EXTENT, STONES, placeAt, stoneNear, stoneFront, travelFee } from '../../../shared/world.js';
+import { LANDS, EXTENT, STONES, ENTRANCES, placeAt, stoneNear, stoneFront, travelFee } from '../../../shared/world.js';
 
 export { tierLabel };
 
@@ -43,7 +43,7 @@ export class WorldMap {
           'div.wm-view',
           this.canvas,
           h('div.wm-zoom', zoomBtn('+', 'Zoom in', 1.4), zoomBtn('−', 'Zoom out', 1 / 1.4), h('button.wm-zb', { 'aria-label': 'Find me', title: 'Find me', on: { click: () => this.#centerOnMe() } }, glyph('compass'))),
-          h('div.wm-legend', h('span', h('i.lg-stone'), 'Waystone'), h('span', h('i.lg-dim'), 'Not visited'), h('span', h('i.lg-camp'), 'Monsters')),
+          h('div.wm-legend', h('span', h('i.lg-stone'), 'Waystone'), h('span', h('i.lg-dim'), 'Not visited'), h('span', h('i.lg-camp'), 'Monsters'), h('span', h('i.lg-crypt'), 'Dungeon')),
           this.card,
         ),
       ),
@@ -187,6 +187,11 @@ export class WorldMap {
       if (d < 22 && (!best || d < best.d)) best = { st, d };
     }
     if (best) return this.#select({ stone: best.st.id });
+    // A dungeon: open its panel (you can walk there from it).
+    for (const e of ENTRANCES) {
+      const [x, y] = this.#toScreen(e.x, e.z);
+      if (Math.hypot(x - sx, y - sy) < 22) return (this.close(), this.hud.game.goCrypt(e.id));
+    }
     const [wx, wz] = this.#toWorld(sx, sy);
     if (LANDS.some((l) => Math.hypot(wx - l.x, wz - l.z) < l.r)) return this.#select({ x: wx, z: wz });
     this.#select(null);

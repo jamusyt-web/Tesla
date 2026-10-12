@@ -39,6 +39,10 @@ Mini Characters (1.0) Created/distributed by Kenney (www.kenney.nl) Creation dat
 
 Mini Dungeon (2.0) Created/distributed by Kenney (www.kenney.nl) Creation date: 29-07-2026 10:35 ------------------------------ License: (Creative Commons Zero, CC0) http://creativecommons.org/publicdomain/zero/1.0/ You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement) ------------------------------ • Website : www.kenney.nl • Donate : www.kenney.nl/donate • Patreon : patreon.com/kenney Follow on social media for updates: • Twitter: twitter.com/KenneyNL • BlueSky: kenney.bsky.social • Instagram: instagram.com/kenney_nl
 
+## modular-dungeon
+
+Modular Dungeon Kit (2.1) Created/distributed by Kenney (www.kenney.nl) Creation date: 24-02-2026 10:40 ------------------------------ License: (Creative Commons Zero, CC0) http://creativecommons.org/publicdomain/zero/1.0/ You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement) ------------------------------ • Website : www.kenney.nl • Donate : www.kenney.nl/donate • Patreon : patreon.com/kenney Follow on social media for updates: • Twitter: twitter.com/KenneyNL • BlueSky: kenney.bsky.social • Instagram: instagram.com/kenney_nl
+
 ## mini-forest
 
 Mini Forest (1.0) Created/distributed by Kenney (www.kenney.nl) Creation date: 14-07-2026 12:13 ------------------------------ License: (Creative Commons Zero, CC0) http://creativecommons.org/publicdomain/zero/1.0/ You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement) ------------------------------ • Website : www.kenney.nl • Donate : www.kenney.nl/donate • Patreon : patreon.com/kenney Follow on social media for updates: • Twitter: twitter.com/KenneyNL • BlueSky: kenney.bsky.social • Instagram: instagram.com/kenney_nl

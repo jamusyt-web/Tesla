@@ -7,6 +7,7 @@ import { STATIONS, batchCap, isStackable } from '../../../shared/crafting.js';
 import { SKILLS, SKILL_IDS, levelProgress, levelFromXp } from '../../../shared/skills.js';
 import { MARKET_TAX as TAX } from '../../../shared/economy.js';
 import { SHOP_PANELS } from './shop-panels.js';
+import { DUNGEON_PANELS } from './dungeon-panels.js';
 import { glyph } from './glyphs.js';
 import { BUILDINGS, doorPoint } from '../../../shared/world.js';
 import { inYard, spotsOf } from '../../../shared/stations.js';
@@ -59,11 +60,11 @@ export class Panels {
     const titleEl = h('h3');
     const place = this.#placeFor(name, args);
     const walk = place ? h('button.walk', { title: `Walk to the ${place.label}`, on: { click: () => (this.close(), this.hud.travel(place.id)) } }, glyph('run'), h('span', 'Walk there')) : null;
-    const panel = h('div.panel' + (['profile', 'result'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, walk, h('button.close', { 'aria-label': 'Close', on: { click: () => this.close() } }, '✕')), body);
+    const panel = h('div.panel' + (['profile', 'result', 'dleave', 'dloot'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, walk, h('button.close', { 'aria-label': 'Close', on: { click: () => this.close() } }, '✕')), body);
     const scrim = h('div.scrim', { on: { pointerdown: (e) => e.target === scrim && this.close() } }, panel);
     this.hud.el.append(scrim);
     this.cur = { name, scrim, body, titleEl, args, refresh: null, onClose: null };
-    const fn = this['p_' + name] || SHOP_PANELS[name];
+    const fn = this['p_' + name] || SHOP_PANELS[name] || DUNGEON_PANELS[name];
     if (fn) fn.call(this, this.cur, args);
     sfx.pop();
   }
@@ -72,7 +73,7 @@ export class Panels {
   // nearest building it belongs to, so you can still walk over.
   #placeFor(name, args) {
     const g = this.hud.game;
-    if (!g?.me || g.room) return null;
+    if (!g?.me || g.room || g.dungeon) return null;
     const p = g.myPos();
     if (name === 'craft' && (args.station || inYard(p.x, p.z))) return null; // already at the stations
     let best = null;
@@ -668,8 +669,18 @@ export class Panels {
       if (!info) return c.body.append(h('div.empty', 'Loading…'));
       if (tab === 'online') {
         c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, `${info.online.length} of ${info.heroes} heroes online`));
+        const mine = this.hud.party;
+        const canInvite = !mine || (mine.leader === this.hud.myId && mine.members.length < 4);
         for (const p of info.online)
-          c.body.append(h('div.rowcard', h('div.ic', '🧑'), h('div.grow', h('div.t', p.name, p.id === this.hud.myId ? ' (you)' : ''), h('div.s', `Level ${p.level} · Channel ${p.channel}`)), p.id !== this.hud.myId ? h('button.btn.small', { on: { click: () => this.open('profile', { id: p.id }) } }, 'View') : null));
+          c.body.append(
+            h(
+              'div.rowcard',
+              h('div.ic', '🧑'),
+              h('div.grow', h('div.t', p.name, p.id === this.hud.myId ? ' (you)' : ''), h('div.s', `Level ${p.level} · ${p.dungeon ? `In ${p.dungeon}` : `Channel ${p.channel}`}${mine && p.party === mine.id ? ' · your party' : ''}`)),
+              p.id !== this.hud.myId && canInvite && !p.party ? h('button.btn.small.green', { on: { click: () => this.#rpc('party.invite', { id: p.id }, `Invited ${p.name} to your party.`) } }, 'Invite') : null,
+              p.id !== this.hud.myId ? h('button.btn.small', { on: { click: () => this.open('profile', { id: p.id }) } }, 'View') : null,
+            ),
+          );
       } else if (tab === 'shops') {
         return this.open('shops');
       } else if (tab === 'leaders') {
@@ -720,14 +731,15 @@ export class Panels {
         this.title(c, p.name);
         c.body.append(
           h('div', { style: { textAlign: 'center' } }, h('img', { src: portrait(p.avatar, { full: true }), style: { width: '140px', height: '175px', background: 'radial-gradient(circle at 50% 35%, #4a3a2c, #1e1814)', borderRadius: '6px', border: '1px solid #8a6a3a' } })),
-          h('div', { style: { textAlign: 'center', margin: '6px 0 10px' } }, h('b', `Level ${p.level}`), h('div.muted', p.online ? `Online · Channel ${p.channel}` : 'Offline')),
+          h('div', { style: { textAlign: 'center', margin: '6px 0 10px' } }, h('b', `Level ${p.level}`), h('div.muted', p.online ? (p.dungeon ? `Online · in ${p.dungeon}` : `Online · Channel ${p.channel}`) : 'Offline', p.sameParty ? ' · in your party' : '')),
           ...SKILL_IDS.map((k) => h('div.kv', h('span', `${SKILLS[k].icon} ${SKILLS[k].name}`), h('b', `Lv ${levelFromXp(p.skills[k] || 0)}`))),
           h(
             'div.row',
             { style: { marginTop: '12px', flexWrap: 'wrap', justifyContent: 'center' } },
             h('button.btn.small', { on: { click: () => (this.hud.game?.sendEmote('wave'), this.close()) } }, 'Wave'),
             p.shop && (p.shopOpen || p.id === this.hud.myId) ? h('button.btn.green.small', { on: { click: () => (this.close(), this.hud.game?.enterShop(p.id)) } }, 'Visit shop') : null,
-            p.online && p.channel !== this.hud.channel ? h('button.btn.blue.small', { on: { click: () => this.#rpc('channel.switch', { id: p.channel }).then(() => this.close()) } }, 'Join their channel') : null,
+            p.online && p.channel && p.channel !== this.hud.channel && !this.hud.game?.dungeon ? h('button.btn.blue.small', { on: { click: () => this.#rpc('channel.switch', { id: p.channel }).then(() => this.close()) } }, 'Join their channel') : null,
+            p.canInvite ? h('button.btn.green.small', { on: { click: () => this.#rpc('party.invite', { id: p.id }, `Invited ${p.name} to your party.`) } }, 'Invite to party') : null,
           ),
         );
       })

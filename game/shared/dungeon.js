@@ -490,7 +490,7 @@ function tryGenerate(seed, K, kind, party, tier, mod, ox, oz) {
     props,
     traps,
     spawns,
-    entry: { x: +ex.toFixed(2), z: +(ez + 1.5).toFixed(2) },
+    entry: { x: +ex.toFixed(2), z: +(ez + 3).toFixed(2) }, // in front of the brazier
     exit: exitStairs,
     bossChest: { x: +bx.toFixed(2), z: +(bz + 2.4).toFixed(2) },
   };

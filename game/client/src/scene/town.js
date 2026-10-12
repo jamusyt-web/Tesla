@@ -4,8 +4,11 @@ import * as assets from './assets.js';
 import { waterMaterial, seaMaterial, groundTexture } from './water.js';
 import { buildModular, buildGate } from './buildings.js';
 import { PROC_BUILDERS, buildWaystone } from './procprops.js';
+import { DUNGEONS } from '../../../shared/dungeon.js';
+
+const DUNGEON_NAMES = Object.fromEntries(Object.entries(DUNGEONS).map(([k, d]) => [k, d.name]));
 import {
-  BUILDINGS, ZONES, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, LANDS, EXTENT, SPAWN, NODE_TYPES,
+  BUILDINGS, ZONES, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, ENTRANCES, CRYPT, LANDS, EXTENT, SPAWN, NODE_TYPES,
   pathSegments, zonesOfKind, landDistance, mulberry32,
 } from '../../../shared/world.js';
 
@@ -627,6 +630,71 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     pickables.push(ws.group);
     stones.set(st.id, ws);
     labels.push({ kind: 'stone', id: st.id, text: st.name, glyph: 'waystone', pos: new THREE.Vector3(st.x, 5, st.z) });
+  }
+
+  // Dungeon entrances: a crypt with its door ajar, a little graveyard
+  // around it, and two braziers. Tap it to see the dungeon (and go in).
+  for (const e of ENTRANCES) {
+    const grp = new THREE.Group();
+    const base = assets.make('crypt_base');
+    if (base) {
+      grp.add(base.object);
+      const roof = assets.make('crypt_roof');
+      if (roof) {
+        roof.object.position.y = base.size.y - 0.05;
+        grp.add(roof.object);
+      }
+      const door = assets.make('crypt_door');
+      if (door) {
+        door.object.position.set(0, 0, base.size.z / 2 + 0.02);
+        grp.add(door.object);
+        const open = door.actions?.open;
+        if (open) {
+          open.setLoop(THREE.LoopOnce, 1);
+          open.clampWhenFinished = true;
+          open.play();
+          animated.push((dt) => door.mixer.update(dt));
+        }
+      }
+    } else {
+      // No model: a stone block with a dark doorway.
+      const blk = mesh(new THREE.BoxGeometry(CRYPT.w, 3.2, CRYPT.d), '#8c867a', { outline: 0.03 });
+      blk.position.y = 1.6;
+      const dark = mesh(new THREE.BoxGeometry(2, 2.4, 0.1), '#1b1511');
+      dark.position.set(0, 1.2, CRYPT.d / 2 + 0.02);
+      grp.add(blk, dark);
+    }
+    // Braziers either side of the door, and broken graves about.
+    for (const sx of [-1, 1]) {
+      const fb = assets.make('dg_fire');
+      if (!fb) continue;
+      fb.object.position.set(sx * (CRYPT.w / 2 + 0.6), 0, CRYPT.d / 2 + 0.9);
+      grp.add(fb.object);
+      const spot = new THREE.Vector3();
+      animated.push((dt) => {
+        if (Math.random() > dt * 14) return;
+        fb.object.getWorldPosition(spot);
+        spot.y += 0.6;
+        fx.puff.burst(spot, { n: 1, color: ['#ffb347', '#ff7a2a', '#ffe08a'], speed: 0.6, up: 2.2, gravity: -1, size: 0.22, life: 0.6, jitter: 0.15 });
+      });
+    }
+    [[-4.6, -1.5, 0.4], [4.4, 1.2, 2.6], [-4.2, 3.4, 5.2], [3.9, -3, 1.1]].forEach(([x, z, r], i) => {
+      const gv = assets.make('crypt_grave', { variant: i });
+      if (!gv) return;
+      gv.object.position.set(x, 0, z);
+      gv.object.rotation.y = r;
+      grp.add(gv.object);
+    });
+    grp.position.set(e.x, 0, e.z);
+    grp.rotation.y = e.rot ?? 0;
+    grp.traverse((o) => {
+      if (!o.isMesh) return;
+      o.userData.crypt = e.id;
+      if (o.material.side !== THREE.BackSide) o.castShadow = true;
+    });
+    root.add(grp);
+    pickables.push(grp);
+    labels.push({ kind: 'crypt', id: e.id, text: DUNGEON_NAMES[e.kind] ?? 'Crypt', glyph: 'crypt', pos: new THREE.Vector3(e.x, 6.2, e.z) });
   }
 
   // Lakes: water, reeds round the shore, lily pads (skipping any dock).
