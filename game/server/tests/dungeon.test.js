@@ -500,3 +500,48 @@ test('town fights still work as before (one monster, it respawns)', async () => 
   assert.ok(mob.respawnAt > Date.now() && mob.respawnAt < Infinity);
   t.ws.close();
 });
+
+test('safety: no skipping tiers by joining, a run closing mid-fight ends the fight, the fourth wipe says so, held seats count', async () => {
+  const vet = await player('Veteran');
+  const rookie = await player('Rookie');
+  // The veteran has cleared Tier 1, so can lead a Tier 2 run; the rookie can't join it.
+  game.db.prepare('INSERT INTO dungeon_runs (kind, tier, mode, week, party, heroes, hero_ids, seconds, finished_at) VALUES (?,?,?,?,?,?,?,?,?)').run('hollow_crypt', 1, 'random', 0, 1, '["Veteran"]', JSON.stringify([vet.id]), 999, Date.now());
+  await vet.call('party.invite', { id: rookie.id });
+  await rookie.next((m) => m.t === 'partyInvite');
+  await rookie.call('party.answer', { accept: true });
+  toDoor(vet);
+  assert.match((await vet.call('dungeon.enter', { kind: 'hollow_crypt', tier: 2, party: true })).err, /hasn't cleared Tier 1/);
+  assert.ok((await vet.call('dungeon.enter', { kind: 'hollow_crypt', tier: 2 })).ok, 'alone is fine');
+  const run = runOf(vet);
+  assert.equal(run.tier, 2);
+  // (A solo run isn't the party's; make it theirs to try joining.)
+  run.partyId = game.parties.get(vet.id).id;
+  assert.match((await rookie.call('dungeon.join', { run: run.id })).err, /Clear Tier 1 first/);
+  // Held seats count toward the four.
+  assert.equal(run.seats(), 1);
+  run.members.set(-1, { name: 'Ghost', goneAt: Date.now() });
+  run.members.set(-2, { name: 'Ghost2', goneAt: Date.now() });
+  run.members.set(-3, { name: 'Ghost3', goneAt: Date.now() });
+  assert.ok(run.full && !run.canJoin(12345));
+  for (const id of [-1, -2, -3]) run.members.delete(id);
+
+  // Closing mid-fight: out of the battle properly, with the health it left you.
+  const unrig = rig(run, { hp: 9999, atk: 5 });
+  const mob = [...run.mobs.values()].find((m) => run.layout.rooms[m.room].depth === 1);
+  standNear(vet, mob);
+  assert.ok((await vet.send({ t: 'engage', mob: mob.id })).ok);
+  const b = client(vet).battle;
+  b.fighters.get(vet.id).hp = 42;
+  const mark = vet.inbox.length;
+  game.failRun(run);
+  assert.match((await vet.send({ t: 'engage', mob: mob.id })).err, /closing|Already/);
+  const out = await vet.next((m) => m.t === 'welcome' && m.channel, 3000, mark);
+  assert.ok(out && !client(vet).battle && !runOf(vet).isRun);
+  assert.equal(client(vet).ent.hp, 42, 'the health from the fight comes out with you');
+  assert.ok(vet.inbox.slice(mark).some((m) => m.t === 'battle' && m.left === vet.id && m.why === 'closed'), 'told the battle is over for you');
+  assert.ok(vet.inbox.slice(mark).some((m) => m.t === 'toast' && /had enough of you/.test(m.text)), 'the failure message arrives');
+  assert.equal(mob.battle, null);
+  assert.ok(!game.runs.has(run.id));
+  unrig();
+  for (const p of [vet, rookie]) p.ws.close();
+});

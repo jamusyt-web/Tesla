@@ -807,7 +807,7 @@ export class Hud {
   // The crypt as far as it's been explored: floors, open and shut gates,
   // monsters, friends and you. `radius` metres around you, or the whole map.
   drawDungeonMap(cv, opts) {
-    this.#drawDungeonMap(cv, opts);
+    return this.#drawDungeonMap(cv, opts);
   }
   #drawDungeonMap(cv, { radius = null, onlyBase = false } = {}) {
     const g = this.game;
@@ -1058,6 +1058,7 @@ export class Hud {
     this.#showDock();
     this.chat.classList.remove('hidden');
     this.questEl.style.visibility = '';
+    if (r.quiet) return;
     if (r.fled) return this.toast('You got away safely.');
     if (r.inRun) {
       // Underground: no panel between rooms, just what you won (or the wipe banner).

@@ -40,7 +40,8 @@ const STATIC = (() => {
 
 const MOOD = { fog: new THREE.Color('#b8c4c8'), fogWild: new THREE.Color('#9faea6'), sun: new THREE.Color('#ffe4bc'), sunWild: new THREE.Color('#ffd0a0') };
 const QUARTER = Math.PI / 2;
-const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+// The next frame (so a veil is on screen), or 100 ms in a background tab where frames don't come.
+const nextFrame = () => new Promise((r) => (requestAnimationFrame(() => setTimeout(r, 0)), setTimeout(r, 100)));
 // A monster's battle stats as shown: its type, plus what the server says about
 // this one (a dungeon's elites and bosses have their own name and level).
 const defOf = (mv) => mv?.def ?? MONSTERS[mv?.type] ?? null;
@@ -667,7 +668,7 @@ export class GameClient {
           pv.av.root.traverse((o) => (o.userData.player = pv.id));
         }
       }),
-      s.on('battle', (m) => this.onBattle(m.b)),
+      s.on('battle', (m) => this.onBattle(m.b, m.why)),
       s.on('bres', (m) => this.onBattleRound(m)),
       s.on('battleEnd', (m) => this.onBattleEnd(m)),
       // Dungeon runs (server/dungeons.js)
@@ -718,6 +719,8 @@ export class GameClient {
   }
 
   #welcome(m) {
+    // A fresh start: no battle screen survives it (the welcome lists any fight you're still in).
+    if (this.hud.battleTop) this.hud.battleEnd({ fled: true, quiet: true });
     if (m.dungeon) this.#intoRun(m.dungeon);
     else if (this.dungeon) this.#outOfRun();
     for (const id of [...this.players.keys()]) this.removePlayer(id);
@@ -1423,7 +1426,7 @@ export class GameClient {
     this.hud.worldMap.refresh();
   }
 
-  onBattle(b) {
+  onBattle(b, why = null) {
     this.battles.set(b.id, b);
     const mv = this.mobs.get(b.mob);
     if (mv) this.#mobState(mv, 'battle');
@@ -1450,7 +1453,7 @@ export class GameClient {
       this.battle = null;
       this.me.av.setState('idle');
       this.me.av.hold(null);
-      this.hud.battleEnd({ fled: true });
+      this.hud.battleEnd({ fled: true, quiet: why === 'closed' });
     }
     for (const f of b.fighters) {
       const pv = this.players.get(f.id);
@@ -1659,6 +1662,7 @@ export class GameClient {
     this.hud.setMode('dungeon');
   }
   #outOfRun() {
+    this.hud.panels.close(); // the crypt's map, a chest's loot… belong to the run
     this.#disposeRun();
     this.battles.clear();
     this.town.root.visible = true;
@@ -1842,6 +1846,7 @@ export class GameClient {
   async #use(what) {
     try {
       const r = await this.sock.rpc('dungeon.use', { what });
+      if (!this.run || !this.dungeon) return; // thrown out while we waited
       if (what === 'rest') {
         this.run.state.lastLight = true;
         this.dungeon.usedFire('rest');

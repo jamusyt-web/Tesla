@@ -115,6 +115,7 @@ export class DungeonRun extends Channel {
   mobFell(b, mob) {
     mob.state = 'dead';
     mob.respawnAt = Infinity;
+    if (this.ended) return; // a failed run counts nothing more
     this.kills++;
     if (mob.key && !this.hasKey) {
       this.hasKey = true;
@@ -210,12 +211,14 @@ export class DungeonRun extends Channel {
     const ids = seated.map(([id]) => id);
     const names = seated.map(([, m]) => m.name);
     const day = dayIndex(this.finishedAt);
+    // The record's party size: everyone who went in (leaving before the boss doesn't make a duo's run a solo record).
+    const bracket = Math.max(this.partySize, this.everSeated.size);
     let best = false;
     try {
       tx(db, () => {
-        const prev = db.prepare('SELECT MIN(seconds) AS s FROM dungeon_runs WHERE kind = ? AND tier = ? AND mode = ? AND party = ? AND (mode = ? OR week = ?)').get(this.kind, this.tier, this.mode, ids.length, 'random', weekIndex(this.finishedAt))?.s;
+        const prev = db.prepare('SELECT MIN(seconds) AS s FROM dungeon_runs WHERE kind = ? AND tier = ? AND mode = ? AND party = ? AND (mode = ? OR week = ?)').get(this.kind, this.tier, this.mode, bracket, 'random', weekIndex(this.finishedAt))?.s;
         best = prev == null || seconds < prev;
-        db.prepare('INSERT INTO dungeon_runs (kind, tier, mode, week, party, heroes, hero_ids, seconds, finished_at) VALUES (?,?,?,?,?,?,?,?,?)').run(this.kind, this.tier, this.mode, weekIndex(this.finishedAt), ids.length, JSON.stringify(names), JSON.stringify(ids), seconds, this.finishedAt);
+        db.prepare('INSERT INTO dungeon_runs (kind, tier, mode, week, party, heroes, hero_ids, seconds, finished_at) VALUES (?,?,?,?,?,?,?,?,?)').run(this.kind, this.tier, this.mode, weekIndex(this.finishedAt), bracket, JSON.stringify(names), JSON.stringify(ids), seconds, this.finishedAt);
         for (const id of ids) {
           const lastDay = db.prepare('SELECT day FROM dungeon_daily WHERE account_id = ? AND kind = ? AND tier = ?').get(id, this.kind, this.tier)?.day;
           const firstToday = lastDay !== day;
@@ -316,12 +319,18 @@ export class DungeonRun extends Channel {
     const m = this.members.get(heroId);
     return m && m.goneAt && now - m.goneAt < SEAT_GRACE_MS && !this.ended ? m : null;
   }
+  // Heroes with a place in the run: inside now, or dropped a moment ago.
+  seats(now = Date.now()) {
+    let n = 0;
+    for (const m of this.members.values()) if (!m.goneAt || now - m.goneAt < SEAT_GRACE_MS) n++;
+    return n;
+  }
   // Party members who haven't been in yet may join until the boss falls.
   canJoin(heroId) {
-    return !this.ended && !this.bossDown && !this.everSeated.has(heroId) && this.players.size < MAX_RUN_HEROES;
+    return !this.ended && !this.bossDown && !this.everSeated.has(heroId) && !this.full;
   }
   get full() {
-    return this.players.size >= MAX_RUN_HEROES;
+    return this.seats() >= MAX_RUN_HEROES;
   }
 
   toEntry(c) {

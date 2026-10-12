@@ -207,7 +207,7 @@ export class Game {
     for (const run of [...this.runs.values()]) {
       try {
         run.tick(now, dt);
-        if (run.expired(now)) this.closeRun(run);
+        if (run.expired(now)) this.closeRun(run, run.closeText);
       } catch (e) {
         console.error('dungeon tick error', e);
       }
@@ -499,17 +499,21 @@ export class Game {
       const o = this.online.get(id);
       if (o && tier > 1 && this.bestTier(id, kind) < tier - 1) fail(`${o.hero.name} hasn't cleared ${TIERS[tier - 1].name} yet.`);
     }
-    p.ready = { kind, tier, mode, leader: c.hero.id, yes: new Set([c.hero.id]), no: new Set(), until: Date.now() + READY_MS };
+    p.ready = { kind, tier, mode, leader: c.hero.id, yes: new Set([c.hero.id]), no: new Set(), asked: new Set(p.members.filter((id) => this.online.has(id))), until: Date.now() + READY_MS };
     for (const id of p.members) if (id !== c.hero.id) this.online.get(id)?.send({ t: 'dready', from: c.hero.name, kind, tier, mode, expiresIn: READY_MS });
     this.parties.push(p);
     this.#checkReady(p);
     return { ready: true, expiresIn: READY_MS };
+  }
+  #tierOk(heroId, kind, tier) {
+    return tier <= 1 || this.bestTier(heroId, kind) >= tier - 1;
   }
   readyAnswer(c, yes) {
     const p = this.parties.get(c.hero.id);
     if (!p?.ready) fail('There is no ready check right now.');
     if (yes) {
       this.#notBusy(c);
+      if (!this.#tierOk(c.hero.id, p.ready.kind, p.ready.tier)) fail(`Clear ${TIERS[p.ready.tier - 1].name} first.`);
       p.ready.yes.add(c.hero.id);
     } else p.ready.no.add(c.hero.id);
     this.#checkReady(p);
@@ -519,12 +523,13 @@ export class Game {
   #checkReady(p, now = Date.now()) {
     const R = p.ready;
     if (!R) return;
+    // Wait only for those it asked who are still here and in the party.
     const online = p.members.filter((id) => this.online.has(id));
-    const answered = online.every((id) => R.yes.has(id) || R.no.has(id));
+    const answered = [...R.asked].filter((id) => online.includes(id)).every((id) => R.yes.has(id) || R.no.has(id));
     if (!answered && now < R.until) return;
     p.ready = null;
     const leader = this.online.get(R.leader);
-    const going = [...R.yes].map((id) => this.online.get(id)).filter((o) => o && !o.battle && !o.room && !o.craft && !o.ch?.isRun);
+    const going = [...R.yes].map((id) => this.online.get(id)).filter((o) => o && p.members.includes(o.hero.id) && !o.battle && !o.room && !o.craft && !o.ch?.isRun && this.#tierOk(o.hero.id, R.kind, R.tier));
     if (!leader || !going.includes(leader)) {
       for (const id of online) this.online.get(id)?.send({ t: 'toast', kind: 'err', text: 'The ready check was called off.' });
       this.parties.push(p);
@@ -543,6 +548,7 @@ export class Game {
     const p = this.parties.get(c.hero.id);
     if (!run.partyId || p?.id !== run.partyId) fail("That isn't your party's run.");
     this.#notBusy(c);
+    if (!this.#tierOk(c.hero.id, run.kind, run.tier)) fail(`Clear ${TIERS[run.tier - 1].name} first.`);
     if (!run.canJoin(c.hero.id)) fail(run.bossDown ? 'They have already beaten the boss.' : run.full ? 'That run is full.' : "You can't rejoin a run you left.");
     this.#intoRun(c, run);
     this.parties.push(p);
@@ -579,19 +585,16 @@ export class Game {
     this.pickChannel(lead?.ch && !lead.ch.isRun ? lead.ch.id : m?.channel).add(c);
   }
   // The fourth wipe: the crypt throws you out (you keep what you won).
+  // (The next tick closes it: an ended run does nothing more meanwhile.)
   failRun(run) {
     run.ended = true;
-    setImmediate(() => this.closeRun(run, `The dead of ${run.def.name} have had enough of you. You keep what you found; the chests stay shut.`));
+    run.closeText = `The dead of ${run.def.name} have had enough of you. You keep what you found; the chests stay shut.`;
   }
   closeRun(run, text = `${run.def.name} closes behind you.`) {
     run.ended = true;
     for (const c of [...run.players.values()]) {
-      if (c.battle) {
-        const b = c.battle;
-        b.fighters.delete(c.hero.id);
-        c.battle = null;
-        if (!b.fighters.size) b.over = true;
-      }
+      // Out of any fight properly (health carried over, battle screens closed).
+      c.battle?.leave(c, 'closed');
       const m = run.depart(c);
       c.send({ t: 'toast', kind: 'err', text });
       this.#outOfRun(c, run, m);
@@ -888,6 +891,7 @@ const HANDLERS = {
     if (!mob || mob.state === 'dead') fail('It ran off.');
     if (c.battle) fail('Already fighting!');
     if (dist(c.ent, mob) > 6) fail('Get closer first.');
+    if (c.ch.isRun && c.ch.ended) fail('The crypt is closing.');
     if (c.ch.isRun) {
       // No fighting through bars: you must be able to walk to it.
       const path = c.ch.nav.findPath(c.ent.x, c.ent.z, mob.x, mob.z);

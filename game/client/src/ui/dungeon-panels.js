@@ -206,6 +206,7 @@ export const DUNGEON_PANELS = {
     const facts = h('div.muted', { style: { textAlign: 'center', margin: '6px 0' } });
     let frame = null;
     const draw = () => {
+      if (!g.dungeon) return this.close();
       frame = this.hud.drawDungeonMap(cv, {});
       facts.textContent = `${st.cleared.length}/${g.run.layout.rooms.length} rooms clear · Bone Key ${st.key ? 'found' : 'not found'} · ${st.wipes ?? 0}/${MAX_WIPES} wipes${st.boss ? ' · Boss slain' : ''}`;
     };
