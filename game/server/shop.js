@@ -1,10 +1,15 @@
 import { ITEMS, isItem } from '../shared/items.js';
-import { SHOP, CUSTOMERS, demandCap, fillNow, npcBuyChance, buyQtyMax, footfall, poisson, pickDisplay } from '../shared/shop.js';
+import { SHOP, customersOf, demandCap, fillNow, npcBuyChance, buyQtyMax, footfall, poisson, pickDisplay } from '../shared/shop.js';
+import { REGIONS } from '../shared/world.js';
 import { tx, fail } from './db.js';
+
+// Moving your shop to another town costs 500 gold per tier of that town.
+export const moveFee = (town) => 500 * (REGIONS.find((r) => r.id === town)?.tier ?? 1);
 
 // Walk-in player shops. The owner puts goods on 8 displays with a price and
 // leaves; NPC customers (simulated here, every 10 s, online or not) buy over
 // time, and other players can walk in and buy. Sales go into the shop's till.
+// Each shop has a home town: its customers and their demand are that town's.
 // All rules and numbers live in shared/shop.js.
 export class Shops {
   constructor(db, heroes) {
@@ -20,11 +25,12 @@ export class Shops {
       upsert: p('INSERT INTO shop_slots (account_id, slot, item, qty, price) VALUES (?,?,?,?,?) ON CONFLICT(account_id, slot) DO UPDATE SET qty = excluded.qty, price = excluded.price, item = excluded.item'),
       del: p('DELETE FROM shop_slots WHERE account_id = ? AND slot = ?'),
       setQty: p('UPDATE shop_slots SET qty = ? WHERE account_id = ? AND slot = ?'),
-      stockedOpen: p('SELECT s.account_id AS owner, COUNT(DISTINCT s.item) AS n FROM shop_slots s JOIN shops p ON p.account_id = s.account_id WHERE p.open = 1 GROUP BY s.account_id'),
+      stockedOpen: p('SELECT s.account_id AS owner, MIN(p.town) AS town, COUNT(DISTINCT s.item) AS n FROM shop_slots s JOIN shops p ON p.account_id = s.account_id WHERE p.open = 1 GROUP BY s.account_id'),
       credit: p('UPDATE shops SET till = till + ?, sales = sales + ?, earned = earned + ?, last_sale_at = ? WHERE account_id = ?'),
       log: p('INSERT INTO shop_log (account_id, item, qty, price, buyer, ts, kind, buyer_id, fee, slot, seen) VALUES (?,?,?,?,?,?,?,?,?,?,1)'),
-      demandGet: p('SELECT fill, at FROM npc_demand WHERE item = ?'),
-      demandSet: p('INSERT INTO npc_demand (item, fill, at) VALUES (?,?,?) ON CONFLICT(item) DO UPDATE SET fill = excluded.fill, at = excluded.at'),
+      demandGet: p('SELECT fill, at FROM town_demand WHERE town = ? AND item = ?'),
+      demandSet: p('INSERT INTO town_demand (town, item, fill, at) VALUES (?,?,?,?) ON CONFLICT(town, item) DO UPDATE SET fill = excluded.fill, at = excluded.at'),
+      setTown: p('UPDATE shops SET town = ? WHERE account_id = ?'),
       metaGet: p('SELECT value FROM meta WHERE key = ?'),
       metaSet: p('INSERT INTO meta (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
       till: p('SELECT till FROM shops WHERE account_id = ?'),
@@ -37,7 +43,7 @@ export class Shops {
       awayTop: p(`SELECT item, SUM(qty) AS qty, SUM(price - fee) AS gold FROM shop_log WHERE account_id = ? AND ${unseen} GROUP BY item ORDER BY gold DESC LIMIT 3`),
       awayPlayers: p(`SELECT buyer AS name, item, qty, price - fee AS gold FROM shop_log WHERE account_id = ? AND kind = 'player' AND ${unseen} ORDER BY id DESC LIMIT 5`),
       prune: p(`DELETE FROM shop_log WHERE account_id = ? AND id <= (SELECT seen_upto FROM shops WHERE account_id = ?) AND id < (SELECT id FROM shop_log WHERE account_id = ? ORDER BY id DESC LIMIT 1 OFFSET ${SHOP.LEDGER_KEEP - 1})`),
-      directory: p(`SELECT p.account_id AS owner, p.name, p.open, p.last_sale_at, h.name AS hero_name, h.avatar, COUNT(s.slot) AS displays, COALESCE(SUM(s.qty), 0) AS items
+      directory: p(`SELECT p.account_id AS owner, p.name, p.open, p.town, p.last_sale_at, h.name AS hero_name, h.avatar, COUNT(s.slot) AS displays, COALESCE(SUM(s.qty), 0) AS items
         FROM shops p JOIN heroes h ON h.account_id = p.account_id LEFT JOIN shop_slots s ON s.account_id = p.account_id
         GROUP BY p.account_id HAVING displays > 0 OR p.account_id = ? ORDER BY p.last_sale_at DESC LIMIT 60`),
     };
@@ -63,14 +69,30 @@ export class Shops {
     return this.q.till.get(id)?.till ?? 0;
   }
 
+  townOf(id) {
+    return this.info(id)?.town ?? 'hearthvale';
+  }
+
   // Town-wide NPC demand for one item: fill (0..1), pool size, units available.
-  demand(item, t = Date.now()) {
-    const fill = fillNow(this.q.demandGet.get(item), t);
+  demand(item, t = Date.now(), town = 'hearthvale') {
+    const fill = fillNow(this.q.demandGet.get(town, item), t);
     const cap = demandCap(ITEMS[item].value);
     return { fill, cap, avail: Math.floor(fill * cap + 1e-9) };
   }
-  demandMap(items, t = Date.now()) {
-    return Object.fromEntries([...new Set(items)].map((it) => [it, this.demand(it, t).fill]));
+  demandMap(items, t = Date.now(), town = 'hearthvale') {
+    return Object.fromEntries([...new Set(items)].map((it) => [it, this.demand(it, t, town).fill]));
+  }
+
+  // Move the shop to `town` (the owner must be there; the caller checks).
+  move(id, town) {
+    this.ensure(id);
+    if (this.townOf(id) === town) fail('Your shop is already here.');
+    const fee = moveFee(town);
+    return tx(this.db, () => {
+      this.heroes.addGold(id, -fee, 'shopMove');
+      this.q.setTown.run(town, id);
+      return { town, fee };
+    });
   }
 
   // What a visitor (or the owner, with private extras) sees.
@@ -80,7 +102,8 @@ export class Shops {
     if (!info) fail('No such shop.');
     const slots = this.slots(owner);
     // The owner gets town demand for everything (to price new stock); visitors just what's shown.
-    const out = { owner, name: this.displayName(info), open: !!info.open, slots, demand: this.demandMap(viewerId === owner ? Object.keys(ITEMS) : slots.map((s) => s.item)) };
+    const town = info.town ?? 'hearthvale';
+    const out = { owner, name: this.displayName(info), town, open: !!info.open, slots, demand: this.demandMap(viewerId === owner ? Object.keys(ITEMS) : slots.map((s) => s.item), Date.now(), town) };
     if (viewerId === owner) Object.assign(out, { till: info.till, stats: { sales: info.sales, earned: info.earned } });
     return out;
   }
@@ -215,6 +238,7 @@ export class Shops {
         heroName: r.hero_name,
         avatar: JSON.parse(r.avatar),
         open: !!r.open,
+        town: r.town,
         displays: r.displays,
         items: r.items,
         featured: featured ? { item: featured.item, price: featured.price } : null,
@@ -253,28 +277,29 @@ export class Shops {
 
   #step(t, dt, presenceOf, rng) {
     const out = [];
-    for (const { owner, n } of this.q.stockedOpen.all()) {
+    for (const { owner, n, town } of this.q.stockedOpen.all()) {
       const pres = presenceOf(owner, t);
-      for (let k = poisson((footfall(n, pres) * dt) / 3_600_000, rng); k > 0; k--) out.push(this.#visit(owner, t, rng));
+      for (let k = poisson((footfall(n, pres) * dt) / 3_600_000, rng); k > 0; k--) out.push(this.#visit(owner, t, rng, town));
     }
     return out;
   }
 
-  #visit(owner, t, rng) {
-    const cust = Math.floor(rng() * CUSTOMERS.length);
+  #visit(owner, t, rng, town = 'hearthvale') {
+    const custs = customersOf(town);
+    const cust = Math.floor(rng() * custs.length);
     const slots = this.slots(owner);
     const fillOf = (item) => {
-      const d = this.demand(item, t);
+      const d = this.demand(item, t, town);
       return d.avail >= 1 ? d.fill : 0;
     };
-    const s = slots.length ? pickDisplay(CUSTOMERS[cust], slots, fillOf, rng) : null;
+    const s = slots.length ? pickDisplay(custs[cust], slots, fillOf, rng) : null;
     if (!s) return { owner, cust, slot: null, sale: null };
-    const d = this.demand(s.item, t);
+    const d = this.demand(s.item, t, town);
     if (rng() >= npcBuyChance(s.item, s.price, d.fill)) return { owner, cust, slot: s.slot, sale: null };
     const qty = Math.min(s.qty, d.avail, 1 + Math.floor(rng() * buyQtyMax(ITEMS[s.item].value)));
     if (qty < 1) return { owner, cust, slot: s.slot, sale: null };
-    this.q.demandSet.run(s.item, d.fill - qty / d.cap, t);
-    const sale = this.#sell(owner, s, qty, { kind: 'npc', buyer: CUSTOMERS[cust].name, buyerId: null, feePm: SHOP.NPC_FEE_PM, now: t });
+    this.q.demandSet.run(town, s.item, d.fill - qty / d.cap, t);
+    const sale = this.#sell(owner, s, qty, { kind: 'npc', buyer: custs[cust].name, buyerId: null, feePm: SHOP.NPC_FEE_PM, now: t });
     return { owner, cust, slot: s.slot, sale };
   }
 

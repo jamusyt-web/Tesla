@@ -91,7 +91,8 @@ test('post, deliver in parts, finish; gold and goods move exactly', async () => 
   await bob.next((m) => m.t === 'chat' && m.sys && /posted a job/.test(m.text));
 
   const list = (await bob.call('jobs.list')).data;
-  const job = list.open.find((j) => j.id === id);
+  const job = list.here.find((j) => j.id === id);
+  assert.equal(job.town, 'hearthvale', "posted on the board of the town it was put up in");
   assert.equal(job.posterName, 'Annette');
   assert.equal(job.left, 20);
   assert.ok(job.expiresAt - job.createdAt === JOB_DAYS * 86400_000);
@@ -145,7 +146,7 @@ test('cancel and expiry refund what was not delivered; limits hold', async () =>
   const now = Date.now() + JOB_DAYS * 86400_000 + 1000;
   game.expireJobs(now);
   assert.equal(gold(dee), before + 20);
-  assert.ok(!(await eli.call('jobs.list')).data.open.some((j) => j.id === id2));
+  assert.ok(!(await eli.call('jobs.list')).data.here.some((j) => j.id === id2));
   await dee.next((m) => m.t === 'toast' && /ran out/.test(m.text));
 
   for (let i = 0; i < MAX_OPEN_JOBS; i++) assert.ok((await dee.call('jobs.post', { item: 'stone', qty: 1, per: 1 })).ok);

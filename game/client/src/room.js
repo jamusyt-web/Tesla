@@ -5,7 +5,7 @@ import * as assets from './scene/assets.js';
 import { h, fmt } from './util/dom.js';
 import { sfx } from './util/sfx.js';
 import { ITEMS, RARITY } from '../../shared/items.js';
-import { ROOM, CUSTOMERS, roomNav } from '../../shared/shop.js';
+import { ROOM, customersOf, roomNav } from '../../shared/shop.js';
 import { stepPath } from '../../shared/world.js';
 
 // What you see while inside a player shop: the interior, everyone in it,
@@ -21,6 +21,7 @@ export class RoomView {
     this.open = p.open;
     this.till = p.till ?? 0;
     this.demand = p.demand || {};
+    this.town = p.town ?? 'hearthvale'; // its customers are that town's
     this.slots = new Map(p.slots.map((s) => [s.slot, s]));
     this.room = buildInterior({ low: game.low });
     this.scene = this.room.scene;
@@ -158,7 +159,8 @@ export class RoomView {
     }, delay);
   }
   #spawnWalker(m) {
-    const cust = CUSTOMERS[m.cust] || CUSTOMERS[0];
+    const custs = customersOf(this.town);
+    const cust = custs[m.cust] || custs[0];
     if (!assets.has('npc_villager')) return m.slot != null && this.#refreshDisplay(m.slot);
     const made = assets.make('npc_villager', { variant: cust.v });
     const nav = roomNav();

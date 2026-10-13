@@ -4,7 +4,6 @@ import { h, fmt } from '../util/dom.js';
 import { itemIcon } from './portrait.js';
 import { ITEMS, baseOf, qOf } from '../../../shared/items.js';
 
-export const NPC_RATE = 0.6; // what the town merchant pays, as a share of value
 
 // 3D-rendered icon when the item has a model, emoji otherwise.
 // Fine / Masterwork versions use their base item's picture plus a star.

@@ -1,30 +1,39 @@
-// The Grand Market: browse, an item's order book and price history, placing
-// and cancelling orders.
+// A town's market: browse its book, an item's orders and price history (and
+// what it fetches in other towns), placing and cancelling orders, the
+// supplier stall and your storage in this town. Out of town you can look
+// but not trade.
 import { h, clear, fmt } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
 import { ITEMS, CATEGORIES } from '../../../shared/items.js';
 import { MARKET_TAX as TAX } from '../../../shared/economy.js';
-import { iconEl, qtyInput, NPC_RATE } from './itemui.js';
+import { iconEl, qtyInput } from './itemui.js';
+import { townName, townCount } from '../../../shared/places.js';
 
 // Panel builders are called as fn.call(panels, c, args) (see panels.js), so
 // `this` is the Panels; the helpers below are called the same way.
 export const MARKET_PANELS = {
   market(c, args) {
     this.title(c, 'Grand Market', 'scales');
-    const st = { tab: 'browse', cat: 'all', q: '', item: args.item || null, side: 'buy', summary: {}, book: null };
+    const st = { tab: args.tab || 'browse', cat: 'all', q: '', item: args.item || null, side: 'buy', summary: {}, book: null, town: null, browseOnly: false, waiting: 0 };
     const load = async () => {
       try {
-        st.summary = await this.sock.rpc('market.summary');
+        const s = await this.sock.rpc('market.summary');
+        Object.assign(st, { summary: s.items, town: s.town, browseOnly: s.browseOnly, waiting: s.waiting?.[s.town] ?? 0 });
+        // Hearthvale's is the Grand Market; the others go by their town.
+        if (townCount() > 1 && s.town !== 'hearthvale') this.title(c, `${townName(s.town)} Market`, 'scales');
       } catch {}
-      render();
+      if (this.cur === c) render();
     };
+    st.reload = load;
     const render = () => {
       clear(c.body);
+      if (st.browseOnly) c.body.append(h('div.note.away', `You're looking from afar. Head to ${townName(st.town)} to trade here.`));
       if (st.item) return marketItem.call(this, c, st, render);
-      c.body.append(
-        h('div.tabs', ...[['browse', 'Browse'], ['mine', 'My Orders']].map(([k, l]) => h('button' + (st.tab === k ? '.on' : ''), { on: { click: () => ((st.tab = k), render()) } }, l))),
-      );
+      const tabs = [['browse', 'Browse'], ['mine', 'My Orders'], ['supplier', 'Stall'], ['storage', st.waiting ? `Storage (${fmt(st.waiting)})` : 'Storage']];
+      c.body.append(h('div.tabs', ...tabs.map(([k, l]) => h('button' + (st.tab === k ? '.on' : ''), { on: { click: () => ((st.tab = k), render()) } }, l))));
       if (st.tab === 'mine') return myOrders.call(this, c.body, render);
+      if (st.tab === 'supplier') return supplierTab.call(this, c.body, st, render);
+      if (st.tab === 'storage') return storageTab.call(this, c.body, st, render);
       const search = h('input.search', { placeholder: 'Search items…', value: st.q });
       search.addEventListener('input', () => {
         st.q = search.value;
@@ -79,14 +88,14 @@ async function myOrders(body, back) {
       h(
         'div.rowcard',
         h('div.ic', it?.icon),
-        h('div.grow', h('div.t', `${o.side === 'buy' ? 'Buying' : 'Selling'} ${it?.name}`), h('div.s', `${o.price} 🪙 each · ${o.filled}/${o.qty} filled · ${o.status}`)),
+        h('div.grow', h('div.t', `${o.side === 'buy' ? 'Buying' : 'Selling'} ${it?.name}`), h('div.s', `${o.price} 🪙 each · ${o.filled}/${o.qty} filled · ${o.status}${townCount() > 1 ? ` · ${townName(o.town)}` : ''}`)),
         o.status === 'open'
           ? h('button.btn.red.small', {
               on: {
                 click: async () => {
                   try {
-                    await this.sock.rpc('market.cancel', { id: o.id });
-                    this.hud.toast('Order cancelled — escrow returned.', 'good');
+                    const r = await this.sock.rpc('market.cancel', { id: o.id });
+                    this.hud.toast(r?.stored ? `Order cancelled. The goods wait in your storage in ${townName(r.stored)}.` : 'Order cancelled — escrow returned.', 'good');
                     back();
                   } catch (e) {
                     this.hud.toast(e.message, 'err');
@@ -105,14 +114,29 @@ function marketItem(c, st, back) {
   const it = ITEMS[id];
   const body = c.body;
   body.append(h('button.btn.plain.small', { style: { marginBottom: '10px' }, on: { click: () => ((st.item = null), back()) } }, '← All items'));
-  const head = h('div.row', h('div', { style: { fontSize: '44px' } }, iconEl(id, '60px')), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '20px' } }, it.name), h('div.muted', `Base value ${it.value} 🪙 · Merchant pays ${Math.floor(it.value * NPC_RATE)} 🪙`)));
+  const prices = h('div.muted', `Base value ${it.value} 🪙`);
+  const head = h('div.row', h('div', { style: { fontSize: '44px' } }, iconEl(id, '60px')), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '20px' } }, it.name), prices));
   const stats = h('div.muted', { style: { margin: '6px 0' } }, 'Loading…');
   const chart = h('canvas.chart', { width: 600, height: 160 });
   const bookEl = h('div.book');
   const trade = h('div.detail');
-  body.append(head, stats, chart, h('div.section-title', 'Order book'), bookEl, trade);
+  const others = h('div');
+  body.append(head, stats, chart, h('div.section-title', 'Order book'), bookEl, trade, others);
+  // The price board: what it fetches in every town (a gap worth a trip?).
+  if (townCount() > 1)
+    this.sock
+      .rpc('market.board', { item: id })
+      .then((r) => {
+        if (st.item !== id) return;
+        others.append(
+          h('div.section-title', 'Other towns'),
+          ...r.towns.map((t) => h('div.rowcard' + (t.town === st.town ? '.open' : ''), h('div.grow', h('div.t', t.name), h('div.s', [t.last ? `Last ${t.last} 🪙` : 'No trades yet', `merchant pays ${t.npcBid} 🪙`, t.ask ? `stall sells at ${t.ask} 🪙` : null].filter(Boolean).join(' · '))))),
+        );
+      })
+      .catch(() => {});
 
   const drawBook = (b) => {
+    prices.textContent = [`Base value ${it.value} 🪙`, b.npcBid ? `Merchant pays ${b.npcBid} 🪙` : "The merchant won't buy it", b.supplierAsk ? `Stall sells at ${b.supplierAsk} 🪙` : null].filter(Boolean).join(' · ');
     stats.textContent = b.vol24 ? `24h: ${fmt(b.vol24)} traded · avg ${b.avg24} 🪙` : 'No trades in the last 24h — set the price!';
     clear(bookEl);
     const tbl = (rows, cls, title) =>
@@ -193,6 +217,10 @@ function marketItem(c, st, back) {
       return { worst, total, filled: q - left };
     };
     const ins = instant();
+    if (st.browseOnly) {
+      trade.append(h('div.muted', `To buy or sell, come to ${townName(st.town)}.`));
+      return;
+    }
     const place = async (ioc) => {
       const q = Math.floor(+qty.value);
       const p = ioc ? ins.worst : Math.floor(+price.value);
@@ -227,7 +255,7 @@ function marketItem(c, st, back) {
 
   const refreshItem = async () => {
     try {
-      const b = await this.sock.rpc('market.book', { item: id });
+      const b = await this.sock.rpc('market.book', { item: id, town: st.town });
       st.book = b;
       if (this.cur?.name !== 'market' || st.item !== id) return;
       drawBook(b);
@@ -238,4 +266,82 @@ function marketItem(c, st, back) {
   };
   st.refreshItem = refreshItem;
   refreshItem();
+}
+
+// The supplier stall: a few goods for sale every day, at a fixed price.
+async function supplierTab(body, st, back) {
+  const wrap = h('div', h('div.empty', 'Loading…'));
+  body.append(wrap);
+  let r;
+  try {
+    r = await this.sock.rpc('supplier.list');
+  } catch (e) {
+    return this.hud.toast(e.message, 'err');
+  }
+  clear(wrap);
+  wrap.append(h('p.muted', 'The stall sells a few local goods every day at a fixed price. Handy when nobody is selling.'));
+  for (const s of r.stock) {
+    const it = ITEMS[s.item];
+    const q = qtyInput(1, Math.max(1, s.left));
+    const buy = async () => {
+      try {
+        const res = await this.sock.rpc('supplier.buy', { item: s.item, qty: +q.value });
+        sfx.coin();
+        this.hud.toast(`Bought ${res.qty}× ${it.name} for ${fmt(res.gold)} 🪙`, 'gold');
+        back();
+      } catch (e) {
+        this.hud.toast(e.message, 'err');
+      }
+    };
+    wrap.append(
+      h(
+        'div.rowcard',
+        h('div.ic', iconEl(s.item, '44px')),
+        h('div.grow', h('div.t', it.name), h('div.s', `${fmt(s.ask)} 🪙 each · ${s.left ? `${fmt(s.left)} left today` : 'sold out today'}`)),
+        st.browseOnly || !s.left ? null : h('div.row', q, h('button.btn.green.small', { on: { click: buy } }, 'Buy')),
+      ),
+    );
+  }
+}
+
+// Your storage in this town: goods that arrived for you (filled buy orders,
+// deliveries, cancelled sell orders) and goods you parked here.
+async function storageTab(body, st, back) {
+  const wrap = h('div', h('div.empty', 'Loading…'));
+  body.append(wrap);
+  let r;
+  try {
+    r = await this.sock.rpc('storage.get', { town: st.town });
+  } catch (e) {
+    return this.hud.toast(e.message, 'err');
+  }
+  clear(wrap);
+  const act = async (m, a, ok) => {
+    try {
+      const res = await this.sock.rpc(m, a);
+      this.hud.toast(ok(res), 'good');
+      await st.reload();
+    } catch (e) {
+      this.hud.toast(e.message, 'err');
+    }
+    back();
+  };
+  const stored = Object.entries(r.items);
+  wrap.append(h('p.muted', `Storage is free. Goods you buy or are sent here wait for you, and you can leave goods here to sell later${townCount() > 1 ? ' (and skip the waystone toll)' : ''}.`));
+  if (stored.length && !st.browseOnly) wrap.append(h('button.btn.green', { on: { click: () => act('storage.collect', {}, (x) => `Collected ${Object.values(x.moved).reduce((a, b) => a + b, 0)} items.`) } }, 'Collect everything'));
+  if (!stored.length) wrap.append(h('div.empty', h('div.big', '📦'), 'Nothing stored here.'));
+  for (const [item, n] of stored) {
+    const q = qtyInput(n, n);
+    wrap.append(h('div.rowcard', h('div.ic', iconEl(item, '40px')), h('div.grow', h('div.t', ITEMS[item].name), h('div.s', `${fmt(n)} stored`)), st.browseOnly ? null : h('div.row', q, h('button.btn.small', { on: { click: () => act('storage.withdraw', { item, qty: +q.value }, () => 'Taken out.') } }, 'Take'))));
+  }
+  if (st.browseOnly) return;
+  // Leave goods here: anything in the bag that isn't worn or held.
+  const worn = new Set(Object.values(this.me.equip || {}));
+  const bag = Object.entries(this.me.inv).filter(([id, n]) => n > (worn.has(id) ? 1 : 0));
+  if (bag.length) wrap.append(h('div.section-title', 'Leave goods here'));
+  for (const [item, n] of bag) {
+    const max = n - (worn.has(item) ? 1 : 0);
+    const q = qtyInput(max, max);
+    wrap.append(h('div.rowcard', h('div.ic', iconEl(item, '40px')), h('div.grow', h('div.t', ITEMS[item].name), h('div.s', `${fmt(n)} in your bag`)), h('div.row', q, h('button.btn.small', { on: { click: () => act('storage.deposit', { item, qty: +q.value }, () => 'Stored.') } }, 'Store'))));
+  }
 }

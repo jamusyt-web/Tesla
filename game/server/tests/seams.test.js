@@ -26,7 +26,8 @@ const schema = (db) => db.prepare("SELECT type, name, sql FROM sqlite_master WHE
 
 // Every RPC that worked before the move, and whether it worked inside a dungeon run.
 const OLD_RPCS = ['craft', 'craft.info', 'craft.start', 'craft.finish', 'craft.cancel', 'craft.quick', 'npcSell', 'drink', 'travel', 'owner.teleport', 'equip', 'avatar', 'profile', 'market.summary', 'market.book', 'market.mine', 'market.place', 'market.cancel', 'shop.enter', 'shop.exit', 'shop.state', 'shop.stock', 'shop.unstock', 'shop.price', 'shop.setup', 'shop.collect', 'shop.ledger', 'shop.ack', 'shop.buy', 'shop.directory', 'town.info', 'invite.create', 'dungeon.info', 'dungeon.enter', 'dungeon.ready', 'dungeon.join', 'dungeon.leave', 'dungeon.use', 'party.get', 'party.invite', 'party.answer', 'party.leave', 'party.kick', 'party.promote', 'jobs.list', 'jobs.post', 'jobs.deliver', 'jobs.cancel', 'channel.switch', 'tutorialSkip'];
-const OLD_IN_RUN = (name) => /^(dungeon|party|market)\./.test(name) || ['equip', 'avatar', 'profile', 'town.info', 'jobs.list', 'drink', 'craft.info', 'invite.create', 'tutorialSkip', 'shop.state', 'shop.ledger', 'shop.collect', 'shop.ack', 'shop.directory'].includes(name);
+// (M3: placing and cancelling market orders left the run list, SPEC §6.1.)
+const OLD_IN_RUN = (name) => (/^(dungeon|party|market)\./.test(name) && !['market.place', 'market.cancel'].includes(name)) || ['equip', 'avatar', 'profile', 'town.info', 'jobs.list', 'drink', 'craft.info', 'invite.create', 'tutorialSkip', 'shop.state', 'shop.ledger', 'shop.collect', 'shop.ack', 'shop.directory'].includes(name);
 
 test('rpc table: every old RPC is registered, with the same in-dungeon rule', () => {
   const names = new Set(rpcNames());

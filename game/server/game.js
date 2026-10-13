@@ -11,6 +11,9 @@ import { Shops } from './shop.js';
 import { ShopRoom } from './rooms.js';
 import { Crafting } from './crafting.js';
 import { Jobs } from './jobs.js';
+import { Merchant } from './merchant.js';
+import { needTown } from './towns.js';
+import { setOverrides } from '../shared/economy.js';
 import { SHOP } from '../shared/shop.js';
 import { Auth } from './auth.js';
 import { Channel, q2 } from './channel.js';
@@ -24,7 +27,7 @@ import { emit } from './events.js';
 import { onMove } from './move.js';
 import { GATHER_HANDLERS } from './gather.js';
 import { attuneNearby } from './travel.js';
-import { expireJobs } from './trade.js';
+import { expireJobs, pushStorage } from './trade.js';
 import './gear.js'; // these register their RPCs
 import './perf.js';
 import { TUTORIAL } from './tutorial.js';
@@ -128,6 +131,13 @@ export class Game {
     this.shops = new Shops(db, this.heroes);
     this.crafting = new Crafting(this);
     this.jobs = new Jobs(db, this.heroes);
+    this.merchant = new Merchant(db, this.heroes);
+    // The owner's economy knobs (SPEC §6.5), read through knob().
+    try {
+      setOverrides(JSON.parse(db.prepare("SELECT value FROM meta WHERE key = 'econ_overrides'").get()?.value ?? '{}'));
+    } catch {
+      setOverrides({});
+    }
     this.parties = new Parties(this);
     this.runs = new Map(); // dungeon runs (id → DungeonRun)
     this.runSeq = 0;
@@ -343,6 +353,7 @@ export class Game {
     }
     const away = this.shops.awaySummary(accountId, Date.now(), this.lastActive.get(accountId));
     if (away) c.send({ t: 'awaySales', ...away });
+    pushStorage(this, c); // goods waiting in storage, per town
     this.shops.prune(accountId);
     ws.on('message', (buf) => this.onMessage(c, buf));
     ws.on('close', () => this.disconnect(c));
@@ -694,6 +705,13 @@ const RPC = {
   },
   'shop.collect'(g, c) {
     const r = g.shops.collect(c.hero.id);
+    c.pushInventory();
+    return r;
+  },
+  // Move your shop to the town you're standing in (its customers come from there).
+  'shop.move'(g, c, a) {
+    const town = needTown(g, c, typeof a.town === 'string' && a.town ? a.town : null);
+    const r = g.shops.move(c.hero.id, town);
     c.pushInventory();
     return r;
   },

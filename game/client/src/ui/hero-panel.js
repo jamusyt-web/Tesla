@@ -4,7 +4,8 @@ import { sfx } from '../util/sfx.js';
 import { portrait } from './portrait.js';
 import { ITEMS, RARITY, CATEGORIES } from '../../../shared/items.js';
 import { SKILLS, SKILL_IDS, levelProgress, levelFromXp } from '../../../shared/skills.js';
-import { iconEl, itemSlot, qtyInput, itemDesc, NPC_RATE } from './itemui.js';
+import { townCount } from '../../../shared/places.js';
+import { iconEl, itemSlot, qtyInput, itemDesc } from './itemui.js';
 
 // Panel builders are called as fn.call(panels, c, args) (see panels.js), so
 // `this` is the Panels; the helpers below are called the same way.
@@ -65,7 +66,12 @@ export const HERO_PANELS = {
 function itemDetail(id, isEq) {
   const it = ITEMS[id];
   const have = this.me.inv[id];
-  const npc = Math.max(1, Math.floor(it.value * NPC_RATE));
+  // The merchant's price here and now (it drops as you sell, and differs by town).
+  const npcEl = h('b.gold', '…');
+  this.sock
+    .rpc('merchant.quote', { item: id, qty: 1 })
+    .then((qt) => (npcEl.textContent = qt.unit ? `${qt.unit} 🪙 each${qt.full ? ' (full up)' : qt.glut && townCount() > 1 ? ' (plenty here)' : ''}` : "Won't buy"))
+    .catch(() => (npcEl.textContent = '—'));
   const sellable = isEq ? have - 1 : have;
   const q = qtyInput(Math.max(1, sellable), Math.max(1, sellable));
   const box = h(
@@ -73,7 +79,7 @@ function itemDetail(id, isEq) {
     h('div.row', h('div', { style: { fontSize: '40px' } }, iconEl(id, '56px')), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '18px' } }, it.name), h('div', { style: { fontWeight: 700, fontSize: '13px' } }, h('span', { style: { background: '#2a2018', color: RARITY[it.rarity].color, padding: '1px 6px', borderRadius: '3px' } }, RARITY[it.rarity].label), ' · ' + CATEGORIES[it.cat]), h('div.muted', itemDesc(it)))),
     h('div.kv', h('span', 'You own'), h('b', fmt(have))),
     h('div.kv', h('span', 'Base value'), h('b.gold', `${it.value} 🪙`)),
-    h('div.kv', h('span', 'Merchant pays'), h('b.gold', `${npc} 🪙 each`)),
+    h('div.kv', h('span', 'Merchant pays'), npcEl),
     h(
       'div.row',
       { style: { marginTop: '10px', flexWrap: 'wrap' } },
@@ -92,7 +98,7 @@ async function npcSell(item, qty) {
   try {
     const r = await this.sock.rpc('npcSell', { item, qty });
     sfx.coin();
-    this.hud.toast(`Sold for ${r.gold} 🪙`, 'gold');
+    this.hud.toast(`Sold for ${r.gold} 🪙${r.full ? '. The merchant has had their fill of these: try another town.' : ''}`, 'gold');
   } catch (e) {
     this.hud.toast(e.message, 'err');
   }

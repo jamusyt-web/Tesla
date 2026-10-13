@@ -1,13 +1,16 @@
 import { ITEMS, isItem } from '../shared/items.js';
 import { MARKET_TAX_PM } from '../shared/economy.js';
 import { tx, fail } from './db.js';
+import { stash } from './storage.js';
 
 // The bulletin board: paid jobs between players. A job asks for `qty` of an
-// item at `per` gold each. The poster's gold is held when the job goes up, so
-// it always pays. Anyone (but the poster) can deliver some or all of it and is
-// paid on the spot, less the usual 4% tax; the goods go straight into the
-// poster's bag, online or not. Unfilled jobs expire after a few days, and
-// cancelling or expiring refunds whatever wasn't delivered.
+// item at `per` gold each, in the town it was posted in. The poster's gold
+// is held when the job goes up, so it always pays. Anyone (but the poster)
+// can deliver some or all of it, in that town, and is paid on the spot, less
+// the usual 4% tax. The goods go into the poster's bag if they're in that
+// town right now, else into their storage there (goods never teleport).
+// Unfilled jobs expire after a few days, and cancelling or expiring refunds
+// whatever wasn't delivered.
 export const JOB_DAYS = 3;
 export const MAX_OPEN_JOBS = 5;
 const MAX_QTY = 999;
@@ -18,7 +21,7 @@ export class Jobs {
     this.db = db;
     this.heroes = heroes;
     this.q = {
-      insert: db.prepare('INSERT INTO jobs (poster, item, qty, left, per, created_at, expires_at) VALUES (?,?,?,?,?,?,?)'),
+      insert: db.prepare('INSERT INTO jobs (poster, item, qty, left, per, created_at, expires_at, town) VALUES (?,?,?,?,?,?,?,?)'),
       get: db.prepare('SELECT * FROM jobs WHERE id = ?'),
       open: db.prepare(`SELECT j.*, h.name AS poster_name FROM jobs j JOIN heroes h ON h.account_id = j.poster WHERE j.status = 'open' AND j.expires_at > ? ORDER BY j.created_at DESC LIMIT 200`),
       mine: db.prepare(`SELECT * FROM jobs WHERE poster = ? AND (status = 'open' OR closed_at > ?) ORDER BY status = 'open' DESC, created_at DESC LIMIT 30`),
@@ -30,7 +33,7 @@ export class Jobs {
   }
 
   #row(j) {
-    return { id: j.id, poster: j.poster, posterName: j.poster_name, item: j.item, qty: j.qty, left: j.left, per: j.per, createdAt: j.created_at, expiresAt: j.expires_at, status: j.status };
+    return { id: j.id, town: j.town, poster: j.poster, posterName: j.poster_name, item: j.item, qty: j.qty, left: j.left, per: j.per, createdAt: j.created_at, expiresAt: j.expires_at, status: j.status };
   }
 
   // Close jobs past their time and refund what's left. Returns the posters to tell.
@@ -52,7 +55,8 @@ export class Jobs {
     return this.q.mine.all(accountId, now - 24 * 3600_000).map((j) => this.#row(j));
   }
 
-  post(accountId, { item, qty, per }, now = Date.now()) {
+  // Post a job on `town`'s board.
+  post(accountId, { item, qty, per }, town = 'hearthvale', now = Date.now()) {
     qty = Number(qty);
     per = Number(per);
     if (!isItem(item)) fail('Pick an item for the job.');
@@ -63,13 +67,18 @@ export class Jobs {
     if (this.heroes.gold(accountId) < total) fail(`That job pays ${total} gold in all; you don't have that much.`);
     return tx(this.db, () => {
       this.heroes.addGold(accountId, -total, 'jobEscrow'); // held until delivered, cancelled or expired
-      const id = Number(this.q.insert.run(accountId, item, qty, qty, per, now, now + JOB_DAYS * 86400_000).lastInsertRowid);
+      const id = Number(this.q.insert.run(accountId, item, qty, qty, per, now, now + JOB_DAYS * 86400_000, town).lastInsertRowid);
       return this.#row(this.q.get.get(id));
     });
   }
 
-  // Hand in up to `qty` for job `id`. Returns what happened, for both sides.
-  deliver(accountId, id, qty, now = Date.now()) {
+  // Hand in up to `qty` for job `id`. posterHere(poster, town) says whether
+  // the poster is in the job's town now (their goods go to the bag, else to
+  // storage there). Returns what happened, for both sides.
+  get(id) {
+    return this.q.get.get(Number(id)) ?? null;
+  }
+  deliver(accountId, id, qty, now = Date.now(), posterHere = () => false) {
     id = Number(id);
     qty = Number(qty);
     const j = this.q.get.get(id);
@@ -81,13 +90,15 @@ export class Jobs {
       const H = this.heroes;
       H.takeItem(accountId, j.item, qty, { keepEquipped: true });
       if (this.q.take.run(qty, id, qty).changes !== 1) fail('That job is no longer up.');
-      H.addItem(j.poster, j.item, qty);
+      const toBag = posterHere(j.poster, j.town);
+      if (toBag) H.addItem(j.poster, j.item, qty);
+      else stash(this.db, j.poster, j.town, j.item, qty);
       const gross = qty * j.per;
       const tax = H.takeFee(accountId, gross, MARKET_TAX_PM);
       H.addGold(accountId, gross - tax, 'jobPay');
       const left = j.left - qty;
       if (left === 0) this.q.close.run('done', now, id);
-      return { job: id, poster: j.poster, item: j.item, qty, gross, tax, paid: gross - tax, left };
+      return { job: id, town: j.town, poster: j.poster, item: j.item, qty, gross, tax, paid: gross - tax, left, stored: !toBag };
     });
   }
 

@@ -548,6 +548,7 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .wm-card .t .g { color: #3d8fa8; }
 .wm-card .s { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
 .wm-card .note { font-size: 14px; margin-top: 6px; }
+.panel-body .note.away { background: rgba(166, 58, 46, 0.12); border-left: 3px solid var(--red); padding: 6px 10px; margin-bottom: 8px; font-weight: 700; font-size: 14px; }
 .wm-card .note.bad { color: var(--red); font-weight: 700; }
 .wm-card .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .wm-x { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; border-radius: 6px; background: #3a2d22; border: 1px solid var(--brass); color: #e8c983; font-weight: 800; }

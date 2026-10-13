@@ -3,6 +3,7 @@ import { sfx } from '../util/sfx.js';
 import { ITEMS, RARITY } from '../../../shared/items.js';
 import { SHOP, estimate, refPrice, npcCeil, demandLabel } from '../../../shared/shop.js';
 import { MARKET_TAX } from '../../../shared/economy.js';
+import { townAt, townName, townCount } from '../../../shared/places.js';
 import { portrait } from './portrait.js';
 import { iconEl } from './panels.js';
 
@@ -23,7 +24,7 @@ const hours = (h_) => (!isFinite(h_) ? 'not at this price' : h_ < 1 ? `about ${M
 function forecast(room, slot, item, qty, price) {
   const slots = [...room.slots.values()].filter((s) => s.slot !== slot).concat([{ slot, item, qty, price }]);
   const fillOf = (it) => room.demand[it] ?? 1;
-  const e = estimate(slots, fillOf, 'offline')[slot];
+  const e = estimate(slots, fillOf, 'offline', room.town)[slot];
   const fill = fillOf(item);
   const lines = [];
   if (price > npcCeil(item)) lines.push(h('div.warn', `Townsfolk never pay more than ${npcCeil(item)} 🪙 for this (players still might).`));
@@ -154,7 +155,7 @@ export const SHOP_PANELS = {
             h(
               'div.rowcard',
               h('img', { src: portrait(s.avatar), style: { width: '48px', height: '48px', borderRadius: '10px', background: '#3a2c22' } }),
-              h('div.grow', h('div.t', s.name, mine ? ' (yours)' : ''), h('div.s', `${s.online ? '🟢' : '⚪'} ${s.heroName} · ${s.displays} displays${s.visitors ? ` · ${s.visitors} inside` : ''}${s.open ? '' : ' · closed'}`), f ? h('div.s', `Featuring ${f.name} · ${fmt(s.featured.price)} 🪙`) : null),
+              h('div.grow', h('div.t', s.name, mine ? ' (yours)' : ''), h('div.s', `${s.online ? '🟢' : '⚪'} ${s.heroName}${townCount() > 1 ? ` · ${townName(s.town)}` : ''} · ${s.displays} displays${s.visitors ? ` · ${s.visitors} inside` : ''}${s.open ? '' : ' · closed'}`), f ? h('div.s', `Featuring ${f.name} · ${fmt(s.featured.price)} 🪙`) : null),
               s.open || mine ? h('button.btn.green.small', { on: { click: () => (this.close(), this.hud.game?.enterShop(s.owner)) } }, mine ? 'Go in' : 'Visit') : h('span.muted', 'Closed'),
             ),
           );
@@ -180,6 +181,7 @@ export const SHOP_PANELS = {
         h('div.till', h('div', h('div.muted', 'In the till'), h('div.big.gold', `${fmt(L.till)} 🪙`)), h('button.btn.green', { disabled: !L.till, on: { click: () => this.rpc('shop.collect', {}).then((r) => (sfx.coin(), this.hud.toast(`Collected ${fmt(r.gold)} 🪙`, 'gold'), this.hud.setTill?.(0), draw())) } }, 'Collect')),
         h('div.kv', h('span', 'Last 24 hours'), h('b', `${L.day.count} sales · ${fmt(L.day.gross - L.day.fee)} 🪙`)),
         h('div.kv', h('span', 'All time'), h('b', `${fmt(st.stats?.sales || 0)} sold · ${fmt(st.stats?.earned || 0)} 🪙`)),
+        homeTown.call(this, st, draw),
         h('div.muted', { style: { fontSize: '12px', margin: '4px 0 8px' } }, `Fees: ${Math.round(MARKET_TAX * 100)}% on sales to players (like the market), ${SHOP.NPC_FEE_PM / 10}% guild levy on sales to townsfolk.`),
         h('div.row.wrap', h('label.qty', 'Name ', name), h('button.btn.small', { on: { click: () => this.rpc('shop.setup', { name: name.value }, 'Renamed!').then(draw) } }, 'Rename'), h('button.btn.small' + (st.open ? '.red' : '.green'), { on: { click: () => this.rpc('shop.setup', { open: !st.open }, st.open ? 'Shop closed.' : 'Shop open!').then(draw) } }, st.open ? 'Close shop' : 'Open shop')),
         h('div.section-title', 'Recent sales'),
@@ -205,3 +207,20 @@ export const SHOP_PANELS = {
     c.onClose = () => this.sock.rpc('shop.ack', { upto: m.upto }, { auto: true }).catch(() => {});
   },
 };
+
+// Where the shop is (its customers are that town's), and moving it to the
+// town you're in, for 500 gold per tier of that town.
+function homeTown(st, draw) {
+  if (townCount() < 2) return null;
+  const p = this.hud.game?.myPos();
+  const here = p && townAt(p.x, p.z);
+  const fee = here ? 500 * (here.tier ?? 1) : 0;
+  return h(
+    'div.kv',
+    h('span', 'Home town'),
+    h('b', townName(st.town)),
+    here && here.id !== st.town && !this.hud.game?.dungeon
+      ? h('button.btn.small', { on: { click: () => this.rpc('shop.move', { town: here.id }, `Your shop moved to ${here.name}.`).then(draw) } }, `Move to ${here.name} · ${fmt(fee)} 🪙`)
+      : null,
+  );
+}

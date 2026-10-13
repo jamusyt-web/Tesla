@@ -2,7 +2,10 @@
 // NPC customer model, the interior room layout). Imports shared code only.
 import { ITEMS } from './items.js';
 import { NavGrid } from './world.js';
-import { MARKET_TAX_PM, NPC_LEVY_PM } from './economy.js';
+import { MARKET_TAX_PM, NPC_LEVY_PM, DEMAND_POOL_GOLD, DEMAND_CAP_MIN, DEMAND_CAP_MAX, demandCap } from './economy.js';
+import { CONTENT } from './content/index.js';
+
+export { demandCap };
 
 export const SHOP = {
   SLOTS: 8,
@@ -22,9 +25,9 @@ export const SHOP = {
   PRICE_CEIL: 1.5, // NPCs never pay more than 1.5× an item's value
   DEMAND_MIN: 0.7,
   DEMAND_MAX: 1.2,
-  DEMAND_POOL_GOLD: 2400, // each item's town-wide NPC demand is worth about this much…
-  DEMAND_CAP_MIN: 12,
-  DEMAND_CAP_MAX: 400,
+  DEMAND_POOL_GOLD, // each item's town-wide NPC demand is worth about this much…
+  DEMAND_CAP_MIN,
+  DEMAND_CAP_MAX,
   DEMAND_REFILL_MS: 8 * 3600_000, // …and refills over 8 hours
   BUY_QTY_GOLD: 40,
   BUY_QTY_MAX: 5,
@@ -56,6 +59,16 @@ export const CUSTOMERS = [
   C('Granny Moss', '👵', 2, [2, 1, 3, 0, 0], ['moonbloom']),
 ];
 
+// Who shops in each town: Hearthvale's townsfolk above; a new town's come
+// from its content pack ({ name, face, v, cats, likes: [ids] }).
+const custCache = new Map();
+export function customersOf(town = 'hearthvale') {
+  const list = town === 'hearthvale' ? null : CONTENT.customers?.[town];
+  if (!list) return CUSTOMERS;
+  if (!custCache.has(town)) custCache.set(town, list.map((c) => ({ ...c, likes: new Set(c.likes ?? []) })));
+  return custCache.get(town);
+}
+
 // ── The NPC demand model ─────────────────────────────────────────────
 // Customers per hour for a shop showing nItems distinct items.
 export const footfall = (nItems, pres) =>
@@ -63,7 +76,6 @@ export const footfall = (nItems, pres) =>
 
 // Town-wide demand for each item is a pool that NPC purchases drain and that
 // refills over 8 h, so NPC buying can never become an unlimited gold tap.
-export const demandCap = (v) => clamp(Math.round(SHOP.DEMAND_POOL_GOLD / v), SHOP.DEMAND_CAP_MIN, SHOP.DEMAND_CAP_MAX);
 export const fillNow = (row, now) => (row ? Math.min(1, row.fill + Math.max(0, now - row.at) / SHOP.DEMAND_REFILL_MS) : 1);
 export const demandFactor = (fill) => SHOP.DEMAND_MIN + (SHOP.DEMAND_MAX - SHOP.DEMAND_MIN) * fill;
 // What townsfolk think an item is worth right now (more when it's scarce).
@@ -110,8 +122,9 @@ export function pickDisplay(cust, slots, fillOf, rng) {
   return opts[opts.length - 1][0];
 }
 
-// Expected sales for the owner's price sheet: per display {chance, perHour, sellOutHours, ref, ceil, demand}.
-export function estimate(slots, fillOf, pres = 'offline') {
+// Expected sales for the owner's price sheet (a shop in `town`): per display {chance, perHour, sellOutHours, ref, ceil, demand}.
+export function estimate(slots, fillOf, pres = 'offline', town = 'hearthvale') {
+  const custs = customersOf(town);
   const cheapest = new Map();
   for (const s of slots) if (!cheapest.has(s.item) || s.price < cheapest.get(s.item).price) cheapest.set(s.item, s);
   const F = footfall(cheapest.size, pres);
@@ -121,10 +134,10 @@ export function estimate(slots, fillOf, pres = 'offline') {
     const chance = npcBuyChance(s.item, s.price, fill);
     let share = 0;
     if (cheapest.get(s.item) === s)
-      for (const c of CUSTOMERS) {
+      for (const c of custs) {
         let total = 0;
         for (const it of cheapest.keys()) total += wantOf(c, it, fillOf(it));
-        if (total > 0) share += wantOf(c, s.item, fill) / total / CUSTOMERS.length;
+        if (total > 0) share += wantOf(c, s.item, fill) / total / custs.length;
       }
     const perHour = F * share * chance * Math.min(s.qty, (1 + buyQtyMax(ITEMS[s.item].value)) / 2);
     out[s.slot] = { chance, perHour, sellOutHours: perHour > 0 ? s.qty / perHour : Infinity, ref: refPrice(s.item, fill), ceil: npcCeil(s.item), demand: demandLabel(fill), shadowed: cheapest.get(s.item) !== s };

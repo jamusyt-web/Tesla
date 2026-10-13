@@ -3,6 +3,7 @@ import { h, clear, fmt } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
 import { ITEMS, CATEGORIES, qOf } from '../../../shared/items.js';
 import { iconEl, qtyInput } from './itemui.js';
+import { townName, townCount } from '../../../shared/places.js';
 
 // Panel builders are called as fn.call(panels, c, args) (see panels.js), so
 // `this` is the Panels; the helpers below are called the same way.
@@ -42,9 +43,10 @@ export const BOARD_PANELS = {
       if (tab === 'post') return jobForm.call(this, c.body, post, () => ((tab = 'mine'), load()));
       if (!data) return c.body.append(h('div.empty', 'Reading the board…'));
       if (tab === 'board') {
-        c.body.append(h('p.muted', 'Bring what someone asks for and get paid on the spot (4% tax). You can deliver part of a job.'));
-        if (!data.open.length) return c.body.append(h('div.empty', h('div.big', '📜'), 'No jobs posted right now. Post one yourself!'));
-        for (const j of data.open) {
+        const many = townCount() > 1;
+        c.body.append(h('p.muted', `Bring what someone asks for and get paid on the spot (4% tax). You can deliver part of a job${many ? `, in the town it was posted in. This is the ${townName(data.town)} board` : ''}.`));
+        if (!data.here.length) c.body.append(h('div.empty', h('div.big', '📜'), `No jobs posted${many ? ` in ${townName(data.town)}` : ''} right now. Post one yourself!`));
+        for (const j of data.here) {
           const it = ITEMS[j.item];
           const mine = j.poster === this.hud.myId;
           const have = this.me.inv[j.item] || 0;
@@ -59,6 +61,12 @@ export const BOARD_PANELS = {
             h('div.rowcard', h('div.ic', iconEl(j.item, '40px')), h('div.grow', h('div.t', `${j.left}× ${it.name}`, j.left < j.qty ? h('span.muted', ` (of ${j.qty})`) : null), h('div.s', `${fmt(j.per)} 🪙 each · ${fmt(j.left * j.per)} 🪙 in all · by ${j.posterName} · ${left(j.expiresAt)}`)), right),
           );
         }
+        // Other towns' jobs: worth the trip? Deliver them there.
+        if (data.elsewhere.length) c.body.append(h('div.section-title', 'In other towns'));
+        for (const j of data.elsewhere) {
+          const it = ITEMS[j.item];
+          c.body.append(h('div.rowcard.locked', h('div.ic', iconEl(j.item, '40px')), h('div.grow', h('div.t', `${j.left}× ${it.name}`), h('div.s', `${fmt(j.per)} 🪙 each · by ${j.posterName} · ${left(j.expiresAt)}`)), h('span.chip', townName(j.town))));
+        }
         return;
       }
       // My jobs
@@ -72,7 +80,7 @@ export const BOARD_PANELS = {
           h(
             'div.rowcard' + (j.status === 'open' ? '.open' : '.locked'),
             h('div.ic', iconEl(j.item, '40px')),
-            h('div.grow', h('div.t', `${it.name}: ${got} of ${j.qty} delivered`), h('div.s', `${fmt(j.per)} 🪙 each · ${state}`)),
+            h('div.grow', h('div.t', `${it.name}: ${got} of ${j.qty} delivered`), h('div.s', `${fmt(j.per)} 🪙 each · ${state}${townCount() > 1 ? ` · ${townName(j.town)}` : ''}`)),
             j.status === 'open' ? h('button.btn.red.small', { on: { click: () => act('jobs.cancel', { id: j.id }, (r) => `Job taken down${r.refund ? `: ${r.refund} 🪙 back` : ''}.`) } }, 'Cancel') : null,
           ),
         );

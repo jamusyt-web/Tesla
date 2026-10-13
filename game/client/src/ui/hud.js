@@ -131,6 +131,11 @@ export class Hud {
       this.goal.render();
     });
     s.on('shopSale', (m) => this.#onShopSale(m));
+    // Goods waiting in storage, per town; the market panel shows them.
+    s.on('storage', (m) => {
+      this.me.storage = m.waiting || {};
+      if (this.panels.cur?.name === 'market') this.panels.cur.refresh?.();
+    });
     s.on('awaySales', (m) => {
       this.setTill(m.till);
       if (m.awayMs < 10 * 60_000) {
