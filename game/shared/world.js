@@ -48,13 +48,15 @@ export function mulberry32(seed) {
 // Map format 2 (all positions in metres; x east, z south; rot in radians):
 //   lands     [{ id, x, z, r }]         land: overlapping circles make any coastline
 //   spawn     { x, z }                  where new heroes appear
-//   regions   [{ id, name, tier, kind, x, z, r }]   towns / areas, tier 1 = starter
+//   biome?    the map's biome (default 'meadow'; shared/biomes.js)
+//   clock?    true: the day turns to night and back (shared/clock.js)
+//   regions   [{ id, name, tier, kind, x, z, r, biome?, stone? }]   kind: town | wild | outpost; tier 1 = starter
 //   buildings [{ id, label, action, x, z, w, d, face, deco, recipe?, ... }]   recipe: whose look to build (default: the id)
 //   gates     [{ id, label, x, z, width, scale }]   castle-wall gatehouses
 //   plazas, fountains [{ id, x, z, r }]
 //   lakes     [{ id, x, z, r, deep, kind? }]   water; fishing spots within `deep` are deep water; kind 'ice' is frozen
-//   docks     [{ id, x, z, w, d }]      walkable piers over water
-//   zones     [{ id, kind, label, x, z, r, ground }]  named areas, tinted ground
+//   docks     [{ id, x, z, w, d, style? }]      walkable piers over water (style: pier | bridge)
+//   zones     [{ id, kind, label, x, z, r, ground, biome? }]  named areas, tinted ground
 //   paths     [{ id, pts: [[x, z], ...], w }]          dirt paths (w = half-width)
 //   nodes     [{ id, type, x, z, rot, s }]            gatherables (NODE_TYPES)
 //   spawns    [{ id, monster, x, z, r, count }]       monster camps
@@ -63,6 +65,10 @@ export function mulberry32(seed) {
 //   props     [{ id, slot, x, z, rot, r, s?, y?, v?, bob?, station? }]
 //             slot = model slot (client/src/scene/manifest/) or a proc_* kind;
 //             r > 0 blocks movement; station marks a crafting station.
+//   landmarks [{ id, kind, name, x, z, r?, look?, reset?, loot?, lore?, page? }]   points of interest
+//             kind: vista | ruin | shrine | cache | secret | curio | npc | landmark
+//   passages  [{ id, name, kind, x, z, tx, tz, req: { skill, lvl } | null, kit? }]   a hop between two ends
+//   skyline   [{ id, kind, x, z, h, card }]   far landmarks drawn as cards (card: a model slot)
 // (Format 1 had `bounds: { r }`, one round island at the centre; it's
 // upgraded on load: see upgradeMap.)
 export let MAP = null;
@@ -87,8 +93,14 @@ export let SPAWNS = [];
 export let PROPS = [];
 export let STONES = [];
 export let ENTRANCES = [];
+export let LANDMARKS = [];
+export let PASSAGES = [];
+export let SKYLINE = [];
 
-const LISTS = ['lands', 'regions', 'buildings', 'gates', 'plazas', 'fountains', 'lakes', 'docks', 'zones', 'paths', 'nodes', 'spawns', 'stones', 'entrances', 'props'];
+const LISTS = ['lands', 'regions', 'buildings', 'gates', 'plazas', 'fountains', 'lakes', 'docks', 'zones', 'paths', 'nodes', 'spawns', 'stones', 'entrances', 'props', 'landmarks', 'passages', 'skyline'];
+export const LANDMARK_KINDS = ['vista', 'ruin', 'shrine', 'cache', 'secret', 'curio', 'npc', 'landmark'];
+export const PASSAGE_KINDS = ['squeeze', 'climb', 'swim'];
+export const REGION_KINDS = ['town', 'wild', 'outpost'];
 
 // Checks a map's shape and returns a list of problems (empty = fine).
 export function mapProblems(m) {
@@ -96,6 +108,8 @@ export function mapProblems(m) {
   if (!m || typeof m !== 'object') return ['The map is not a JSON object.'];
   if (m.format !== 2) out.push(`Unknown map format ${m.format} (expected 2).`);
   if (!m.lands?.length) out.push('The map needs at least one piece of land (lands).');
+  if ((m.skyline?.length ?? 0) > 6) out.push('At most 6 skyline cards (they share one 512×256 picture).');
+  if (m.biome != null && typeof m.biome !== 'string') out.push('biome must be a biome id.');
   if (!Number.isFinite(m.spawn?.x) || !Number.isFinite(m.spawn?.z)) out.push('spawn needs x and z.');
   const ids = new Set();
   for (const k of LISTS) {
@@ -120,6 +134,21 @@ export function mapProblems(m) {
       if (k === 'stones' && (typeof e.name !== 'string' || !e.name.trim())) out.push(`${where} needs a name.`);
       if ((k === 'stones' || k === 'entrances') && e.rot != null && !Number.isFinite(e.rot)) out.push(`${where} needs a numeric rot (the way it faces, in radians).`);
       if (k === 'entrances' && typeof e.kind !== 'string') out.push(`${where} needs a dungeon kind.`);
+      if (k === 'regions' && e.kind != null && !REGION_KINDS.includes(e.kind)) out.push(`${where}: kind must be one of ${REGION_KINDS.join(', ')}.`);
+      if ((k === 'regions' || k === 'zones') && e.biome != null && typeof e.biome !== 'string') out.push(`${where}: biome must be a biome id.`);
+      if (k === 'lakes' && e.kind != null && !['water', 'ice'].includes(e.kind)) out.push(`${where}: kind must be water or ice.`);
+      if (k === 'landmarks') {
+        if (!LANDMARK_KINDS.includes(e.kind)) out.push(`${where}: kind must be one of ${LANDMARK_KINDS.join(', ')}.`);
+        if (typeof e.name !== 'string' || !e.name.trim()) out.push(`${where} needs a name.`);
+        if (e.reset != null && !['weekly', 'once'].includes(e.reset)) out.push(`${where}: reset must be weekly or once.`);
+        if (e.page != null && !(Number.isInteger(e.page) && e.page >= 1 && e.page <= 12)) out.push(`${where}: page must be 1–12.`);
+      }
+      if (k === 'passages') {
+        if (!Number.isFinite(e.tx) || !Number.isFinite(e.tz)) out.push(`${where} needs numeric tx and tz (the other end).`);
+        if (!PASSAGE_KINDS.includes(e.kind)) out.push(`${where}: kind must be one of ${PASSAGE_KINDS.join(', ')}.`);
+        if (e.req != null && (typeof e.req.skill !== 'string' || !Number.isInteger(e.req.lvl))) out.push(`${where}: req must be null or { skill, lvl }.`);
+      }
+      if (k === 'skyline' && (!(e.h > 0) || typeof e.card !== 'string')) out.push(`${where} needs a height h and a card (a model slot).`);
     });
   }
   return out;
@@ -200,6 +229,9 @@ export function setWorld(m) {
   PROPS = (m.props ?? []).map((p) => ({ rot: 0, r: 0, ...p }));
   STONES = (m.stones ?? []).map((st) => ({ rot: 0, ...st }));
   ENTRANCES = (m.entrances ?? []).map((e) => ({ rot: 0, ...e }));
+  LANDMARKS = (m.landmarks ?? []).map((l) => ({ r: 8, ...l }));
+  PASSAGES = m.passages ?? [];
+  SKYLINE = m.skyline ?? [];
   buildIndex();
   return m;
 }

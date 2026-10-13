@@ -1845,7 +1845,7 @@ export class GameClient {
     this.#updateGuide(dt);
     updateCamera(this, dt);
     setFocus(this.cam.target.x, this.cam.target.z);
-    this.mood.update();
+    this.mood.update(dt);
     this.labels.update();
     this.hud.frame(dt);
   }

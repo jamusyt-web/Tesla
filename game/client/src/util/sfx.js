@@ -57,6 +57,8 @@ function noise(dur, { vol = 0.4, freq = 1200, q = 1, delay = 0 } = {}) {
 
 export const sfx = {
   unlock: () => ac(),
+  // The audio graph, for the ambience: { ctx, out } or null when muted.
+  output: () => (muted || !ac() ? null : { ctx, out: master }),
   get muted() {
     return muted;
   },

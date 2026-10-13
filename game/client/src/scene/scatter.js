@@ -1,5 +1,6 @@
 // Ground cover (bushes, mushrooms, grass…) generated on the client per chunk
-// from a biome's cover rules. It's never stored in the map, the server and
+// from a biome's cover rules (BIOMES[id].cover; meadow has none, so Hearthvale
+// keeps exactly its hand-placed cover). It's never stored in the map, the server and
 // the nav grid never see it, and it never blocks anyone. Plain JS (no three),
 // so the server tests can check it.
 //
@@ -11,10 +12,6 @@ import { mulberry32 } from '../../../shared/world.js';
 import { CHUNK } from '../../../shared/budget.js';
 
 export { CHUNK }; // metres: the side of a streaming chunk
-
-// biome id → cover rules. Filled from the biome definitions; meadow has none,
-// so Hearthvale keeps exactly its hand-placed cover.
-export const COVER = {};
 
 const VARIANTS = 3; // at most 3 variants per scatter slot
 

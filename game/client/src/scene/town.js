@@ -7,11 +7,12 @@ import { buildModular, buildGate } from './buildings.js';
 import { PROC_BUILDERS, buildWaystone } from './procprops.js';
 import { ChunkMerge, casters, disposeMerged } from './chunkmerge.js';
 import { mergeRigid } from './merge.js';
-import { CHUNK, COVER, scatterPoints, landDist } from './scatter.js';
+import { CHUNK, scatterPoints, landDist } from './scatter.js';
 import { DUNGEONS } from '../../../shared/dungeon.js';
-import { biomeAt } from '../../../shared/places.js';
+import { biomeAt, groundAt } from '../../../shared/places.js';
+import { biome } from '../../../shared/biomes.js';
 import {
-  BUILDINGS, ZONES, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, ENTRANCES, CRYPT, LANDS, EXTENT, SPAWN, NODE_TYPES,
+  BUILDINGS, ZONES, REGIONS, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, ENTRANCES, CRYPT, LANDS, EXTENT, SPAWN, NODE_TYPES, MAP,
   pathSegments, zonesOfKind, mulberry32,
 } from '../../../shared/world.js';
 
@@ -541,6 +542,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     }),
   );
   sky.frustumCulled = false;
+  town.sky = sky; // (the mood sets its colours)
   root.add(sky);
   animated.push((dt, t, cam) => {
     RIPPLE_TIME.value = t;
@@ -569,12 +571,21 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   // Ground shape and colour at any point: gentle undulation, flat plazas,
   // lake beds, and beach then cliff falling away past the coast. `near` holds
   // what's close enough to the chunk to matter (keeps the loops short).
-  const grass = new THREE.Color('#74a04c');
-  const grass2 = new THREE.Color('#628c42');
-  const pathCol = new THREE.Color('#b89b6e');
-  const plazaCol = new THREE.Color('#a89a82');
-  const sand = new THREE.Color('#d6bd8a');
-  const cliff = new THREE.Color('#7a5b40');
+  // The biome's ground colours (groundAt: blended across biome edges).
+  const grass = new THREE.Color();
+  const grass2 = new THREE.Color();
+  const pathCol = new THREE.Color();
+  const plazaCol = new THREE.Color();
+  const sand = new THREE.Color();
+  const cliff = new THREE.Color();
+  const palette = (P) => {
+    grass.setRGB(...P.grass);
+    grass2.setRGB(...P.grass2);
+    pathCol.setRGB(...P.path);
+    plazaCol.setRGB(...P.plaza);
+    sand.setRGB(...P.sand);
+    cliff.setRGB(...P.cliff);
+  };
   const zoneCols = new Map(ZONES.map((z) => [z, new THREE.Color(z.ground || '#74a04c')]));
   const heightAt = (x, z, near) => {
     const s = landDist(x, z, near.lands);
@@ -591,6 +602,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   };
   const colourAt = (x, z, near, c) => {
     const n = Math.sin(x * 0.21) * Math.cos(z * 0.17) + Math.sin(x * 0.07 + z * 0.11) * 0.6;
+    palette(near.palette ?? groundAt(x, z));
     c.copy(grass).lerp(grass2, 0.5 + n * 0.25);
     for (const zn of near.zones) {
       const w = 1 - smooth(zn.r - 4, zn.r + 3, Math.hypot(x - zn.x, z - zn.z));
@@ -624,6 +636,8 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       buildings: BUILDINGS.filter((b) => hit(b.x, b.z, Math.max(b.w, b.d) / 2 + 1)),
       nodes: NODES.filter((n) => hit(n.x, n.z, 2)).map((n) => ({ x: n.x, z: n.z, r: (NODE_TYPES[n.type]?.r ?? 0.5) * n.s })),
       biomeAt,
+      // One palette for the whole chunk unless a biome edge crosses it.
+      palette: [...REGIONS, ...ZONES].some((e) => e.biome && e.biome !== (MAP?.biome ?? 'meadow') && hit(e.x, e.z, e.r + 3)) ? null : groundAt((x0 + x1) / 2, (z0 + z1) / 2),
     };
   };
 
@@ -896,7 +910,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       // Grass tufts everywhere that isn't paved, built on or wet (near only).
       if (!far) {
         const tufts = [];
-        const tries = Math.round(CHUNK * CHUNK * (low ? 0.042 : 0.106));
+        const tries = Math.round(CHUNK * CHUNK * (low ? 0.042 : 0.106) * biome(biomeAt(x0 + CHUNK / 2, z0 + CHUNK / 2)).tufts.density);
         for (let i = 0; i < tries; i++) {
           const x = x0 + crng() * CHUNK;
           const z = z0 + crng() * CHUNK;
@@ -916,14 +930,15 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
           const o = new THREE.Object3D();
           let k = 0;
           for (const [x, z] of list) {
-            const wild = wilds.some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 6);
+            // Its biome's three greens (the Wilds' reach 6 m past their edge).
+            const cols = biome(wilds.some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 6) ? 'wilds' : biomeAt(x, z)).tufts.colors;
             for (let j = 0; j < 3; j++) {
               o.position.set(x + (crng() - 0.5) * 0.4, 0, z + (crng() - 0.5) * 0.4);
               o.rotation.set((crng() - 0.5) * 0.5, crng() * 3, (crng() - 0.5) * 0.5);
               o.scale.setScalar(0.6 + crng() * 0.9);
               o.updateMatrix();
               im.setMatrixAt(k, o.matrix);
-              im.setColorAt(k++, c.set(wild ? ['#4e6e38', '#43602f', '#5b7a42'][j] : ['#6b9a48', '#5a8a3d', '#7caa55'][j]));
+              im.setColorAt(k++, c.set(cols[j]));
             }
           }
           im.userData.grass = true;
@@ -1251,7 +1266,7 @@ function ripples(spots) {
 
 // Cover rules for a chunk: its biome's (by the chunk's middle), halved on low.
 function coverRules(x0, z0, low) {
-  const rules = COVER[biomeAt(x0 + CHUNK / 2, z0 + CHUNK / 2)] ?? [];
+  const rules = biome(biomeAt(x0 + CHUNK / 2, z0 + CHUNK / 2)).cover ?? [];
   return low ? rules.map((r) => ({ ...r, per100m2: r.per100m2 / 2 })) : rules;
 }
 
@@ -1525,7 +1540,7 @@ registerChunkStatic(
 registerChunkStatic(
   () => LAKES,
   (l, ctx) => {
-    const water = new THREE.Mesh(new THREE.CircleGeometry(l.r + 0.6, 64), waterMaterial({ id: l.id, radius: l.r + 0.6, foamAt: l.r + 0.1, shallow: '#5fb3c4', deep: '#1f5f86', fog: ctx.scene.fog, opacity: 0.93, ice: l.kind === 'ice' }));
+    const water = new THREE.Mesh(new THREE.CircleGeometry(l.r + 0.6, 64), waterMaterial({ id: l.id, radius: l.r + 0.6, foamAt: l.r + 0.1, ...biome(biomeAt(l.x, l.z)).water, fog: ctx.scene.fog, opacity: 0.93, ice: l.kind === 'ice' }));
     water.rotation.x = -Math.PI / 2;
     water.position.set(l.x, -0.12, l.z);
     water.userData.water = true;

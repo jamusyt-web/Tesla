@@ -144,3 +144,10 @@ test('swing rhythm: mashing can never score PERFECT, and on-beat swings always c
     assert.ok(SWING_FLOOR * P < SWING_GATE * P - 80, `${it.name}: server floor leaves jitter headroom`);
   }
 });
+
+test('landmarks, passages and skyline cards are checked like everything else', () => {
+  const base = { format: 2, name: 'T', rev: 1, spawn: { x: 0, z: 0 }, lands: [{ id: 'l', x: 0, z: 0, r: 50 }] };
+  assert.deepEqual(mapProblems({ ...base, landmarks: [{ id: 'v', kind: 'vista', name: 'View', x: 1, z: 2 }], passages: [{ id: 'p', name: 'Gap', kind: 'squeeze', x: 0, z: 0, tx: 5, tz: 5, req: { skill: 'mining', lvl: 10 }, kit: 'hooded_lantern' }], skyline: [{ id: 's', kind: 'tree', x: 300, z: 0, h: 28, card: 'tree_oak' }] }), []);
+  const bad = mapProblems({ ...base, regions: [{ id: 'r', name: 'R', kind: 'castle', x: 0, z: 0, r: 5 }], landmarks: [{ id: 'v', kind: 'statue', x: 1, z: 2 }], passages: [{ id: 'p', kind: 'fly', x: 0, z: 0, req: { skill: 'mining' } }], skyline: Array.from({ length: 7 }, (_, i) => ({ id: `s${i}`, x: 0, z: 0, h: 1, card: 'tree_oak' })) });
+  for (const want of [/kind must be one of town/, /landmarks.*kind must be/, /needs a name/, /tx and tz/, /passages.*kind must be/, /req must be/, /At most 6 skyline/]) assert.ok(bad.some((p) => want.test(p)), `${want} in ${bad.join(' | ')}`);
+});

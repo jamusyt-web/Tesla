@@ -1,24 +1,48 @@
-// The light and air: fog, sky light and sun colour for where the camera is.
-// The Wilds are hazier, greener-grey and a touch dimmer than town; the crypt
-// is dark blue-grey with a cool moon overhead. (Phase 1, M1: biomes, the 1.5 s
-// lerp and night tint live here.)
+// The light and air: fog, sky, sea, sun and ambient light, weather and the
+// background music for the biome where the camera looks (shared/biomes.js).
+// Moving into another biome blends everything over 1.5 s (all uniforms, so
+// nothing recompiles). On a map with a clock the night tints it all (shared/
+// clock.js). The crypt has its own light (setCrypt).
 import * as THREE from 'three';
-import { zonesOfKind } from '../../../shared/world.js';
+import { biome, LOW_FOG } from '../../../shared/biomes.js';
+import { biomeAt } from '../../../shared/places.js';
+import { nightness, weatherAt } from '../../../shared/clock.js';
+import { MAP } from '../../../shared/world.js';
+import { setSeaColors } from './water.js';
+import { ambience } from '../util/ambience.js';
 
-const MOOD = { fog: new THREE.Color('#b8c4c8'), fogWild: new THREE.Color('#9faea6'), sun: new THREE.Color('#ffe4bc'), sunWild: new THREE.Color('#ffd0a0') };
-// Phones see a little less far (and the camera draws nothing past the fog).
-const LOW_NEAR = 0.9;
-const LOW_FAR = 0.75;
+const BLEND_S = 1.5;
+const NIGHT = new THREE.Color('#3a4270');
+const COLORS = ['fog', 'hemiSky', 'hemiGround', 'sun', 'top', 'mid', 'bot', 'seaShallow', 'seaDeep'];
 
 export class Mood {
   constructor(g) {
     this.g = g;
-    this.w = undefined; // how far into the Wilds (0–1); undefined = work it out afresh
+    this.biome = null; // where the camera looks
+    this.from = null;
+    this.to = null;
+    this.k = 1; // how far the blend has come
+    this.cur = null;
+    this.night = -1;
+    this.nextWeather = 0;
     this.townLight = null; // the town's light, kept while underground
   }
 
+  // A biome's look, as numbers (phones see less far).
+  #look(id) {
+    const b = biome(id);
+    const L = b.light;
+    const low = this.g.low;
+    const c = (v) => new THREE.Color(v);
+    return {
+      fog: c(L.fog), near: L.fogNear * (low ? LOW_FOG.near : 1), far: L.fogFar * (low ? LOW_FOG.far : 1),
+      hemiSky: c(L.hemiSky), hemiGround: c(L.hemiGround), hemi: L.hemi, sun: c(L.sun), sunI: L.sunI, exposure: L.exposure,
+      top: c(b.sky.top), mid: c(b.sky.mid), bot: c(b.sky.bot), seaShallow: c(b.sea.shallow), seaDeep: c(b.sea.deep),
+    };
+  }
+
   // Every frame, after the camera moved.
-  update() {
+  update(dt = 0) {
     const g = this.g;
     const c = g.cam;
     if (g.dungeon) {
@@ -27,16 +51,47 @@ export class Mood {
       g.scene.fog.far = c.curDist + 34;
       return;
     }
-    let w = 0;
-    for (const zn of zonesOfKind('wilds')) w = Math.max(w, 1 - THREE.MathUtils.smoothstep(Math.hypot(c.target.x - zn.x, c.target.z - zn.z), zn.r * 0.2, zn.r));
-    if (w === this.w) return;
-    this.w = w;
+    const id = biomeAt(c.target.x, c.target.z);
+    if (id !== this.biome) {
+      this.biome = id;
+      this.to = this.#look(id);
+      this.from = this.cur ? { ...this.cur, ...Object.fromEntries(COLORS.map((k) => [k, this.cur[k].clone()])) } : this.to;
+      this.k = this.cur ? 0 : 1;
+      this.cur ??= { ...this.to, ...Object.fromEntries(COLORS.map((k) => [k, this.to[k].clone()])) };
+      ambience.set(biome(id).ambience);
+    }
+    const now = g.sock?.serverNow?.() ?? Date.now();
+    const n = MAP?.clock ? Math.round(nightness(now) * 200) / 200 : 0;
+    if (this.k >= 1 && n === this.night) return this.#weather(now);
+    this.k = Math.min(1, this.k + dt / BLEND_S);
+    this.night = n;
+    const e = THREE.MathUtils.smoothstep(this.k, 0, 1);
+    const C = this.cur;
+    for (const k of COLORS) C[k].lerpColors(this.from[k], this.to[k], e);
+    for (const k of ['near', 'far', 'hemi', 'sunI', 'exposure']) C[k] = this.from[k] + (this.to[k] - this.from[k]) * e;
+    // Apply, with the night's tint on top.
     const f = g.scene.fog;
-    f.color.lerpColors(MOOD.fog, MOOD.fogWild, w);
-    f.near = (20 - 6 * w) * (g.low ? LOW_NEAR : 1);
-    f.far = (100 - 30 * w) * (g.low ? LOW_FAR : 1);
-    g.hemi.intensity = 1.3 - 0.25 * w;
-    g.sun.color.lerpColors(MOOD.sun, MOOD.sunWild, w);
+    f.color.copy(C.fog).lerp(NIGHT, 0.35 * n);
+    f.near = C.near;
+    f.far = C.far;
+    g.hemi.color.copy(C.hemiSky).lerp(NIGHT, 0.35 * n);
+    g.hemi.groundColor.copy(C.hemiGround).lerp(NIGHT, 0.35 * n);
+    g.hemi.intensity = C.hemi;
+    g.sun.color.copy(C.sun);
+    g.sun.intensity = C.sunI;
+    g.renderer.toneMappingExposure = C.exposure * (1 - 0.15 * n);
+    const sky = g.town?.sky?.material.uniforms;
+    if (sky) for (const k of ['top', 'mid', 'bot']) sky[k].value.copy(C[k]).lerp(NIGHT, 0.35 * n);
+    setSeaColors(C.seaShallow, C.seaDeep);
+    this.#weather(now);
+  }
+
+  // Weather for the biome where the camera looks (checked every few seconds).
+  #weather(now) {
+    if (now < this.nextWeather || !this.g.weather) return;
+    this.nextWeather = now + 5000;
+    const w = weatherAt(this.biome, now);
+    this.g.weather.set(w?.kind ?? null, w?.rate);
   }
 
   // Crypt light: dark blue-grey fog, a cool moon overhead, a touch more exposure.
@@ -66,7 +121,9 @@ export class Mood {
       g.sun.color.copy(T.sun[0]);
       g.sun.intensity = T.sun[1];
       g.renderer.toneMappingExposure = T.exp;
-      this.w = undefined; // the Wilds' haze is worked out afresh
+      this.townLight = null;
+      this.night = -1; // the town's look is applied afresh
+      this.k = 1;
     }
     g.el.classList.toggle('in-dungeon', crypt);
   }
