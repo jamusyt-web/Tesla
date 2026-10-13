@@ -158,7 +158,9 @@ export class Heroes {
     const after = levelFromXp(hero.skills[skill]);
     const prevHero = hero.level;
     hero.level = heroLevel(hero.skills);
-    return { skill, amount, leveled: after > before, level: after, heroLeveled: hero.level > prevHero, heroLevel: hero.level };
+    const xp = { skill, amount, leveled: after > before, level: after, heroLeveled: hero.level > prevHero, heroLevel: hero.level };
+    this.onXp?.(hero, xp); // (the game turns it into an 'xp' event for whoever is online)
+    return xp;
   }
 
   // Keep a hero's buffs (they survive logging out).

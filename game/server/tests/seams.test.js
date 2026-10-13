@@ -117,7 +117,8 @@ test('the tutorial path emits gather, craft, kill and stock in order, and each p
     game.stop();
   }
   assert.deepEqual(seen, ['gather', 'craft', 'kill', 'stock']);
-  assert.deepEqual(sent.filter((m) => m.t === 'tutorial').map((m) => m.done), TUTORIAL.map((s) => s.id));
+  // The tutorial is hv_intro's first four steps now: each step done is one message.
+  assert.deepEqual(sent.filter((m) => m.t === 'quest' && m.id === 'hv_intro' && m.stepDone != null).map((m) => m.stepDone), [0, 1, 2, 3]);
   const rewards = TUTORIAL.reduce((a, s) => a + s.reward, 0);
   assert.ok(game.heroes.gold(c.hero.id) - gold0 >= rewards, 'every step paid');
 });
@@ -126,14 +127,20 @@ test('the tutorial ignores steps done out of order', () => {
   const { game, c } = setup();
   try {
     emit(c, 'stock', {});
-    emit(c, 'kill', {});
+    emit(c, 'kill', { monster: 'slime' });
     emit(c, 'craft', { out: 'oak_plank' });
     assert.equal(c.hero.tutorial, 0);
-    emit(c, 'gather', { kind: 'rock' });
+    emit(c, 'gather', { kind: 'rock', type: 'rock_stone', loot: {} });
     assert.equal(c.hero.tutorial, 0);
-    emit(c, 'gather', { kind: 'tree' });
+    emit(c, 'gather', { kind: 'tree', type: 'tree_oak', loot: { oak_log: 1 } });
     emit(c, 'craft', { out: 'birch_plank' });
     assert.equal(c.hero.tutorial, 1);
+    // Step 3 wants a slime now, not just any fight.
+    emit(c, 'craft', { out: 'oak_plank', qty: 2 });
+    emit(c, 'kill', { monster: 'wolf' });
+    assert.equal(c.hero.tutorial, 2);
+    emit(c, 'kill', { monster: 'slime' });
+    assert.equal(c.hero.tutorial, 3);
   } finally {
     game.stop();
   }

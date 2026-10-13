@@ -33,6 +33,8 @@ import { expireJobs, pushStorage } from './trade.js';
 import './gear.js'; // these register their RPCs
 import './perf.js';
 import { TUTORIAL } from './tutorial.js';
+import { Quests } from './quests.js';
+import * as rep from './rep.js';
 
 export { TUTORIAL };
 export const CHANNEL_CAP = Number(process.env.CHANNEL_CAP || 40);
@@ -132,7 +134,7 @@ class Client {
   }
   publicSelf() {
     const shop = this.game.shops.info(this.hero.id);
-    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, speedMul: this.ent.speedMul, home: this.hero.home, charm: this.hero.equip.charm ?? null, title: this.hero.title, perks: this.hero.perks, buffs: this.hero.buffs, stones: this.hero.stones.filter((id) => stoneById(id)), shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
+    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, speedMul: this.ent.speedMul, home: this.hero.home, charm: this.hero.equip.charm ?? null, title: this.hero.title, perks: this.hero.perks, buffs: this.hero.buffs, stones: this.hero.stones.filter((id) => stoneById(id)), quests: this.game.quests.list(this), shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
   }
 
   pushInventory() {
@@ -160,6 +162,13 @@ export class Game {
     this.crafting = new Crafting(this);
     this.jobs = new Jobs(db, this.heroes);
     this.merchant = new Merchant(db, this.heroes);
+    rep.useDb(db);
+    this.quests = new Quests(this);
+    // Every xp grant, as an event for whoever earned it (quests, level-up unlocks).
+    this.heroes.onXp = (hero, xp) => {
+      const c = this.online.get(hero.id);
+      if (c) emit(c, 'xp', xp);
+    };
     // The owner's economy knobs (SPEC §6.5), read through knob().
     try {
       setOverrides(JSON.parse(db.prepare("SELECT value FROM meta WHERE key = 'econ_overrides'").get()?.value ?? '{}'));
@@ -369,6 +378,7 @@ export class Game {
     }
     const c = new Client(this, ws, hero, opts);
     this.online.set(accountId, c);
+    this.quests.load(c);
     const leftover = this.crafting.onConnect(c);
     // Dropped out of a dungeon a moment ago? Back into the same run.
     const seat = [...this.runs.values()].map((run) => [run, run.seatFor(accountId)]).find(([, m]) => m);
@@ -383,6 +393,7 @@ export class Game {
     const away = this.shops.awaySummary(accountId, Date.now(), this.lastActive.get(accountId));
     if (away) c.send({ t: 'awaySales', ...away });
     pushStorage(this, c); // goods waiting in storage, per town
+    this.quests.ensure(c); // a new hero's first quest, and any chain that has opened up
     this.shops.prune(accountId);
     ws.on('message', (buf) => this.onMessage(c, buf));
     ws.on('close', () => this.disconnect(c));

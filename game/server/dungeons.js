@@ -15,6 +15,7 @@ import { MONSTERS } from '../shared/monsters.js';
 import { ITEMS } from '../shared/items.js';
 import { NavGrid } from '../shared/world.js';
 import { tx, fail } from './db.js';
+import { emit } from './events.js';
 
 export const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
@@ -232,6 +233,7 @@ export class DungeonRun extends Channel {
       console.error('dungeon clear failed', e);
     }
     for (const id of ids) this.game.online.get(id)?.pushInventory();
+    for (const id of ids) emit(this.game.online.get(id) ?? null, 'dungeon', { kind: this.kind, tier: this.tier, seconds, party: ids.length, heroId: id });
     this.broadcast({ t: 'dboss', seconds, best, chest: this.layout.bossChest });
     this.game.announce(`${names.join(', ')} conquered ${this.def.name} (${TIERS[this.tier].name}) in ${fmtTime(seconds)}${best ? '. A new record!' : ''}`);
     this.#announceFinds(ids, 'boss');
