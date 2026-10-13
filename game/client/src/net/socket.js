@@ -1,4 +1,5 @@
 import { getToken } from './api.js';
+import { isLow } from '../util/device.js';
 
 // WebSocket connection to the game server with auto-reconnect and
 // request/response RPC on top of the event stream.
@@ -24,7 +25,7 @@ export class Socket {
 
   connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(getToken() || '')}`);
+    const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(getToken() || '')}${isLow() ? '&low=1' : ''}`);
     this.ws = ws;
     ws.onopen = () => {
       this.retry = 0;

@@ -1,7 +1,7 @@
 // Where a point is: its region, the town it belongs to (where you can trade,
 // craft and use a town's services) and its biome (the look and mood).
-// Phase 1 (M1) indexes these for a big world; today they scan the map lists.
-import { MAP, REGIONS, ZONES } from './world.js';
+// They look only at the entries near the point (world.js keeps an index).
+import { MAP, around } from './world.js';
 
 // The smallest entry of `list` whose circle holds (x, z) and passes `ok`.
 function smallest(list, x, z, ok = () => true) {
@@ -10,9 +10,9 @@ function smallest(list, x, z, ok = () => true) {
   return best;
 }
 
-export const regionAt = (x, z) => smallest(REGIONS, x, z);
-export const townAt = (x, z) => smallest(REGIONS, x, z, (r) => r.kind === 'town');
-export const zoneAt = (x, z) => smallest(ZONES, x, z);
+export const regionAt = (x, z) => smallest(around('regions', x, z), x, z);
+export const townAt = (x, z) => smallest(around('regions', x, z), x, z, (r) => r.kind === 'town');
+export const zoneAt = (x, z) => smallest(around('zones', x, z), x, z);
 
 // zone biome, else region biome, else the map's, else meadow. A wilds zone is
 // the wilds biome. Today that gives meadow everywhere except the Wilds.

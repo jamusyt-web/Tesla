@@ -48,9 +48,11 @@ class Client {
     this.send({ t: 'fishResult', ok: false, cancelled: true, reason });
   }
 
-  constructor(game, ws, hero) {
+  // opts.low: a phone (it's told about fewer, nearer monsters).
+  constructor(game, ws, hero, { low = false } = {}) {
     this.game = game;
     this.ws = ws;
+    this.low = low;
     this.hero = hero;
     this.ch = null;
     this.battle = null;
@@ -61,12 +63,17 @@ class Client {
     this.lastChat = 0;
     this.bucket = { t: Date.now(), n: 0 };
     const st = this.stats();
-    this.ent = { x: hero.x, z: hero.z, rot: 0, path: null, act: 'idle', hp: st.hp, maxHp: st.hp, lastSwing: 0, lastNode: null, fishing: null, lastSnap: '' };
+    this.ent = { x: hero.x, z: hero.z, rot: 0, path: null, act: 'idle', hp: st.hp, maxHp: st.hp, lastSwing: 0, lastNode: null, fishing: null, lastSnap: '', speedMul: 1 };
     if (!isWalkable(this.ent.x, this.ent.z, world().col)) Object.assign(this.ent, { x: SPAWN.x, z: SPAWN.z });
   }
 
   send(msg) {
     this.sendRaw(JSON.stringify(msg));
+  }
+  // Walk faster or slower (a buff, a road, a mount…): 1 is normal.
+  setSpeed(mul) {
+    this.ent.speedMul = mul;
+    this.send({ t: 'speed', mul });
   }
   sendRaw(data) {
     if (this.ws.readyState === 1) this.ws.send(data);
@@ -93,7 +100,7 @@ class Client {
   }
   publicSelf() {
     const shop = this.game.shops.info(this.hero.id);
-    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, stones: this.hero.stones.filter((id) => stoneById(id)), shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
+    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, speedMul: this.ent.speedMul, stones: this.hero.stones.filter((id) => stoneById(id)), shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
   }
 
   pushInventory() {
@@ -308,7 +315,7 @@ export class Game {
     for (const c of this.online.values()) c.sendRaw(msg);
   }
 
-  connect(ws, accountId) {
+  connect(ws, accountId, opts = {}) {
     const hero = this.heroes.load(accountId);
     if (!hero) {
       ws.send(JSON.stringify({ t: 'needHero' }));
@@ -321,7 +328,7 @@ export class Game {
       this.disconnect(prev);
       prev.ws.close(4002, 'replaced');
     }
-    const c = new Client(this, ws, hero);
+    const c = new Client(this, ws, hero, opts);
     this.online.set(accountId, c);
     const leftover = this.crafting.onConnect(c);
     // Dropped out of a dungeon a moment ago? Back into the same run.

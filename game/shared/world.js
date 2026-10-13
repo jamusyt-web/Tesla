@@ -8,6 +8,7 @@ import { inRect } from './nav.js';
 // imports of world.js keep working.
 export * from './nodes.js';
 export * from './nav.js';
+export * from './roads.js';
 
 export const MOVE_SPEED = 6.2; // units / second
 export const INTERACT_RANGE = 2.9; // how close you must stand to hit a tree/rock
@@ -199,8 +200,40 @@ export function setWorld(m) {
   PROPS = (m.props ?? []).map((p) => ({ rot: 0, r: 0, ...p }));
   STONES = (m.stones ?? []).map((st) => ({ rot: 0, ...st }));
   ENTRANCES = (m.entrances ?? []).map((e) => ({ rot: 0, ...e }));
+  buildIndex();
   return m;
 }
+
+// ── Spatial index ──────────────────────────────────────────────────────
+// Lands, lakes, docks, regions and zones sorted into 64 m cells once per map,
+// so "what's here?" questions only look at what's near, however big the world.
+const CELL_M = 64;
+const LAND_REACH = 64; // landDistance is exact within this of a coast
+const NO_ENTRIES = Object.freeze([]);
+let INDEX = new Map();
+const cellKey = (i, j) => (i + 32768) * 65536 + (j + 32768);
+function buildIndex() {
+  const grid = new Map();
+  const add = (kind, e, x0, z0, x1, z1) => {
+    for (let i = Math.floor(x0 / CELL_M); i <= Math.floor(x1 / CELL_M); i++)
+      for (let j = Math.floor(z0 / CELL_M); j <= Math.floor(z1 / CELL_M); j++) {
+        const k = cellKey(i, j);
+        let c = grid.get(k);
+        if (!c) grid.set(k, (c = {}));
+        (c[kind] ??= []).push(e);
+      }
+  };
+  const circle = (kind, e, r) => add(kind, e, e.x - r, e.z - r, e.x + r, e.z + r);
+  for (const l of LANDS) circle('lands', l, l.r + LAND_REACH);
+  for (const l of LAKES) circle('lakes', l, l.r + 1);
+  for (const d of DOCKS) add('docks', d, d.x - d.w / 2, d.z - d.d / 2, d.x + d.w / 2, d.z + d.d / 2);
+  for (const r of REGIONS) circle('regions', r, r.r);
+  for (const zn of ZONES) circle('zones', zn, zn.r);
+  INDEX = grid;
+}
+// The entries of a list ('lands', 'lakes', 'docks', 'regions', 'zones') that
+// might cover (x, z). (Lands: those whose coast is within 64 m.)
+export const around = (kind, x, z) => INDEX.get(cellKey(Math.floor(x / CELL_M), Math.floor(z / CELL_M)))?.[kind] ?? NO_ENTRIES;
 
 // A map as text, one entity per line: readable, and diffs show exactly what moved.
 export function formatMap(m) {
@@ -229,7 +262,7 @@ export function placeAt(x, z) {
     for (const e of list) if (Math.hypot(x - e.x, z - e.z) < e.r && (!best || e.r < best.r)) best = e;
     return best;
   };
-  return { zone: inner(ZONES), region: inner(REGIONS) };
+  return { zone: inner(around('zones', x, z)), region: inner(around('regions', x, z)) };
 }
 
 // ── Fast travel ────────────────────────────────────────────────────────
@@ -259,10 +292,11 @@ export function stoneNear(x, z) {
 }
 export const zonesOfKind = (kind) => ZONES.filter((z) => (z.kind ?? z.id) === kind);
 
-// Signed distance to the coast: negative on land, positive out at sea.
+// Signed distance to the coast: negative on land, positive out at sea (exact
+// within 64 m of a coast; further out it says at least 64).
 export function landDistance(x, z) {
-  let d = Infinity;
-  for (const l of LANDS) d = Math.min(d, Math.hypot(x - l.x, z - l.z) - l.r);
+  let d = LAND_REACH;
+  for (const l of around('lands', x, z)) d = Math.min(d, Math.hypot(x - l.x, z - l.z) - l.r);
   return d;
 }
 

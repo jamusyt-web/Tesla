@@ -174,7 +174,7 @@ export function createServer(db, opts = {}) {
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.isAlive = true;
       ws.on('pong', () => (ws.isAlive = true));
-      game.connect(ws, accountId);
+      game.connect(ws, accountId, { low: url.searchParams.get('low') === '1' });
     });
   });
 

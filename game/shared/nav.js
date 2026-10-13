@@ -1,8 +1,9 @@
 // Walking: what's solid in the current world (colliders, indexed in a coarse
 // grid), whether a point is walkable, the lazily built navigation grid with A*,
 // and stepping along a path. Reads the current map from world.js at call time.
-import { MOVE_SPEED, LAKES, DOCKS, BUILDINGS, GATES, ENTRANCES, FOUNTAINS, NODES, PROPS, STONES, EXTENT, CRYPT, STONE_R, gateColliders, landDistance, quarter } from './world.js';
+import { MOVE_SPEED, BUILDINGS, GATES, ENTRANCES, FOUNTAINS, NODES, PROPS, STONES, EXTENT, CRYPT, STONE_R, gateColliders, landDistance, quarter, around } from './world.js';
 import { NODE_TYPES } from './nodes.js';
+import { nearestRoad, roadRoute } from './roads.js';
 
 export const inRect = (x, z, b, pad = 0) => Math.abs(x - b.x) < b.w / 2 + pad && Math.abs(z - b.z) < b.d / 2 + pad;
 
@@ -50,7 +51,7 @@ export function indexColliders(col) {
 export function isWalkable(x, z, col) {
   if (landDistance(x, z) > 0) return false;
   // Lakes are water, except where a dock runs over them.
-  if (LAKES.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + 0.3) && !DOCKS.some((d) => Math.abs(x - d.x) < d.w / 2 && Math.abs(z - d.z) < d.d / 2)) return false;
+  if (around('lakes', x, z).some((l) => Math.hypot(x - l.x, z - l.z) < l.r + 0.3) && !around('docks', x, z).some((d) => Math.abs(x - d.x) < d.w / 2 && Math.abs(z - d.z) < d.d / 2)) return false;
   const near = col.grid ? col.grid.get(bucketKey(Math.floor(x / BUCKET), Math.floor(z / BUCKET))) ?? NONE : col;
   for (const r of near.rects) if (inRect(x, z, r, PLAYER_R)) return false;
   for (const c of near.circles) if ((x - c.x) ** 2 + (z - c.z) ** 2 < (c.r + PLAYER_R) ** 2) return false;
@@ -58,45 +59,59 @@ export function isWalkable(x, z, col) {
 }
 
 // ── Navigation grid + A* ───────────────────────────────────────────────
-// A grid of 1 m cells over the whole world. Cells are worked out a tile at a
-// time, the first time a search reaches them, and each search only looks at a
-// window around its start and goal, so even a huge world costs little.
+// A grid of 1 m cells over the whole world. Cells are worked out a 32 m tile
+// at a time, the first time a search reaches them, and kept per tile (so the
+// memory is only for places someone has walked near); each search only looks
+// at a window around its start and goal. Long walks go by road (roads.js).
 const CELL = 1;
 const TILE = 32;
+const ROAD_MIN = 100; // a walk this long (m) tries the roads first
 
-// The world uses the defaults (sized to the current map); a shop interior
-// passes its own small grid and walkable test (shared/shop.js).
+// The world passes its road network; a shop interior or a dungeon passes its
+// own small grid and walkable test (shared/shop.js) and no roads.
 export class NavGrid {
-  constructor(col, { half = null, bounds = null, cell = CELL, walkable = isWalkable, margin = 0.2 } = {}) {
+  constructor(col, { half = null, bounds = null, cell = CELL, walkable = isWalkable, margin = 0.2, roads = null } = {}) {
     this.col = col;
     this.cs = cell;
     this.walk = walkable;
     this.margin = margin;
+    this.roads = roads?.segs.length ? roads : null;
     const b = bounds ?? (half != null ? { x0: -half, z0: -half, x1: half, z1: half } : EXTENT);
     this.ox = b.x0;
     this.oz = b.z0;
     this.nx = Math.ceil((b.x1 - b.x0) / cell);
     this.nz = Math.ceil((b.z1 - b.z0) / cell);
-    this.block = new Uint8Array(this.nx * this.nz);
     this.tx = Math.ceil(this.nx / TILE);
-    this.done = new Uint8Array(this.tx * Math.ceil(this.nz / TILE));
+    this.tz = Math.ceil(this.nz / TILE);
+    this.tiles = new Map(); // tile index → TILE×TILE bytes, 1 = blocked
+    this.legs = new Map(); // a stretch of road → the waypoints that walk it
+    this.lastKey = -1;
+    this.lastTile = null;
   }
   // A cell is open only if its centre and the area around it are walkable,
   // so paths never squeeze through gaps narrower than a hero.
   #fill(ti, tj) {
-    this.done[tj * this.tx + ti] = 1;
+    const t = new Uint8Array(TILE * TILE);
     const m = this.margin;
     const w = (x, z) => this.walk(x, z, this.col);
     for (let j = tj * TILE; j < Math.min(this.nz, (tj + 1) * TILE); j++)
       for (let i = ti * TILE; i < Math.min(this.nx, (ti + 1) * TILE); i++) {
         const [x, z] = this.center(i, j);
         const ok = w(x, z) && w(x - m, z - m) && w(x + m, z - m) && w(x - m, z + m) && w(x + m, z + m);
-        this.block[j * this.nx + i] = ok ? 0 : 1;
+        t[(j - tj * TILE) * TILE + (i - ti * TILE)] = ok ? 0 : 1;
       }
+    return t;
   }
   // Forget what's been worked out (something solid moved, e.g. a gate opened).
   invalidate() {
-    this.done.fill(0);
+    this.tiles.clear();
+    this.legs.clear();
+    this.lastKey = -1;
+    this.lastTile = null;
+  }
+  // Bytes held by worked-out tiles.
+  get bytes() {
+    return this.tiles.size * TILE * TILE;
   }
   center(i, j) {
     return [this.ox + (i + 0.5) * this.cs, this.oz + (j + 0.5) * this.cs];
@@ -108,8 +123,12 @@ export class NavGrid {
     if (i < 0 || j < 0 || i >= this.nx || j >= this.nz) return false;
     const ti = (i / TILE) | 0;
     const tj = (j / TILE) | 0;
-    if (!this.done[tj * this.tx + ti]) this.#fill(ti, tj);
-    return !this.block[j * this.nx + i];
+    const k = tj * this.tx + ti;
+    let t = k === this.lastKey ? this.lastTile : this.tiles.get(k);
+    if (!t) this.tiles.set(k, (t = this.#fill(ti, tj)));
+    this.lastKey = k;
+    this.lastTile = t;
+    return !t[(j - tj * TILE) * TILE + (i - ti * TILE)];
   }
   // Straight line clear? (fine sampling against the exact colliders)
   clear(ax, az, bx, bz) {
@@ -133,7 +152,11 @@ export class NavGrid {
     return null;
   }
   // Returns a list of waypoints [[x,z],...] excluding start, or null.
-  findPath(sx, sz, tx, tz) {
+  findPath(sx, sz, tx, tz, { roads = true } = {}) {
+    if (roads && this.roads && Math.hypot(tx - sx, tz - sz) > ROAD_MIN) {
+      const p = this.#viaRoads(sx, sz, tx, tz);
+      if (p) return p;
+    }
     if (this.walk(tx, tz, this.col) && this.clear(sx, sz, tx, tz)) return [[tx, tz]];
     let goal = [tx, tz];
     if (!this.walk(tx, tz, this.col)) {
@@ -189,6 +212,63 @@ export class NavGrid {
     }
     return out;
   }
+  // A long walk: to the nearest road, along the roads, and off them to the
+  // goal. Null when the roads don't help (none near, or a detour).
+  #viaRoads(sx, sz, tx, tz) {
+    const R = this.roads;
+    const A = nearestRoad(R, sx, sz);
+    const B = nearestRoad(R, tx, tz);
+    if (!A || !B) return null;
+    const mid = roadRoute(R, A, B);
+    if (!mid) return null;
+    let len = A.d + B.d;
+    for (let i = 1; i < mid.length; i++) len += Math.hypot(mid[i][0] - mid[i - 1][0], mid[i][1] - mid[i - 1][1]);
+    if (len > Math.hypot(tx - sx, tz - sz) * 2.5 + 40) return null; // a long way round: try the grid
+    const out = [];
+    // A straight stretch: walked as is where it's clear; where something
+    // stands on it, a short search round just that 16 m piece.
+    const piece = (ax, az, bx, bz) => {
+      if (this.clear(ax, az, bx, bz)) return [[bx, bz]];
+      return this.findPath(ax, az, bx, bz, { roads: false });
+    };
+    const stretch = (ax, az, bx, bz) => {
+      const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 16));
+      const pts = [];
+      let [px, pz] = [ax, az];
+      for (let k = 1; k <= n; k++) {
+        const p = piece(px, pz, ax + ((bx - ax) * k) / n, az + ((bz - az) * k) / n);
+        if (!p) return null;
+        pts.push(...p);
+        [px, pz] = pts[pts.length - 1];
+      }
+      return pts;
+    };
+    let [ax, az] = [sx, sz];
+    const legs = [...mid, [tx, tz]];
+    for (const [k, [x, z]] of legs.entries()) {
+      if (Math.hypot(x - ax, z - az) < 0.05) continue;
+      // Stretches between two road junctions are the same every time: kept
+      // (each starts at its junction, so get there first if we're not on it).
+      const inner = k > 0 && k < legs.length - 2;
+      let p;
+      if (inner) {
+        const [jx, jz] = mid[k - 1];
+        if (Math.hypot(jx - ax, jz - az) > 0.05) {
+          const c = piece(ax, az, jx, jz);
+          if (!c) return null;
+          out.push(...c);
+        }
+        const key = `${jx},${jz}|${x},${z}`;
+        p = this.legs.get(key);
+        if (p === undefined) this.legs.set(key, (p = stretch(jx, jz, x, z)));
+      } else p = k === legs.length - 1 ? this.findPath(ax, az, x, z, { roads: false }) : stretch(ax, az, x, z);
+      if (!p) return null;
+      out.push(...p);
+      [ax, az] = out[out.length - 1];
+    }
+    return out;
+  }
+
   // A* between two cells inside a window `pad` cells around them. Returns the
   // cell centres after the start up to the goal, or null.
   #astar(si, sj, gi, gj, pad) {

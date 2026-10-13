@@ -115,7 +115,8 @@ maps/     world.json  the world map: everything placed in the world (see below)
 shared/   rules & data used by BOTH server and client (items, recipes, skills,
           monsters, avatar options, the world map loader)
           nodes.js  gathering node types      nav.js  colliders, walkability, A* navigation
-          places.js which region / town / biome a point is in
+          roads.js  the road network (long walks go by road)
+          places.js which region / town / biome a point is in (world.js indexes them)
           content/  content packs (a town's items, nodes, monsters, recipes…) merged into the tables
 server/   game.js   the hub: connections, the 20 Hz tick, channels, shops, dungeons, chat
           rpc.js    the RPC table (each module registers its own)

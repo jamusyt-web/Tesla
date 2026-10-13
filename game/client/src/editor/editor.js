@@ -9,7 +9,7 @@ import { buildTown, disposeTown } from '../scene/town.js';
 import { Particles } from '../scene/fx.js';
 import { PROC_BUILDERS } from '../scene/procprops.js';
 import { GROUPS } from '../scene/manifest/index.js';
-import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES, stoneFront, STONE_RANGE, EXTENT, entranceFront } from '../../../shared/world.js';
+import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, buildRoads, NavGrid, approachPoint, doorPoint, NODE_TYPES, stoneFront, STONE_RANGE, EXTENT, entranceFront } from '../../../shared/world.js';
 import { paintWorld } from '../ui/mapdraw.js';
 import { KINDS, KIND_KEYS, PALETTE, show, store } from './kinds.js';
 import { DUNGEONS } from '../../../shared/dungeon.js';
@@ -330,7 +330,7 @@ class Editor {
   reachability() {
     setWorld(this.map);
     const col = buildColliders();
-    const nav = new NavGrid(col);
+    const nav = new NavGrid(col, { roads: buildRoads() });
     const sp = this.map.spawn;
     const out = [];
     if (!nav.nearestOpen(sp.x, sp.z)) out.push('The spawn point is inside something solid.');

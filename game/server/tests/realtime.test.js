@@ -32,11 +32,11 @@ async function post(path, body, token) {
 }
 
 // A scripted player: an account, a hero, and a live socket with a message inbox.
-async function player(name) {
+async function player(name, { low = false } = {}) {
   const { body } = await post('/api/signup', { username: name.toLowerCase(), password: 'secret1' });
   const hero = await post('/api/hero', { name, avatar: {} }, body.token);
   assert.equal(hero.status, 200, JSON.stringify(hero.body));
-  const ws = new WebSocket(`${base.replace('http', 'ws')}/ws?token=${body.token}`);
+  const ws = new WebSocket(`${base.replace('http', 'ws')}/ws?token=${body.token}${low ? '&low=1' : ''}`);
   const inbox = [];
   const waiters = [];
   ws.on('message', (d) => {
@@ -312,6 +312,25 @@ test('heroes are only told about monsters near them', async () => {
     Object.assign(c.ent, { x: 0, z: -20, path: null });
     const back = await a.next((m) => m.t === 's' && m.add?.length);
     assert.ok(back.add.every((m) => m.type && Number.isFinite(m.x)), 'new arrivals come with everything needed to draw them');
+  } finally {
+    a.ws.close();
+  }
+});
+
+test('phones are told about fewer, nearer monsters; one-off monsters come and go', async () => {
+  const a = await player('Pia', { low: true });
+  try {
+    const c = game.online.get(a.id);
+    const ch = c.ch;
+    assert.equal(c.low, true);
+    const near = a.welcome.mobs.map((m) => [m, Math.hypot(m.x - a.welcome.you.x, m.z - a.welcome.you.z)]);
+    assert.ok(near.length <= 20 && near.every(([, d]) => d < 50), 'within 50 m, at most 20');
+    // An elite appears next to her, and goes again.
+    const elite = ch.addMob('slime', { x: c.ent.x + 3, z: c.ent.z + 2 });
+    const add = await a.next((m) => m.t === 's' && m.add?.some((x) => x.id === elite.id));
+    assert.equal(add.add.find((x) => x.id === elite.id).type, 'slime');
+    assert.ok(ch.removeMob(elite.id));
+    await a.next((m) => m.t === 's' && m.rm?.includes(elite.id));
   } finally {
     a.ws.close();
   }

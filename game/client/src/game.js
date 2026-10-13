@@ -18,12 +18,13 @@ import { goCraft, craftDone, resumeCraft, goBuilding, goBoard, goStone, travelTo
 import { glyph } from './ui/glyphs.js';
 import { stationPos } from '../../shared/stations.js';
 import { h } from './util/dom.js';
+import { isTouch, isLow } from './util/device.js';
 import { sfx } from './util/sfx.js';
 import { ITEMS } from '../../shared/items.js';
 import { MONSTERS } from '../../shared/monsters.js';
 import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
-  NODES, buildColliders, NavGrid, stepPath, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById, MAP,
+  NODES, buildColliders, buildRoads, NavGrid, stepPath, MOVE_SPEED, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById, MAP,
 } from '../../shared/world.js';
 import { USE_RANGE } from '../../shared/dungeon.js';
 
@@ -33,12 +34,11 @@ const lerpAngle = (a, b, t) => {
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * t;
 };
-const isTouch = matchMedia('(pointer: coarse)').matches;
 
 // Shared static world data (same deterministic generation as the server).
 const STATIC = (() => {
   const col = buildColliders();
-  return { nodes: new Map(NODES.map((n) => [n.id, n])), col, nav: new NavGrid(col) };
+  return { nodes: new Map(NODES.map((n) => [n.id, n])), col, nav: new NavGrid(col, { roads: buildRoads() }) };
 })();
 
 const QUARTER = Math.PI / 2;
@@ -106,8 +106,9 @@ export class GameClient {
     this.dungeon = null; // DungeonView while in a dungeon run
     this.run = null; // { id, layout, state } of that run
     this.battles = new Map(); // fights going on near you (id → state)
+    this.speedMul = 1; // walking speed × this (the server says)
 
-    const low = isTouch || Math.min(screen.width, screen.height) < 700;
+    const low = isLow();
     this.low = low;
     const renderer = createRenderer(low);
     this.renderer = renderer;
@@ -515,6 +516,7 @@ export class GameClient {
     const s = this.sock;
     this.off = [
       s.on('welcome', (m) => this.onWelcome(m)),
+      s.on('speed', (m) => (this.speedMul = m.mul ?? 1)),
       s.on('_close', () => {
         this.endFishing();
         this.stopGather();
@@ -622,6 +624,7 @@ export class GameClient {
   }
 
   onWelcome(m) {
+    this.speedMul = m.you?.speedMul ?? 1;
     const swap = m.dungeon ? this.dungeon?.runId !== m.dungeon.run : !!this.dungeon;
     if (!swap || this.swapping) return this.#welcome(m);
     // Into (or out of) a dungeon: cover the screen, build the new place while
@@ -1068,6 +1071,7 @@ export class GameClient {
   onNode(m) {
     const view = this.town.nodes.get(m.id);
     if (!view) return;
+    if ('st' in m) view.setSt(m.st); // rich or ancient (or back to normal)
     markShadows(this, m.alive ? 1 : 3); // it grows back, or falls
     if (m.alive) {
       view.respawn();
@@ -1710,7 +1714,7 @@ export class GameClient {
     if (me) {
       const L = me.local;
       this.#keyboardMove();
-      const moving = L.path ? stepPath(L, this.moveDt ?? dt) : false;
+      const moving = L.path ? stepPath(L, this.moveDt ?? dt, MOVE_SPEED * this.speedMul) : false;
       if (!moving && this.intent) {
         const fn = this.intent.onArrive;
         this.intent = null;
