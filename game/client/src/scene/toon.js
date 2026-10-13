@@ -20,6 +20,7 @@ export function toon(color, opts = {}) {
 }
 
 // Inverted-hull outline: push vertices along normals, draw back faces in ink.
+// Every thickness shares one shader program: the thickness is a uniform.
 const outlineMats = new Map();
 export function outlineMat(thickness = 0.03, color = '#1e140e') {
   const key = thickness + color;
@@ -29,7 +30,7 @@ export function outlineMat(thickness = 0.03, color = '#1e140e') {
     s.uniforms.thick = { value: thickness };
     s.vertexShader = 'uniform float thick;\n' + s.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed = position + normal * thick;');
   };
-  m.customProgramCacheKey = () => 'outline' + thickness;
+  m.customProgramCacheKey = () => 'outline';
   outlineMats.set(key, m);
   return m;
 }

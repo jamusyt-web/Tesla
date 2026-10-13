@@ -20,6 +20,7 @@ import { MODELS, GROUPS, registerGroup, groupOf } from '../../client/src/scene/m
 import { MODELS as CORE } from '../../client/src/scene/manifest/core.js';
 import { PROC_BUILDERS, registerProc } from '../../client/src/scene/procprops.js';
 import { spotsOf } from '../../shared/stations.js';
+import { checkManifest } from '../../scripts/check-manifest.mjs';
 
 const schema = (db) => db.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all();
 
@@ -206,8 +207,10 @@ test('places: Hearthvale is a town, the Wilds are wilds, the rest meadow', () =>
 test('registries: content, model groups and code-drawn props', () => {
   assert.deepEqual(Object.keys(CONTENT.items), []);
   assert.throws(() => mergeInto({ a: 1 }, { a: 2 }, 'x'), /defined twice/);
-  assert.deepEqual(Object.keys(MODELS).sort(), Object.keys(CORE).sort());
-  assert.deepEqual(GROUPS.core.sort(), Object.keys(CORE).sort());
+  for (const slot of Object.keys(CORE)) assert.ok(MODELS[slot], slot);
+  assert.deepEqual(checkManifest(), [], 'every slot in one group, every file there');
+  assert.ok(GROUPS.core.includes('tree_oak') && GROUPS['kit:crypt'].includes('dg_chest') && GROUPS['mobs:hearthvale'].includes('mob_wolf'));
+  assert.equal(groupOf('dg_fire'), 'core', 'the brazier by the crypt door is in town');
   const slot = Object.keys(CORE)[0];
   assert.equal(groupOf(slot), 'core');
   assert.throws(() => registerGroup('dupe', { [slot]: {} }), /two groups/);

@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { Avatar } from './scene/avatar.js';
-import { createRenderer, setupPasses, renderFrame, warm, updateCamera, fadeOccluders, markShadows } from './scene/render.js';
+import { createRenderer, setupPasses, renderFrame, warm, warmModels, updateCamera, fadeOccluders, markShadows } from './scene/render.js';
+import { ensureGroup, onGroup } from './scene/assets.js';
+import { GROUPS } from './scene/manifest/index.js';
+import { PROC_BUILDERS } from './scene/procprops.js';
 import { Mood } from './scene/mood.js';
 import { Mob } from './scene/mobs.js';
 import { buildTown } from './scene/town.js';
@@ -156,6 +159,36 @@ export class GameClient {
     addEventListener('resize', () => this.resize());
     this.running = true;
     this.loop();
+    this.#prefetch();
+  }
+
+  // After the first frame: the shaders of everything loaded, then the model
+  // groups the island will want soon (its monsters, the crypt's kit). A
+  // monster that showed up before its model did is rebuilt with it.
+  #prefetch() {
+    // (Props drawn in code have their own materials: one of each kind joins in.)
+    const procs = Object.entries(PROC_BUILDERS).flatMap(([slot, make]) => {
+      try {
+        return [make({ id: `warm:${slot}`, slot, x: 0, z: 0, rot: 0, r: 0 }, { fx: this.fx, animate: () => {} })];
+      } catch {
+        return [];
+      }
+    });
+    warmModels(this, GROUPS.core, procs);
+    warm(this); // the whole island too, off-screen parts included
+    onGroup((id) => {
+      if (!this.running) return;
+      // Monsters with no model are drawn in code: warm those shaders with theirs.
+      warmModels(this, GROUPS[id], id.startsWith('mobs:') ? Object.keys(MONSTERS).map((t) => new Mob(t).root) : []);
+      for (const mv of [...this.mobs.values()]) if (!mv.mob.modelled && GROUPS[id].includes(`mob_${mv.type}`)) this.#rebuildMob(mv);
+    });
+    for (const id of ['mobs:hearthvale', 'kit:crypt']) ensureGroup(id);
+  }
+  #rebuildMob(mv) {
+    const info = { ...mv.info, x: mv.x, z: mv.z, rot: mv.mob.root.rotation.y, state: mv.state };
+    this.removeMob(mv.id);
+    const nv = this.addMob(info);
+    nv.body.push(info.x, info.z, info.rot, info.state);
   }
 
   resize() {
@@ -445,7 +478,7 @@ export class GameClient {
       ring.position.y = 0.04;
       mob.root.add(ring);
     }
-    mv = { id: m.id, type: m.type, def: d, room: m.d?.room ?? null, mob, tag, nm, body: new RemoteBody(), state: m.state, x: m.x, z: m.z };
+    mv = { id: m.id, info: m, type: m.type, def: d, room: m.d?.room ?? null, mob, tag, nm, body: new RemoteBody(), state: m.state, x: m.x, z: m.z };
     nm.style.color = conColor(d.lvl - (this.hud.me.level || 1));
     mv.body.push(m.x, m.z, m.rot, m.state);
     this.mobs.set(m.id, mv);
@@ -592,7 +625,7 @@ export class GameClient {
     this.swapping = true;
     this.sock.pause();
     const veil = this.#veil(m.dungeon ? `Descending into ${m.dungeon.layout.name}…` : 'Back to the surface…');
-    nextFrame()
+    Promise.all([nextFrame(), m.dungeon ? ensureGroup('kit:crypt') : null])
       .then(() => this.#welcome(m))
       .catch((e) => console.error('scene swap failed', e))
       .finally(() => {

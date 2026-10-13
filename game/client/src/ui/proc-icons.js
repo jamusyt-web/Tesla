@@ -187,3 +187,10 @@ export const PROC_ICONS = {
   iron_bar: () => ingot('#c9d3df'),
   gold_bar: () => ingot('#ffd23f', '#ffb020'),
 };
+
+// A town's own item icons, drawn in code ({ itemId: () => Object3D }), for
+// items no model pack has. Each item gets one builder.
+export function registerIcons(town, map) {
+  for (const id of Object.keys(map)) if (PROC_ICONS[id]) throw new Error(`${town}: icon for "${id}" is defined twice.`);
+  Object.assign(PROC_ICONS, map);
+}

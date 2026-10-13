@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { mergeVertices, mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { MODELS, PALETTES, MODULE_PACKS, TEXTURES } from './manifest/index.js';
+import { MODELS, PALETTES, TEXTURES, GROUPS } from './manifest/index.js';
 import { toon, outlineMat } from './toon.js';
 
 // Loads every model listed in the manifest (manifest/) once, converts it to the game's
@@ -61,7 +61,11 @@ function graded(mat) {
 // band) take the colour `to`, keeping their light/dark steps: a texel whose
 // luma equals `ref` becomes exactly `to`. First matching rule wins.
 const BANDS = {
-  metal: (h, s) => h >= 200 && h <= 265 && s >= 0.08 && s <= 0.45, // lavender-grey steel
+  metal: (h, s, v) => h >= 200 && h <= 265 && s >= 0.08 && s <= 0.45 && v < 0.7, // lavender-grey steel (not pale snow)
+  ice: (h, s, v) => h >= 185 && h <= 230 && s < 0.3 && v >= 0.7, // snow and frost: pale blue-white
+  blue: (h, s) => h >= 205 && h < 255 && s > 0.45,
+  purple: (h, s) => h >= 255 && h < 340 && s > 0.2, // purple, mauve, pink crystal
+  dark: (h, s, v) => v < 0.22, // near-black
   red: (h, s) => (h >= 340 || h < 15) && s > 0.45,
   orange: (h, s) => h >= 15 && h < 30 && s > 0.35, // wood handles, leather
   yellow: (h, s) => h >= 30 && h < 55 && s > 0.35,
@@ -69,7 +73,7 @@ const BANDS = {
   white: (h, s, v) => s < 0.12 && v > 0.7,
   warm: (h, s) => h < 60 && s > 0.2, // every orange/tan/cream fur or wood tone
 };
-const BAND_REF = { metal: 0.62, red: 0.45, orange: 0.55, yellow: 0.7, green: 0.5, white: 0.85 };
+const BAND_REF = { metal: 0.62, red: 0.45, orange: 0.55, yellow: 0.7, green: 0.5, white: 0.85, ice: 0.85, blue: 0.45, purple: 0.5, dark: 0.15 };
 const remapCache = new Map();
 const hexRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 function remapTexture(tex, remap) {
@@ -119,9 +123,12 @@ function maskTexture(tex, band) {
 
 // def (the manifest entry) can recolour named materials, repaint a palette
 // atlas (`remap`) and make thin leaf/petal planes double-sided.
+// Materials are shared by what they look like (texture, colour, flags), not by
+// which model file they came from, so identical ones are one material.
 function toToon(m, tint, def = {}) {
   const re = def.recolor?.[m.name] || def.recolor?.['*'] || PALETTES[def._pack]?.[m.name];
-  const key = m.uuid + (tint ? JSON.stringify(tint) : '') + (re || '') + (def.doubleSide ? 'D' : '') + JSON.stringify([def.remap, def.glowBand, def.texture]);
+  const look = [m.map?.uuid ?? '', m.color?.getHexString() ?? '', m.transparent, m.opacity, m.side, m.alphaTest, !!m.vertexColors];
+  const key = JSON.stringify([look, tint, re, def.doubleSide, def.remap, def.glowBand, def.texture, def.grade]);
   if (matCache.has(key)) return matCache.get(key);
   if (m.map) {
     // Kenney packs colour models from a small palette atlas: keep it crisp.
@@ -150,7 +157,7 @@ function toToon(m, tint, def = {}) {
     t.emissive = new THREE.Color(def.glowBand.color);
     t.emissiveIntensity = def.glowBand.amount ?? 0.6;
   }
-  graded(t);
+  if (def.grade !== false) graded(t); // grade:false keeps a slot's own colours (ice, crystal)
   matCache.set(key, t);
   return t;
 }
@@ -169,21 +176,50 @@ function hullGeometry(geo, skinned = false) {
   return merged;
 }
 
+// The ink material (one shader for every thickness): for shader warm-up.
+export const outline = () => outlineMat(OUTLINE_WORLD);
+
 const ACTOR_OUTLINE = 0.036; // characters and monsters get a bolder line than the scenery
 const outlineFor = (scale, world = OUTLINE_WORLD) => outlineMat(Math.round((world / Math.max(scale, 1e-3)) * 1000) / 1000);
 
 const textures = new Map(); // url -> Texture (palette variants for modular kits)
 const texLoader = new THREE.TextureLoader(manager);
 
-// Modular building pieces are loaded "raw": no re-centering or resizing,
-// because their pivots are what make walls and roofs line up.
-for (const [pack, names] of Object.entries(MODULE_PACKS)) for (const n of names) MODELS[`${pack}:${n}`] ??= { url: `/models/${pack}/${n}.glb`, raw: true, outline: !/^(flag|banner|stall|fountain-center|metal-gate)/.test(n) };
+// The groups loaded (or loading): id → Promise.
+const groups = new Map();
+const groupListeners = [];
+export const groupReady = (id) => groups.has(id);
+// fn(id) after each group finishes loading (the game swaps in monster models).
+export const onGroup = (fn) => groupListeners.push(fn);
 
-export async function loadAssets(onProgress = () => {}) {
+// Load the 'core' group (and any others named) before the first frame.
+export async function loadAssets(onProgress = () => {}, ids = ['core']) {
+  await Promise.all(ids.map((id, i) => ensureGroup(id, i === 0 ? onProgress : () => {})));
+}
+
+// Load a group of models once; later calls get the same promise.
+export function ensureGroup(id, onProgress = () => {}) {
+  if (!groups.has(id)) {
+    const p = loadGroup(GROUPS[id] ?? [], onProgress).then(() => {
+      for (const fn of groupListeners) fn(id);
+    });
+    groups.set(id, p);
+  }
+  return groups.get(id);
+}
+
+async function loadGroup(slots, onProgress) {
+  const defs = slots.map((s) => [s, MODELS[s]]).filter(([, d]) => d);
   const urls = new Set();
-  for (const def of Object.values(MODELS)) for (const u of [].concat(def.url)) urls.add(u);
-  const texUrls = [...new Set(Object.values(TEXTURES).flatMap((t) => Object.values(t)).concat(Object.values(MODELS).map((d) => d.texture).filter(Boolean)))];
-  const total = urls.size + texUrls.length;
+  for (const [, def] of defs) for (const u of [].concat(def.url)) if (!gltfs.has(u)) urls.add(u);
+  // A kit's palette swaps come with the group that has its pieces; a slot's own texture with the slot.
+  const packs = new Set(slots.filter((s) => s.includes(':')).map((s) => s.split(':')[0]));
+  const wanted = Object.entries(TEXTURES)
+    .filter(([pack]) => packs.has(pack))
+    .flatMap(([, t]) => Object.values(t))
+    .concat(defs.map(([, d]) => d.texture).filter(Boolean));
+  const texUrls = [...new Set(wanted)].filter((u) => !textures.has(u));
+  const total = urls.size + texUrls.length || 1;
   await Promise.all(
     texUrls.map((u) =>
       texLoader
@@ -208,11 +244,75 @@ export async function loadAssets(onProgress = () => {}) {
         .finally(() => onProgress((++done + texUrls.length) / total)),
     ),
   );
-  for (const [slot, def] of Object.entries(MODELS)) {
+  await shareTextures();
+  for (const [slot, def] of defs) {
+    if (ready.has(slot)) continue;
     const variants = [].concat(def.url).map((u) => gltfs.get(u)).filter(Boolean);
     if (!variants.length) continue;
     ready.set(slot, variants.map((g, i) => prepare(g, def.heights ? { ...def, height: def.heights[i % def.heights.length] } : def)));
   }
+}
+
+// Many model files point at the same palette image (each pack's colormap.png),
+// but every file gets its own Texture: keep one per image (and sampling), so
+// the GPU holds each picture once. Images are known by their resolved URL, or
+// by a hash of their bytes when they are packed inside the model file.
+const imageKeys = new Map(); // `key|wrap|flip` → Texture
+const fnv = (bytes) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 0x01000193);
+  return (h >>> 0).toString(36) + ':' + bytes.length;
+};
+async function textureKey(url, gltf, tex) {
+  const ref = gltf.parser.associations.get(tex);
+  const def = ref?.textures != null ? gltf.parser.json.textures?.[ref.textures] : null;
+  const img = def ? gltf.parser.json.images?.[def.source] : null;
+  if (!img) return null;
+  if (img.uri && !img.uri.startsWith('data:')) return new URL(img.uri, new URL(url, location.href)).pathname;
+  if (img.bufferView != null) return 'bv:' + fnv(new Uint8Array(await gltf.parser.getDependency('bufferView', img.bufferView)));
+  return null;
+}
+// Kenney palette atlases are columns of colour swatches 32–64 px wide with a
+// vertical gradient in each; at 256 px they keep every swatch, so phones hold
+// a quarter of the memory per atlas.
+const ATLAS_MAX = 256;
+function shrink(tex) {
+  const img = tex.image;
+  const w = img?.width ?? 0;
+  const h = img?.height ?? 0;
+  if (!(w > ATLAS_MAX || h > ATLAS_MAX)) return;
+  const k = ATLAS_MAX / Math.max(w, h);
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(w * k));
+  cv.height = Math.max(1, Math.round(h * k));
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = false; // nearest: swatches stay exact colours
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  img.close?.(); // an ImageBitmap's pixels are no longer needed
+  tex.image = cv;
+  tex.needsUpdate = true;
+}
+
+const shared = new Set(); // model files already gone through
+async function shareTextures() {
+  for (const [url, gltf] of gltfs) {
+    if (shared.has(url)) continue;
+    shared.add(url);
+    const mats = new Set();
+    gltf.scene.traverse((o) => o.isMesh && [].concat(o.material).forEach((m) => mats.add(m)));
+    for (const m of mats)
+      for (const slot of ['map', 'emissiveMap']) {
+        const tex = m[slot];
+        if (!tex) continue;
+        const key = await textureKey(url, gltf, tex);
+        if (!key) continue;
+        const full = `${key}|${tex.wrapS},${tex.wrapT}|${tex.flipY}`;
+        const keep = imageKeys.get(full);
+        if (!keep) imageKeys.set(full, tex), shrink(tex);
+        else if (keep !== tex) m[slot] = keep;
+      }
+  }
+  for (const t of textures.values()) shrink(t); // the palette variants for building kits
 }
 
 // Normalise a loaded model: toon materials, size in metres, feet on y=0.
@@ -273,7 +373,7 @@ export function make(slot, { variant = 0, tint = null, outline = true, castShado
     // unique: own material copies (e.g. so one monster can flash red alone)
     const conv = (m) => (unique ? toToon(m, tint, p.def).clone() : toToon(m, tint, p.def));
     o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material);
-    if (unique) [].concat(o.material).forEach(graded);
+    if (unique && p.def.grade !== false) [].concat(o.material).forEach(graded);
     o.castShadow = castShadow;
     o.receiveShadow = true;
     if (outline && p.def.outline !== false) {

@@ -4,6 +4,7 @@
 // fading what stands between the camera and you, and warming up shaders.
 import * as THREE from 'three';
 import { useGrade } from './grade.js';
+import * as assets from './assets.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 
 const lerpAngle = (a, b, t) => {
@@ -94,12 +95,45 @@ export function renderFrame(g) {
   g.scene.add(g.hemi, g.sun, g.sun.target);
 }
 
-// Compile every shader the scene needs before anyone sees it.
+// Compile every shader the scene needs before anyone sees it, including the
+// see-through versions of anything that fades out between camera and hero
+// (a faded material is transparent, which three.js draws with other shaders).
 export async function warm(g) {
   try {
     updateCamera(g, 0.016);
     g.mood.update();
+    const mats = (g.dungeon?.fades ?? g.town?.fades ?? []).flatMap((f) => (f.op < 1 ? [] : f.mats));
+    for (const m of mats) m.transparent = true;
+    const done = g.renderer.compileAsync?.(g.scene, g.camera); // starts every compile now
+    for (const m of mats) m.transparent = false;
     await g.renderer.compileAsync?.(g.scene, g.camera);
+    await done;
+  } catch {}
+}
+
+// Compile the shaders a group of models needs before any of them is seen:
+// one copy of each, plus an instanced copy of each material (scenery is
+// drawn instanced) and an ink hull of each kind. Nothing here is ever drawn.
+export async function warmModels(g, slots, extra = []) {
+  const grp = new THREE.Group();
+  for (const o of extra) grp.add(o);
+  const inst = new Map(); // material → a geometry it's drawn with
+  for (const s of slots) {
+    const m = assets.make(s, { outline: false });
+    if (!m) continue;
+    grp.add(m.object);
+    m.object.traverse((o) => o.isMesh && !o.isSkinnedMesh && !inst.has(o.material) && inst.set(o.material, o.geometry));
+  }
+  for (const [mat, geo] of inst) {
+    if (Array.isArray(mat)) continue;
+    const im = new THREE.InstancedMesh(geo, mat, 1);
+    im.castShadow = im.receiveShadow = true;
+    grp.add(im);
+  }
+  const hullGeo = new THREE.BoxGeometry(1, 1, 1);
+  grp.add(new THREE.Mesh(hullGeo, assets.outline()), new THREE.InstancedMesh(hullGeo, assets.outline(), 1));
+  try {
+    await g.renderer.compileAsync?.(grp, g.camera, g.scene);
   } catch {}
 }
 

@@ -35,13 +35,22 @@ Every imported model is drawn with the game's own look: cel shading, ink outline
 
 - **`recolor: { materialName: '#hex' }`**: repaints named materials. Use this for models with plain colours per material.
 - **`remap: [{ band, to: '#hex' }]`**: repaints a model that takes its colours from a small palette image, as most Kenney packs do.
-  - `band` picks which colours to change: `metal`, `red`, `orange`, `yellow`, `green`, `white` or `warm`.
+  - `band` picks which colours to change: `metal`, `red`, `orange`, `yellow`, `green`, `white`, `warm`, `blue`, `purple`, `ice` (pale snow and frost) or `dark` (near-black).
   - Leave `band` out to tint the whole model.
   - Light and dark shades are kept.
   - Example: `axe_gold` is the iron axe with `remap: [{ band: 'metal', to: '#ffd23f' }]`.
 - **`texture: '/models/…/palette.png'`**: swaps in a different palette image with the same layout. This is how each building gets its own roof colour.
 - **`glowBand: { band, color, amount }`**: makes only part of a model glow, such as a lantern's glass.
 - **`heights: [..]`**: gives each variant its own size.
+- **`grade: false`**: keeps a model's own colours out of the game's colour grade (which warms pale blues and shifts jade greens). Use it for ice, snow and crystal. Each slot with it costs one extra shader, so use it sparingly.
+
+### Model groups (what loads when)
+
+Phones only download what they need. Every slot belongs to one group (`client/src/scene/manifest/index.js` sorts them):
+- `core`: the town and everything you see first, loaded before the game starts;
+- `mobs:hearthvale`: the Wilds' monsters, and `kit:crypt`: the crypt's pieces and monsters, both loaded just after the game starts.
+
+A monster that appears before its model has loaded is drawn as its code version and swapped once the model arrives. `npm run check:manifest` checks that every slot is in a group and every file it names exists.
 
 ### Item icons
 

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Cozy multiplayer economy adventure game — authoritative Node game server + three.js client",
+  "description": "Cozy multiplayer economy adventure game \u2014 authoritative Node game server + three.js client",
   "scripts": {
     "dev": "node scripts/dev.js",
     "dev:server": "node --watch --no-warnings server/index.js",
@@ -13,7 +13,8 @@
     "bots": "node --no-warnings scripts/bots.js",
     "invite": "node --no-warnings scripts/invite.js",
     "admin": "node --no-warnings scripts/admin.js",
-    "test": "node --no-warnings --test server/tests/*.test.js"
+    "test": "node --no-warnings --test server/tests/*.test.js",
+    "check:manifest": "node scripts/check-manifest.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"

@@ -6,6 +6,7 @@ import * as assets from '../scene/assets.js';
 import { buildTown, disposeTown } from '../scene/town.js';
 import { Particles } from '../scene/fx.js';
 import { PROC_BUILDERS } from '../scene/procprops.js';
+import { GROUPS } from '../scene/manifest/index.js';
 import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, NavGrid, approachPoint, doorPoint, NODE_TYPES, stoneFront, STONE_RANGE, EXTENT, entranceFront } from '../../../shared/world.js';
 import { paintWorld } from '../ui/mapdraw.js';
 import { KINDS, KIND_KEYS, PALETTE, show, store } from './kinds.js';
@@ -30,7 +31,7 @@ export async function openEditor(root, { onProgress = () => {} } = {}) {
   if (!res.ok) throw new Error(`Couldn't load the map (HTTP ${res.status}).`);
   const etag = res.headers.get('etag');
   const map = await res.json();
-  await assets.loadAssets(onProgress);
+  await assets.loadAssets(onProgress, Object.keys(GROUPS)); // the editor shows everything
   return new Editor(root, map, etag);
 }
 

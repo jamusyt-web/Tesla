@@ -42,6 +42,11 @@ const WARM_LAMP = { remap: [{ band: 'metal', to: '#7d7570', ref: 0.42 }], glowBa
 // where glTF expects linear ones, so it renders pastel; these restore a warm,
 // saturated palette that matches the textured packs.
 export const PALETTES = {
+  // Space kit has the same linear-slot problem as nature kit (SPEC §9, assets brief).
+  'space-kit': {
+    rock: '#E88563',
+    crystal: '#30E096',
+  },
   'nature-kit': {
     leafsGreen: '#4F9150',
     leafsDark: '#2E6B47',

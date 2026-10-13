@@ -35,7 +35,8 @@ export class Mob {
     blob.position.y = 0.02;
     this.root.add(blob);
     this.blob = blob;
-    if (assets.has(`mob_${type}`)) this.#fromModel(`mob_${type}`);
+    this.modelled = assets.has(`mob_${type}`); // false: drawn in code until its model group loads
+    if (this.modelled) this.#fromModel(`mob_${type}`);
     else if (this[type]) this[type]();
     else this.slime(); // unknown type without a model: a tinted blob
     // Monsters move, and the shadow map is only redrawn now and then, so they
