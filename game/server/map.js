@@ -20,7 +20,8 @@ import { MONSTERS } from '../shared/monsters.js';
 import { DUNGEONS } from '../shared/dungeon.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const SHIPPED_MAP = path.join(ROOT, 'maps', 'world.json');
+// MAP_FILE: play on another map (a test fixture) instead of maps/world.json.
+export const SHIPPED_MAP = process.env.MAP_FILE ? path.resolve(process.env.MAP_FILE) : path.join(ROOT, 'maps', 'world.json');
 export const LOCAL_MAP = path.join(process.env.DATA_DIR || path.resolve('data'), 'maps', 'world.json');
 export const PATCH_DIR = path.join(ROOT, 'maps', 'patches');
 

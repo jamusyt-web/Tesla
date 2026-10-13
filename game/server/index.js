@@ -1,5 +1,13 @@
 import { openDb } from './db.js';
-import { createServer } from './app.js';
+
+// Extra content packs (e.g. HV_PACKS=testvale with MAP_FILE=maps/fixtures/
+// twotown.json, to play-test two towns): installed before the map loads.
+for (const id of (process.env.HV_PACKS ?? '').split(',').filter(Boolean)) {
+  const { installPack } = await import('../shared/content/install.js');
+  installPack((await import(`../shared/content/${id}.js`)).default);
+  console.log(`📦 Content pack: ${id}`);
+}
+const { createServer } = await import('./app.js');
 
 const PORT = Number(process.env.PORT || 8787);
 const db = openDb();

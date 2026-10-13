@@ -132,7 +132,7 @@ class Client {
   }
   publicSelf() {
     const shop = this.game.shops.info(this.hero.id);
-    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, speedMul: this.ent.speedMul, home: this.hero.home, title: this.hero.title, perks: this.hero.perks, buffs: this.hero.buffs, stones: this.hero.stones.filter((id) => stoneById(id)), shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
+    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, speedMul: this.ent.speedMul, home: this.hero.home, charm: this.hero.equip.charm ?? null, title: this.hero.title, perks: this.hero.perks, buffs: this.hero.buffs, stones: this.hero.stones.filter((id) => stoneById(id)), shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
   }
 
   pushInventory() {

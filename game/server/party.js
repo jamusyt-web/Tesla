@@ -1,3 +1,4 @@
+import { regionAt } from '../shared/places.js';
 import { fail } from './db.js';
 
 // Parties: up to four heroes who adventure together (dungeon runs, for now).
@@ -35,6 +36,8 @@ export class Parties {
           level: c?.hero.level ?? null,
           online: !!c,
           where: !c ? 'offline' : c.ch?.isRun ? 'dungeon' : c.room ? 'shop' : 'town',
+          // The region they're in (a town, the wilds…), for "In Amberfold".
+          region: c && !c.ch?.isRun ? (regionAt(c.ent.x, c.ent.z)?.name ?? null) : null,
           run: c?.ch?.isRun ? c.ch.id : null,
           hp: c ? Math.round(c.ent.hp) : null,
           maxHp: c ? c.ent.maxHp : null,

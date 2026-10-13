@@ -164,7 +164,14 @@
     {"id":"n91","type":"fish_spot","x":16,"z":48,"rot":5.58,"s":1.07},
     {"id":"n92","type":"fish_spot","x":36,"z":45,"rot":5.16,"s":0.98},
     {"id":"n93","type":"fish_spot","x":29,"z":56,"rot":1.21,"s":0.98},
-    {"id":"tv_spot","type":"fish_spot","x":440,"z":25,"rot":0,"s":1}
+    {"id":"tv_spot","type":"fish_spot","x":440,"z":25,"rot":0,"s":1},
+    {"id":"tv_n0","type":"tree_oak","x":360,"z":30,"rot":0,"s":1},
+    {"id":"tv_n1","type":"tree_oak","x":354,"z":22,"rot":0,"s":1},
+    {"id":"tv_n2","type":"tree_birch","x":348,"z":34,"rot":0,"s":1},
+    {"id":"tv_n3","type":"rock_stone","x":438,"z":-30,"rot":0,"s":1},
+    {"id":"tv_n4","type":"rock_copper","x":444,"z":-36,"rot":0,"s":1},
+    {"id":"tv_n5","type":"herb_mint","x":370,"z":-40,"rot":0,"s":1},
+    {"id":"tv_n6","type":"herb_mint","x":376,"z":-46,"rot":0,"s":1}
   ],
   "spawns": [
     {"id":"spawn_slime","monster":"slime","x":0,"z":-52,"r":15,"count":6},

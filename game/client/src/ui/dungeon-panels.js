@@ -113,7 +113,7 @@ export const DUNGEON_PANELS = {
       else {
         const lead = p.leader === me;
         for (const m of p.members) {
-          const where = !m.online ? 'Offline' : m.where === 'dungeon' ? 'In a dungeon' : m.where === 'shop' ? 'In a shop' : 'In town';
+          const where = !m.online ? 'Offline' : m.where === 'dungeon' ? 'In a dungeon' : m.where === 'shop' ? 'In a shop' : m.region ? `In ${m.region}` : 'Out in the wilds';
           c.body.append(
             h(
               'div.rowcard',

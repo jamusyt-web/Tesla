@@ -493,15 +493,20 @@ export class GameClient {
       mob.root.add(ring);
     }
     mv = { id: m.id, info: m, type: m.type, def: d, room: m.d?.room ?? null, mob, tag, nm, body: new RemoteBody(), state: m.state, x: m.x, z: m.z };
-    nm.style.color = conColor(d.lvl - (this.hud.me.level || 1));
+    nm.style.color = conColor(d.lvl - this.#conLevel());
     mv.body.push(m.x, m.z, m.rot, m.state);
     this.mobs.set(m.id, mv);
     this.#mobState(mv, m.state);
     return mv;
   }
+  // What a monster's level is measured against: mostly Combat, a little hero level.
+  #conLevel() {
+    const me = this.hud.me;
+    return Math.round(((me.level || 1) + 2 * levelFromXp(me.skills?.combat || 0)) / 3);
+  }
   // Recolour monster names when the hero's level changes (grey = trivial … red = deadly).
   tintMobs() {
-    for (const mv of this.mobs.values()) mv.nm.style.color = conColor(defOf(mv).lvl - (this.hud.me.level || 1));
+    for (const mv of this.mobs.values()) mv.nm.style.color = conColor(defOf(mv).lvl - this.#conLevel());
   }
   #mobState(mv, st) {
     const prev = mv.state;

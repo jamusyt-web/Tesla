@@ -193,9 +193,11 @@ export class Hud {
   setMe(m) {
     const prevLevel = this.me.level;
     const prevGold = this.me.gold;
+    const prevCombat = this.me.skills?.combat;
     Object.assign(this.me, m);
     if (m.level && prevLevel && m.level > prevLevel) this.levelUp(`Hero Level ${m.level}!`, 'You feel stronger.');
-    if (m.level && m.level !== prevLevel) this.game?.tintMobs();
+    // Monster name colours follow hero and Combat level.
+    if ((m.level && m.level !== prevLevel) || (m.skills && m.skills.combat !== prevCombat)) this.game?.tintMobs();
     this.goldEl.textContent = fmt(this.me.gold);
     if (prevGold !== undefined && m.gold > prevGold && prevGold !== 0) {
       this.goldEl.parentElement.animate([{ transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 300 });

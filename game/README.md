@@ -164,6 +164,9 @@ Everything placed in the world lives in **`maps/world.json`**: the land itself (
 - **Waystones:** `stones` lists the fast-travel stones (`name`, position, and `rot`, the way it faces: travellers arrive in front of it). Maps made before waystones existed get Hearthvale's two automatically.
 - **Checks:** a broken map stops the server with a list of exactly what's wrong (duplicate ids, unknown node types or monsters, missing coordinates).
 - **Your own copy:** a map saved to `data/maps/world.json` (next to your saves) is used instead, unless the game ships a map with a higher `rev`.
+- **New content arrives as patches** (`maps/patches/NNN_name.json`, see the README there): each adds map entries by id, once. Your own buildings, and anything you deleted, are never touched; anything a patch would put on top of your work is skipped. The editor's **Checks → Patch report** lists what applied and what was skipped.
+- **Towns:** each `town` region has its own market book, merchant prices, supplier stall, storage, bulletin board, crafting stations and shop customers; trading works inside a town, and you can look from anywhere. Outposts (`kind: 'outpost'`) are a waystone with a campfire and a cookpot.
+- **Trying two towns:** `MAP_FILE=maps/fixtures/twotown.json HV_PACKS=testvale npm start` runs the server on the test map with a second town, Testvale (a 70 m town on its own island east of Hearthvale, with its own cave dungeon). `BOT_SECONDS=60 npm run bots -- 6 http://localhost:8787` (with the same `DATA_DIR`) sends bots into both towns for a minute and prints what worked.
 
 ## The world editor (server owners)
 
@@ -176,12 +179,14 @@ The first account made on a server is its **owner**. Owners get an **Edit the wo
 - **Place:** open **Place**, pick something (plants, town props, resource nodes, monster camps, cottages, waystones, dungeon entrances, docks, fountains, plazas, lakes, zones, regions), then click the world. Plants and nodes keep placing until you press Esc. *Natural variety* gives plants a random turn and size.
 - **Paths:** **Path**, click points, then double-click the last point (or press Enter). Select a path to drag its points, add more, or change its width.
 - **Keys:** Q / E turn the selection, Delete removes it, Ctrl+D copies it, Ctrl+Z / Ctrl+Y undo and redo, G turns grid snapping on and off, Ctrl+S saves.
+- **Town building:** *Place → Stamps* puts down a whole town (plaza, waystone, market, workshop with its five stations, shops, town hall, order board and supplier stall, laid out like every town) or an outpost at the cursor. *Town pieces* places them one at a time. Landmarks, passages (drag either end) and skyline beacons are under *Places to find*.
+- **Checks:** the **Checks** tab lists anything worth a look (a town missing part of its kit, a road with 100 m of nothing, a place far from any waystone, an island nobody can reach, nodes above their region's level, a map that's getting too big); click one to jump there. *Check every square* rates each 96 m square of the world against the phone budget, and the bar at the bottom shows the square you're looking at (green, amber or red).
 - **Saving:** **Save** checks the map, then checks that every resource node, door, monster camp and waystone can still be walked to from the spawn point, and tells you if something is cut off. Saving makes the change live straight away: anyone playing sees "The world was updated" and rejoins the new version a second later. The previous version is kept in `data/maps/backups/` (the last 30 saves).
-- **Drafts:** unsaved edits are kept in your browser; if you close the editor without saving, it offers them back next time.
+- **Drafts:** unsaved edits are kept in your browser (in its database, so even big maps fit); if you close the editor without saving, it offers them back next time. The **Go to…** list jumps to any region.
 - **Export / Import:** **Export** downloads the map as a file, to keep a copy or send it over. **Import** loads one back in (then Save to make it live).
 - **More owners:** `npm run admin -- <username>` (Windows: `npm.cmd run admin -- <username>`) makes someone an owner, `npm run admin -- <username> off` removes them, and `npm run admin` lists the owners.
 
-The Workshop's five crafting stations and the four main buildings (Workshop, Market, Your Shop, Town Hall) can be moved but not deleted, because the game needs them.
+A town's market, workshop, shops building and town hall can be moved, but the last one of each can't be deleted, because the game needs them.
 
 ## Roadmap (next phases)
 
