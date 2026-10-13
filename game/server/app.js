@@ -6,15 +6,18 @@ import { WebSocketServer } from 'ws';
 import { GameError } from './db.js';
 import { Game } from './game.js';
 import { current as currentMap, saveMap } from './map.js';
+import { COMPRESSIBLE } from '../scripts/precompress.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
 
 // Builds the HTTP + WebSocket server around a Game. Kept separate from
 // index.js so tests can spin up a real server on a random port.
+// opts.dist: serve the client from another folder (tests).
 export function createServer(db, opts = {}) {
   const game = new Game(db, opts);
-  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.jpg': 'image/jpeg', '.webp': 'image/webp' };
+  const dist = opts.dist ?? DIST;
+  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.bin': 'application/octet-stream', '.txt': 'text/plain; charset=utf-8' };
 
   function readBody(req, limit = 1e5) {
     return new Promise((resolve, reject) => {
@@ -105,25 +108,51 @@ export function createServer(db, opts = {}) {
     }
   }
 
+  // Files from dist/ (the built client). A browser that takes br or gzip gets
+  // the precompressed copy (scripts/precompress.mjs). Every file has an ETag,
+  // so a repeat visit only revalidates; hashed bundles and ?v= asset URLs are
+  // cached for good (a new build changes their URLs).
   function serveStatic(req, res, url) {
-    let p = path.normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
-    let file = path.join(DIST, p);
-    if (!file.startsWith(DIST)) return json(res, 403, { error: 'no' });
-    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+    const p = path.normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, '');
+    let file = path.join(dist, p);
+    if (!file.startsWith(dist)) return json(res, 403, { error: 'no' });
+    let st = fs.statSync(file, { throwIfNoEntry: false });
+    if (!st || st.isDirectory()) {
       // Missing files with an extension (models, images…) are real 404s; anything else is the app.
       if (path.extname(p)) return json(res, 404, { error: 'Not found' });
-      file = path.join(DIST, 'index.html');
+      file = path.join(dist, 'index.html');
+      st = fs.statSync(file, { throwIfNoEntry: false });
     }
-    if (!fs.existsSync(file)) {
+    if (!st) {
       res.writeHead(200, { 'content-type': 'text/plain' });
       return res.end('Client not built. Run `npm run build` (or use `npm run dev`).');
     }
     const ext = path.extname(file);
-    res.writeHead(200, {
-      'content-type': MIME[ext] || 'application/octet-stream',
-      'cache-control': file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : file.includes(`${path.sep}models${path.sep}`) ? 'public, max-age=86400' : 'no-cache',
-    });
-    fs.createReadStream(file).pipe(res);
+    const forever = file.includes(`${path.sep}assets${path.sep}`) || url.searchParams.has('v');
+    const etag = `W/"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"`;
+    const headers = { 'cache-control': forever ? 'public, max-age=31536000, immutable' : 'no-cache', etag };
+    if (COMPRESSIBLE.has(ext)) headers.vary = 'Accept-Encoding';
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, headers);
+      return res.end();
+    }
+    headers['content-type'] = MIME[ext] || 'application/octet-stream';
+    let send = file;
+    let size = st.size;
+    const accept = req.headers['accept-encoding'] || '';
+    for (const [enc, suffix] of [['br', '.br'], ['gzip', '.gz']]) {
+      if (!new RegExp(`\\b${enc}\\b`).test(accept)) continue;
+      const z = fs.statSync(file + suffix, { throwIfNoEntry: false });
+      if (!z) continue;
+      send = file + suffix;
+      size = z.size;
+      headers['content-encoding'] = enc;
+      break;
+    }
+    headers['content-length'] = size;
+    res.writeHead(200, headers);
+    if (req.method === 'HEAD') return res.end();
+    fs.createReadStream(send).pipe(res);
   }
 
   const server = http.createServer((req, res) => {

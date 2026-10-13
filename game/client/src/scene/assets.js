@@ -11,7 +11,13 @@ import { toon, outlineMat } from './toon.js';
 // so the game always runs — and you can swap any model by editing the
 // manifest (see ASSETS.md).
 
-const loader = new GLTFLoader();
+// Every asset URL carries the build's version (vite.config.js), so the server
+// can let browsers keep models and textures cached for good.
+const VERSION = typeof __ASSET_VERSION__ === 'string' ? __ASSET_VERSION__ : '';
+export const versioned = (u) => (VERSION && u.startsWith('/') && !/[?&]v=/.test(u) ? `${u}${u.includes('?') ? '&' : '?'}v=${VERSION}` : u);
+const manager = new THREE.LoadingManager();
+manager.setURLModifier(versioned); // also the textures a model file points to
+const loader = new GLTFLoader(manager);
 const gltfs = new Map(); // url -> gltf
 const ready = new Map(); // slot -> { scene, animations, scale, def }
 const matCache = new Map();
@@ -167,7 +173,7 @@ const ACTOR_OUTLINE = 0.036; // characters and monsters get a bolder line than t
 const outlineFor = (scale, world = OUTLINE_WORLD) => outlineMat(Math.round((world / Math.max(scale, 1e-3)) * 1000) / 1000);
 
 const textures = new Map(); // url -> Texture (palette variants for modular kits)
-const texLoader = new THREE.TextureLoader();
+const texLoader = new THREE.TextureLoader(manager);
 
 // Modular building pieces are loaded "raw": no re-centering or resizing,
 // because their pivots are what make walls and roofs line up.
