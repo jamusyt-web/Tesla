@@ -43,6 +43,8 @@ import { Explore } from './explore.js';
 import { Landmarks, landmarksChanged } from './landmarks.js';
 import { resetJournalCache } from '../shared/journal.js';
 import { Digest, DIGEST_AFTER_MS } from './digest.js';
+import { Engage } from './engage.js';
+import './owner.js'; // the owner's Economy and Engagement reports
 import * as rep from './rep.js';
 
 export { TUTORIAL };
@@ -190,6 +192,7 @@ export class Game {
     this.explore = new Explore(this);
     this.landmarks = new Landmarks(this);
     this.digest = new Digest(this);
+    this.engage = new Engage(this);
     // Festive and Hearth Rest add to every xp grant.
     this.heroes.xpBonus = (hero, skill, amount) => {
       const c = this.online.get(hero.id);
@@ -432,6 +435,7 @@ export class Game {
     this.digest.onConnect(c, lastSeen != null ? Date.now() - lastSeen : 0);
     pushStorage(this, c); // goods waiting in storage, per town
     this.explore.load(c); // the cells walked and places found
+    this.engage.onConnect(c);
     this.quests.ensure(c); // a new hero's first quest, and any chain that has opened up
     this.almanac.ensure(c); // today's dailies and this week's errand
     this.shops.prune(accountId);
@@ -448,6 +452,7 @@ export class Game {
     this.heroes.savePos(c.hero.id, p.x, p.z);
     this.heroes.saveActive(c.hero.id, c.lastInput);
     this.explore.save(c);
+    this.engage.onDisconnect(c);
     this.lastActive.set(c.hero.id, c.lastInput);
     if (c.ch?.isRun) c.ch.depart(c, { keepSeat: true }); // you can reconnect into the run for a while
     else c.ch?.remove(c);
