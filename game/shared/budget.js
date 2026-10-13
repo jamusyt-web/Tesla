@@ -48,7 +48,7 @@ export const keepDetail = (x, z) => !((Math.floor(x * 7.31) ^ Math.floor(z * 3.7
 // census: `draws`/`tris` always drawn, `tileDraws`/`tileTris` only near the
 // camera (ink, small detail, grass); statics apart.
 import STATS from './slot-stats.js';
-import { PROPS, NODES, BUILDINGS, GATES, STONES, ENTRANCES, LAKES, DOCKS, PLAZAS, FOUNTAINS, LANDS, NODE_TYPES, pathSegments } from './world.js';
+import { PROPS, NODES, BUILDINGS, GATES, STONES, ENTRANCES, LAKES, DOCKS, PLAZAS, FOUNTAINS, LANDS, NODE_TYPES, pathSegments, styleOf } from './world.js';
 
 // Measured once in the game (draws, triangles, ink triangles).
 const STATIC_COST = {
@@ -191,7 +191,7 @@ export function estimateChunk(i, j, { level = 'near', low = true } = {}) {
   S.tileDraws += detail.size + inkTiles.size;
   // Statics.
   const add = ([d, t, ink]) => ((T.draws += d), (T.tris += t + ink));
-  for (const b of BUILDINGS) if (inChunk(b)) add(STATIC_COST[b.deco ? 'cottage' : b.recipe ?? b.id] ?? STATIC_COST.house);
+  for (const b of BUILDINGS) if (inChunk(b)) add(STATIC_COST[styleOf(b)] ?? STATIC_COST.house);
   for (const g of GATES) if (inChunk(g)) add(STATIC_COST.gate);
   for (const s of STONES) if (inChunk(s)) add(STATIC_COST.stone);
   for (const e of ENTRANCES) if (inChunk(e)) add(STATIC_COST.crypt);

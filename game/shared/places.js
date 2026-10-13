@@ -1,7 +1,7 @@
 // Where a point is: its region, the town it belongs to (where you can trade,
 // craft and use a town's services) and its biome (the look and mood).
 // They look only at the entries near the point (world.js keeps an index).
-import { MAP, around } from './world.js';
+import { MAP, BUILDINGS, around } from './world.js';
 import { biome } from './biomes.js';
 
 // The smallest entry of `list` whose circle holds (x, z) and passes `ok`.
@@ -14,6 +14,21 @@ function smallest(list, x, z, ok = () => true) {
 export const regionAt = (x, z) => smallest(around('regions', x, z), x, z);
 export const townAt = (x, z) => smallest(around('regions', x, z), x, z, (r) => r.kind === 'town');
 export const zoneAt = (x, z) => smallest(around('zones', x, z), x, z);
+
+// The building that does `action` (craft, market, townhall…) for the town
+// at (x, z): the nearest one inside that town, else the nearest anywhere.
+export function townBuilding(action, x, z) {
+  const t = townAt(x, z);
+  const away = (b) => (t && Math.hypot(b.x - t.x, b.z - t.z) > t.r ? 1e9 : 0);
+  let best = null;
+  let bd = Infinity;
+  for (const b of BUILDINGS) {
+    if (b.deco || b.action !== action) continue;
+    const d = Math.hypot(b.x - x, b.z - z) + away(b);
+    if (d < bd) (best = b), (bd = d);
+  }
+  return best;
+}
 
 // zone biome, else region biome, else the map's, else meadow. A wilds zone is
 // the wilds biome. Today that gives meadow everywhere except the Wilds.

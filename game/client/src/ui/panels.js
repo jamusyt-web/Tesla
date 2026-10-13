@@ -11,7 +11,8 @@ import { MARKET_PANELS } from './market.js';
 import { BOARD_PANELS } from './board.js';
 import { BATTLE_PANELS } from './battle-panels.js';
 import { glyph } from './glyphs.js';
-import { BUILDINGS, doorPoint } from '../../../shared/world.js';
+import { townBuilding } from '../../../shared/places.js';
+import { doorPoint } from '../../../shared/world.js';
 import { inYard, spotsOf } from '../../../shared/stations.js';
 import { iconEl, itemDesc } from './itemui.js';
 
@@ -62,14 +63,10 @@ export class Panels {
     if (!g?.me || g.room || g.dungeon) return null;
     const p = g.myPos();
     if (name === 'craft' && (args.station || inYard(p.x, p.z))) return null; // already at the stations
-    let best = null;
-    for (const b of BUILDINGS) {
-      if (b.deco || b.action !== name || b.action === 'shop') continue;
-      const [dx, dz] = doorPoint(b);
-      const d = Math.hypot(dx - p.x, dz - p.z);
-      if (!best || d < best.d) best = { b, d };
-    }
-    return best && best.d > 8 ? best.b : null;
+    const b = name === 'shop' ? null : townBuilding(name, p.x, p.z);
+    if (!b) return null;
+    const [dx, dz] = doorPoint(b);
+    return Math.hypot(dx - p.x, dz - p.z) > 8 ? b : null;
   }
 
   close() {
@@ -101,7 +98,7 @@ export class Panels {
     const g = this.hud.game;
     const p = g.myPos();
     if (inYard(p.x, p.z)) return go();
-    const sp = spotsOf(r.station)[0];
+    const sp = spotsOf(r.station, p.x, p.z)[0];
     this.close();
     if (!g.walkTo(sp.x, sp.z, true, go)) return this.hud.toast("Can't reach the Workshop yard.", 'err');
     this.hud.toast('Off to the Workshop yard…');

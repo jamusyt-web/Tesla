@@ -51,7 +51,9 @@ export function mulberry32(seed) {
 //   biome?    the map's biome (default 'meadow'; shared/biomes.js)
 //   clock?    true: the day turns to night and back (shared/clock.js)
 //   regions   [{ id, name, tier, kind, x, z, r, biome?, stone? }]   kind: town | wild | outpost; tier 1 = starter
-//   buildings [{ id, label, action, x, z, w, d, face, deco, recipe?, ... }]   recipe: whose look to build (default: the id)
+//   buildings [{ id, label, action, x, z, w, d, face, deco, style?, kit?, ... }]
+//             style: which look to build (default: cottage for deco, else the id);
+//             kit: which building kit it's made from (default ftk)
 //   gates     [{ id, label, x, z, width, scale }]   castle-wall gatehouses
 //   plazas, fountains [{ id, x, z, r }]
 //   lakes     [{ id, x, z, r, deep, kind? }]   water; fishing spots within `deep` are deep water; kind 'ice' is frozen
@@ -362,6 +364,10 @@ export function gateColliders(g = GATE) {
 export const isDeepSpot = (n) => LAKES.some((l) => Math.hypot(n.x - l.x, n.z - l.z) < l.deep);
 
 // Building door location (where you walk to enter).
+// A building's look: its style and the kit it's built from (see the map format above).
+export const styleOf = (b) => b.style ?? (b.deco ? 'cottage' : b.id);
+export const kitOf = (b) => b.kit ?? 'ftk';
+
 export function doorPoint(b) {
   const off = { n: [0, -b.d / 2 - 1.4], s: [0, b.d / 2 + 1.4], e: [b.w / 2 + 1.4, 0], w: [-b.w / 2 - 1.4, 0] }[b.face || 's'];
   return [b.x + off[0], b.z + off[1]];

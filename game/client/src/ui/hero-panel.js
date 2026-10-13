@@ -79,6 +79,7 @@ function itemDetail(id, isEq) {
       { style: { marginTop: '10px', flexWrap: 'wrap' } },
       (it.cat === 'tool' || it.slot) && !isEq ? h('button.btn.green.small', { on: { click: () => this.rpc('equip', { item: id }, `Equipped ${it.name}!`) } }, 'Equip') : null,
       isEq ? h('span.chip.on', 'Equipped') : null,
+      id === 'hearth_charm' && have > 0 ? h('button.btn.green.small', { on: { click: () => (this.close(), this.hud.game?.travelHome()) } }, 'Go home') : null,
       sellable > 0 ? h('div.qty', q) : null,
       sellable > 0 ? h('button.btn.small', { on: { click: () => npcSell.call(this, id, +q.value) } }, 'Sell to merchant') : null,
       h('button.btn.blue.small', { on: { click: () => this.open('market', { item: id }) } }, 'Market'),

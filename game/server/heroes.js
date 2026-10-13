@@ -67,6 +67,8 @@ export class Heroes {
       equip: { ...STARTER_EQUIP, ...JSON.parse(r.equip) },
       tutorial: r.tutorial,
       stones: JSON.parse(r.stones || '[]'),
+      home: r.home ?? 'hearthvale',
+      title: r.title ?? null,
       x: r.x ?? SPAWN.x,
       z: r.z ?? SPAWN.z,
     };

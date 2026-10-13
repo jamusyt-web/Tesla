@@ -15,7 +15,7 @@ import { Townsfolk } from './scene/townsfolk.js';
 import { RoomView } from './room.js';
 import { Labels } from './ui/labels.js';
 import { DungeonView } from './scene/dungeon.js';
-import { goCraft, craftDone, resumeCraft, goBuilding, goBoard, goStone, travelTo, ownerTeleport, goCrypt, enterCrypt, guideToCrypt, contextAction } from './world/services.js';
+import { goCraft, craftDone, resumeCraft, goBuilding, goBoard, goStone, travelTo, travelHome, travelToMember, ownerTeleport, goCrypt, enterCrypt, guideToCrypt, contextAction } from './world/services.js';
 import { glyph } from './ui/glyphs.js';
 import { stationPos } from '../../shared/stations.js';
 import { h } from './util/dom.js';
@@ -224,6 +224,12 @@ export class GameClient {
   }
   travelTo(id) {
     return travelTo(this, id);
+  }
+  travelHome() {
+    return travelHome(this);
+  }
+  travelToMember(id) {
+    return travelToMember(this, id);
   }
   ownerTeleport(x, z) {
     return ownerTeleport(this, x, z);
@@ -546,7 +552,8 @@ export class GameClient {
       }),
       s.on('crafted', (m) => {
         const pv = this.players.get(m.by);
-        const p = stationPos(m.station);
+        const at = pv?.av.root.position;
+        const p = at && stationPos(m.station, at.x, at.z);
         if (!pv || pv.isMe || !p) return;
         pv.av.play('cheer');
         this.floatText(new THREE.Vector3(p.x, 2.8, p.z), `${m.grade} · ${m.qty}× ${ITEMS[m.item]?.name}`, m.mw || m.grade === 'S' ? 'loot rare' : 'loot');
@@ -889,6 +896,8 @@ export class GameClient {
     const L = this.me?.local;
     if (!L || this.battle) return;
     if (this.dungeon) return this.contextAction()?.fn();
+    const ctx = this.contextAction();
+    if (ctx && !ctx.off) return ctx.fn();
     let best = null;
     for (const n of STATIC.nodes.values()) {
       const t = NODE_TYPES[n.type];

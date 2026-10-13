@@ -3,7 +3,9 @@ import { ITEMS } from '../shared/items.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
 import { levelFromXp } from '../shared/skills.js';
 import { buildSpec, replayCraft, finalizeCraft, scoreOf, isFlawless, outcomeOf, batchCap, isStackable, CRAFT_TICK, CRAFT_MAX_TICKS, STATIONS } from '../shared/crafting.js';
-import { spotsOf, inYard } from '../shared/stations.js';
+import { spotsOf, inYard, nearestStation } from '../shared/stations.js';
+import { townAt } from '../shared/places.js';
+import { REGIONS } from '../shared/world.js';
 import { tx, fail } from './db.js';
 import { emit } from './events.js';
 import { register } from './rpc.js';
@@ -49,21 +51,25 @@ export class Crafting {
     return levelFromXp(c.hero.skills.crafting || 0);
   }
 
-  // Which work spot at a station is free (two main spots, then the shared overflow).
-  #claimSpot(c, station) {
+  // Which work spot at the nearest station of a kind is free (two main
+  // spots, then the shared overflow). Spots are claimed per station prop, so
+  // each town's anvil has its own.
+  #claimSpot(c, kind) {
     const ch = c.ch;
+    const prop = nearestStation(kind, c.ent.x, c.ent.z);
+    if (!prop) fail(`There's no ${STATIONS[kind]?.label ?? kind} here.`);
     ch.spots ??= new Map();
-    if (!ch.spots.has(station)) ch.spots.set(station, [null, null]);
-    const taken = ch.spots.get(station);
-    const spots = spotsOf(station);
+    if (!ch.spots.has(prop.id)) ch.spots.set(prop.id, [null, null]);
+    const taken = ch.spots.get(prop.id);
+    const spots = spotsOf(prop);
     const free = [0, 1].filter((i) => !taken[i] || taken[i] === c.hero.id || !ch.players.has(taken[i]));
     const near = (i) => Math.hypot(spots[i].x - c.ent.x, spots[i].z - c.ent.z);
     const i = free.length ? free.sort((a, b) => near(a) - near(b))[0] : 2;
     if (i < 2) taken[i] = c.hero.id;
-    return spots[i];
+    return { ...spots[i], prop: prop.id };
   }
-  releaseSpot(c, station = c.craft?.station) {
-    const taken = station && c.ch?.spots?.get(station);
+  releaseSpot(c, prop = c.craft?.spot?.prop) {
+    const taken = prop && c.ch?.spots?.get(prop);
     if (taken) for (let i = 0; i < 2; i++) if (taken[i] === c.hero.id) taken[i] = null;
   }
 
@@ -72,7 +78,7 @@ export class Crafting {
     for (const r of this.q.mastery.all(c.hero.id)) mastery[r.recipe] = { n: r.n, best: r.best, quick: r.n >= QUICK_UNLOCK };
     const occupancy = {};
     for (const st of Object.keys(STATIONS)) {
-      const taken = c.ch?.spots?.get(st) || [null, null];
+      const taken = c.ch?.spots?.get(nearestStation(st, c.ent.x, c.ent.z)?.id) || [null, null];
       occupancy[st] = taken.map((id) => (id && c.ch.players.has(id) ? id : null));
     }
     return { mastery, occupancy, level: this.#level(c) };
@@ -83,6 +89,8 @@ export class Crafting {
     if (!r) fail('Unknown recipe.');
     const lvl = this.#level(c);
     if (lvl < r.lvl) fail(`Requires Crafting level ${r.lvl}.`);
+    // A town's own recipes are made only in its yard.
+    if (r.town && townAt(c.ent.x, c.ent.z)?.id !== r.town) fail(`${ITEMS[r.out]?.name ?? 'That'} can only be made in ${REGIONS.find((t) => t.id === r.town)?.name ?? r.town}.`);
     if (c.craft) fail("You're already crafting.");
     if (c.battle) fail("You're in a battle!");
     if (c.room) fail("You're inside a shop.");
@@ -93,7 +101,7 @@ export class Crafting {
     for (const [id, n] of Object.entries(escrow)) if (H.count(c.hero.id, id) < n) fail(`Not enough ${ITEMS[id].name}.`);
     const spot = this.#claimSpot(c, r.station);
     if (Math.hypot(spot.x - c.ent.x, spot.z - c.ent.z) > 3.5) {
-      this.releaseSpot(c, r.station);
+      this.releaseSpot(c, spot.prop);
       fail(`Walk up to the ${STATIONS[r.station].label} first.`);
     }
     const sid = crypto.randomBytes(6).toString('base64url');

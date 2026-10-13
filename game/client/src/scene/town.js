@@ -13,7 +13,7 @@ import { biomeAt, groundAt } from '../../../shared/places.js';
 import { biome } from '../../../shared/biomes.js';
 import {
   BUILDINGS, ZONES, REGIONS, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, ENTRANCES, CRYPT, LANDS, EXTENT, SPAWN, NODE_TYPES, MAP,
-  pathSegments, zonesOfKind, mulberry32,
+  pathSegments, zonesOfKind, mulberry32, styleOf,
 } from '../../../shared/world.js';
 
 const DUNGEON_NAMES = Object.fromEntries(Object.entries(DUNGEONS).map(([k, d]) => [k, d.name]));
@@ -1677,6 +1677,7 @@ function gableRoof(w, d, h, color) {
 
 function buildHouse(b, rng) {
   const grp = new THREE.Group();
+  const style = styleOf(b);
   grp.position.set(b.x, 0, b.z);
   // Model faces +z; rotate so the door faces the building's `face` direction.
   const faceRot = { s: 0, n: Math.PI, e: Math.PI / 2, w: -Math.PI / 2 }[b.face || 's'];
@@ -1686,9 +1687,9 @@ function buildHouse(b, rng) {
   const swap = b.face === 'e' || b.face === 'w';
   const W = swap ? b.d : b.w;
   const D = swap ? b.w : b.d;
-  const H = b.id === 'townhall' ? 4.6 : b.deco ? 3.2 : 3.8;
+  const H = style === 'townhall' ? 4.6 : b.deco ? 3.2 : 3.8;
 
-  if (b.id === 'market') {
+  if (style === 'market') {
     // Open-air market pavilion with a striped canopy and stalls.
     const deck = mesh(box(W, 0.3, D), '#c9a374', { outline: OL });
     deck.position.y = 0.15;
@@ -1742,7 +1743,7 @@ function buildHouse(b, rng) {
     beam.position.set((sx * W) / 2, H / 2, D / 2);
     inner.add(beam);
   }
-  const roofH = b.id === 'townhall' ? 3 : 2.4;
+  const roofH = style === 'townhall' ? 3 : 2.4;
   const roof = gableRoof(D, W, roofH, b.roof);
   roof.rotation.y = Math.PI / 2;
   roof.position.y = H;
@@ -1784,7 +1785,7 @@ function buildHouse(b, rng) {
   smokePos.set(W * 0.25, H + roofH * 0.65 + 1, -D * 0.15).applyAxisAngle(new THREE.Vector3(0, 1, 0), faceRot).add(grp.position);
   if (!b.deco || rng() > 0.4) grp.userData.smoke = smokePos;
 
-  if (b.id === 'shop') {
+  if (style === 'shop') {
     const stripes = 6;
     for (let i = 0; i < stripes; i++) {
       const s = mesh(box(W / stripes, 0.12, 1.5), i % 2 ? '#fff7ea' : '#e2574c');
@@ -1800,7 +1801,7 @@ function buildHouse(b, rng) {
       barrel.position.set(sx * (W / 2 + 0.6), 0.45, D / 2 + 0.4);
       inner.add(barrel);
     }
-  } else if (b.id === 'workshop') {
+  } else if (style === 'workshop') {
     const anvil = mesh(box(0.9, 0.5, 0.45), '#4a4a5a', { outline: OL });
     anvil.position.set(-W / 2 + 1.2, 0.85, D / 2 + 1.3);
     const block = mesh(cyl(0.35, 0.4, 0.6, 8), '#8b5a33', { outline: OL });
@@ -1812,7 +1813,7 @@ function buildHouse(b, rng) {
       log.position.set(W / 2 - 1.2, 0.25 + Math.floor(i / 3) * 0.45, D / 2 + 0.9 + (i % 3) * 0.5 - (i >= 3 ? -0.25 : 0));
       inner.add(log);
     }
-  } else if (b.id === 'townhall') {
+  } else if (style === 'townhall') {
     const tower = mesh(box(2.2, 3.2, 2.2), b.color, { outline: OL });
     tower.position.set(0, H + roofH + 0.4, 0);
     const troof = mesh(new THREE.ConeGeometry(1.9, 2.2, 4), b.roof, { outline: OL, mat: toon(b.roof, { flatShading: true }) });

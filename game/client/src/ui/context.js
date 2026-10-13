@@ -1,6 +1,7 @@
 // The round button above the dock: the best thing to do right here (join a
-// friend's fight, rest, pray, open a chest, leave). Dungeon-only today; the
-// game works out what it is (world/services.js contextAction).
+// friend's fight, rest, pray, open a chest, leave; out in the world, hop
+// through a passage). The game works out what it is (world/services.js
+// contextAction); `off` greys it out (you can't yet).
 import { h } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
 import { glyph } from './glyphs.js';
@@ -13,13 +14,14 @@ export class ContextButton {
   }
   update() {
     const g = this.hud.game;
-    const ctx = g?.dungeon && !g.battle ? g.contextAction() : null;
+    const ctx = g && !g.battle ? g.contextAction() : null;
     this.ctx = ctx;
     this.el.classList.toggle('hidden', !ctx);
     if (!ctx) return;
     const key = ctx.label + ctx.glyph;
     if (this.el.dataset.k === key) return;
     this.el.dataset.k = key;
+    this.el.classList.toggle('off', !!ctx.off);
     this.el.replaceChildren(glyph(ctx.glyph), h('span', ctx.label));
   }
   hide() {

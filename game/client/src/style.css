@@ -596,6 +596,7 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .ctxbtn { position: absolute; right: 12px; bottom: calc(84px + var(--safe-bottom)); z-index: 15; min-height: 54px; max-width: 46vw; padding: 8px 16px 8px 12px; border-radius: 28px; display: inline-flex; align-items: center; gap: 8px; font-weight: 800; font-size: 15px; color: #1b1511; background: linear-gradient(#f3d589, #c99a3a); border: 2px solid #6b4a1c; box-shadow: 0 4px 0 #3a2410, 0 0 18px rgba(240, 190, 90, 0.45); animation: ctxin 0.25s ease-out; }
 .ctxbtn .g { font-size: 24px; }
 .ctxbtn:active { transform: translateY(2px); box-shadow: 0 2px 0 #3a2410; }
+.ctxbtn.off { color: #5a4a3a; background: linear-gradient(#d8cdb8, #a99a80); box-shadow: 0 4px 0 #3a2410; font-size: 13px; }
 @keyframes ctxin { from { transform: scale(0.8); opacity: 0; } }
 
 .prompts { position: absolute; top: calc(150px + var(--safe-top)); left: 50%; transform: translateX(-50%); width: min(360px, 92vw); display: flex; flex-direction: column; gap: 8px; z-index: 55; }

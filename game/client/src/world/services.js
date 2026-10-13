@@ -10,6 +10,7 @@ import { STATIONS } from '../../../shared/crafting.js';
 import { ITEMS } from '../../../shared/items.js';
 import { BUILDINGS, GATE, PROPS, doorPoint, stoneById, stoneFront, STONE_RANGE, ENTRANCES, entranceFront } from '../../../shared/world.js';
 import { ENTRANCE_RANGE } from '../../../shared/dungeon.js';
+import { passageAt, passageOpen, passageNeeds } from '../../../shared/travel.js';
 
 // Walk to the recipe's station, then make it by hand.
 export function goCraft(g, recipe, batch = 1) {
@@ -21,7 +22,7 @@ export function goCraft(g, recipe, batch = 1) {
   if (g.fishing) g.endFishing();
   g.stopGather();
   const L = g.me.local;
-  const sp = spotsOf(r.station)
+  const sp = spotsOf(r.station, L.x, L.z)
     .slice(0, 2)
     .sort((a, b) => Math.hypot(a.x - L.x, a.z - L.z) - Math.hypot(b.x - L.x, b.z - L.z))[0];
   const start = () => startCraft(g, recipe, batch);
@@ -55,7 +56,7 @@ function beginCraft(g, st, recipe, batch) {
       if (step.k === 'strike') g.me.av.play('swing', 0.32);
       else if (step.k === 'sweep') g.me.av.play('pick', 0.4);
       else g.me.av.play('cast', 0.45);
-      const p = stationPos(station);
+      const p = stationPos(station, g.me.local.x, g.me.local.z);
       if (p && q !== 'M') g.fx.burst(new THREE.Vector3(p.x, 1.1, p.z), { n: q === 'P' ? 14 : 6, color: station === 'cookpot' ? ['#ffffff', '#d9f3ff'] : station === 'forge' || station === 'anvil' ? ['#ffd84a', '#ff9a3c', '#fff1a8'] : ['#e0bd8a', '#c89a62'], speed: 4, up: 3, size: 0.12, life: 0.5, gravity: 6 });
     },
   });
@@ -170,7 +171,7 @@ export async function travelTo(g, id) {
   g.intent = null;
   try {
     const r = await g.sock.rpc('travel', { to: id });
-    g.hud.toast(`Travelled to ${stoneById(r.to)?.name ?? 'the waystone'} (−${r.fee} 🪙)`, 'gold');
+    g.hud.toast(`Travelled to ${stoneById(r.to)?.name ?? 'the waystone'} (−${r.fee + (r.toll ?? 0)} 🪙)`, 'gold');
     return true;
   } catch (e) {
     g.hud.toast(e.message, 'err');
@@ -178,6 +179,40 @@ export async function travelTo(g, id) {
   } finally {
     g.travelling = false;
   }
+}
+
+// The other trips: home with a Hearth Charm, to a party member, or through a
+// passage. Each is one RPC; the server moves you.
+async function trip(g, m, a, done) {
+  if (g.travelling || !g.me) return false;
+  if (g.dungeon) return g.underground(), false;
+  if (g.battle) return g.hud.toast("You're in a battle!", 'err'), false;
+  g.travelling = true;
+  g.me.local.path = null;
+  g.intent = null;
+  try {
+    done(await g.sock.rpc(m, a));
+    return true;
+  } catch (e) {
+    g.hud.toast(e.message, 'err');
+    return false;
+  } finally {
+    g.travelling = false;
+  }
+}
+export const travelHome = (g) => trip(g, 'travel.home', {}, (r) => g.hud.toast(`Home to ${stoneById(r.to)?.name ?? 'your home stone'}${r.toll ? ` (toll −${r.toll} 🪙)` : ''}`, 'gold'));
+export const travelToMember = (g, member) => trip(g, 'travel.party', { member }, (r) => g.hud.toast(`Travelled to ${stoneById(r.to)?.name ?? 'the waystone'} (−${r.fee + (r.toll ?? 0)} 🪙)`, 'gold'));
+export const usePassage = (g, id) => trip(g, 'passage.use', { id }, () => {});
+
+// Out in the world: hop through the passage you're standing at. Without
+// its skill or kit the button shows, greyed, what it takes.
+const PASSAGE_VERB = { squeeze: 'Squeeze through', climb: 'Climb', swim: 'Swim across' };
+function worldAction(g, L) {
+  const at = passageAt(L.x, L.z);
+  if (!at) return null;
+  const p = at.p;
+  if (!passageOpen(p, g.hud.me.skills, g.hud.me.inv)) return { label: passageNeeds(p), glyph: 'lock', off: true, fn: () => g.hud.toast(`You need ${passageNeeds(p)}.`, 'err') };
+  return { label: PASSAGE_VERB[p.kind] ?? 'Go through', glyph: 'run', fn: () => usePassage(g, p.id) };
 }
 
 // Server owners: jump anywhere on land (to check on building work).
@@ -228,11 +263,12 @@ export function guideToCrypt(g, kind = 'hollow_crypt') {
   g.walkTo(fx, fz, true);
 }
 
-// The best thing to do right now in the crypt (the round button and E/Space).
+// The best thing to do right here (the round button and E/Space).
 export function contextAction(g) {
   const v = g.dungeon;
   const L = g.me?.local;
-  if (!v || !L || g.battle) return null;
+  if (!L || g.battle) return null;
+  if (!v) return worldAction(g, L);
   const room = g.myRoom();
   // A friend fighting in this room: join them.
   for (const b of g.battles.values()) {

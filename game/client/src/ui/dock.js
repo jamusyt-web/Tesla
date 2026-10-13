@@ -13,7 +13,7 @@ export class Dock {
       'div.dock',
       dockBtn('bag', 'Bag', () => hud.panels.open('bag')),
       // These open straight away; the panel has a "Walk there" button too.
-      dockBtn('anvil', 'Craft', () => hud.openPlace('workshop')),
+      dockBtn('anvil', 'Craft', () => hud.openPlace('craft')),
       dockBtn('scales', 'Market', () => hud.openPlace('market')),
       dockBtn('shop', 'Shop', () => hud.game?.enterShop(hud.myId), this.shopBadge),
       dockBtn('castle', 'Town', () => hud.openPlace('townhall')),

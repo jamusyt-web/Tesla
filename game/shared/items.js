@@ -67,6 +67,8 @@ export const ITEMS = {
   grilled_fish: { name: 'Grilled Fish', icon: '🍢', cat: 'consumable', value: 18, rarity: 'common', heal: 30 },
   health_potion: { name: 'Health Potion', icon: '🧪', cat: 'consumable', value: 30, rarity: 'common', heal: 60 },
   moon_elixir: { name: 'Moon Elixir', icon: '⚗️', cat: 'consumable', value: 110, rarity: 'rare', heal: 150 },
+  // Used up for one free trip to your home stone (travel.home).
+  hearth_charm: { name: 'Hearth Charm', icon: '🏡', cat: 'consumable', tag: 'kit', value: 44, rarity: 'uncommon' },
 
   // ── Tools (power = damage per swing, speed = rhythm period ms) ──
   axe_wood: { name: 'Wooden Axe', icon: '🪓', cat: 'tool', tool: 'axe', tier: 1, power: 1, speed: 700, value: 15, rarity: 'common', skin: toolSkin('#9a6b3f', '#c89a62', '#e0bd8a') },

@@ -141,14 +141,15 @@ test('the tutorial ignores steps done out of order', () => {
 test('migrations: the six built in give user_version 6; the file loader adds nothing until it has files', () => {
   const db = openDb(':memory:');
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 6);
-  // The same database built by hand (schema + the six), with no loader: identical
-  // apart from what file migrations added.
+  // The same database built by hand (schema + the six), then the file
+  // migrations: identical to what openDb gives, and nothing dropped.
   const ref = openDb(':memory:');
   const plain = new (db.constructor)(':memory:');
   plain.exec(SCHEMA_V0);
   migrate(plain);
-  const added = new Set(MIGRATIONS.length ? schema(ref).map((r) => r.name).filter((n) => !schema(plain).some((p) => p.name === n)) : []);
-  assert.deepEqual(schema(ref).filter((r) => !added.has(r.name)), schema(plain));
+  for (const t of schema(plain)) assert.ok(schema(ref).some((r) => r.name === t.name), `${t.name} is kept`);
+  applyMigrations(plain);
+  assert.deepEqual(schema(plain), schema(ref));
   if (!MIGRATIONS.length) assert.ok(!schema(ref).some((r) => r.name === 'schema_migrations'), 'nothing to apply: nothing touched');
   const before = schema(plain);
   assert.deepEqual(applyMigrations(plain, []), []);

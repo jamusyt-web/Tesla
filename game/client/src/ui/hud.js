@@ -4,6 +4,7 @@ import { sfx } from '../util/sfx.js';
 import { portrait } from './portrait.js';
 import { ITEMS } from '../../../shared/items.js';
 import { SKILLS, levelProgress } from '../../../shared/skills.js';
+import { townBuilding } from '../../../shared/places.js';
 import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, LANDS, EXTENT, STONES, ENTRANCES, pathSegments, doorPoint, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
 import { DUNGEONS, TIERS } from '../../../shared/dungeon.js';
 import { MONSTERS } from '../../../shared/monsters.js';
@@ -416,10 +417,12 @@ export class Hud {
   openBuilding(action) {
     this.panels.open(action);
   }
-  // A building's panel, right now, wherever you are (no walk).
-  openPlace(id) {
+  // A service's panel (craft, market, townhall), right now, wherever you are
+  // (no walk). It acts for the town you're in, else the nearest one.
+  openPlace(action) {
     if (this.game?.battle) return this.toast("You're in a battle!", 'err');
-    const b = BUILDINGS.find((x) => x.id === id);
+    const p = this.game?.myPos() ?? { x: 0, z: 0 };
+    const b = townBuilding(action, p.x, p.z);
     if (b) this.panels.open(b.action);
   }
   openProfile(id) {
@@ -436,9 +439,9 @@ export class Hud {
       this.mapT = 0;
       this.#drawMap();
       this.banners.update();
+      this.context.update();
       if (this.game?.dungeon) {
         this.#tickRun();
-        this.context.update();
         this.lowHp.classList.toggle('hidden', !(this.me.hp > 0 && this.me.hp < this.me.maxHp * 0.3));
       }
     }

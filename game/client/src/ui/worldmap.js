@@ -3,6 +3,8 @@ import { sfx } from '../util/sfx.js';
 import { glyph } from './glyphs.js';
 import { paintWorld, tierLabel } from './mapdraw.js';
 import { LANDS, EXTENT, STONES, ENTRANCES, placeAt, stoneNear, stoneFront, travelFee } from '../../../shared/world.js';
+import { travelToll, nowarpItem } from '../../../shared/travel.js';
+import { ITEMS } from '../../../shared/items.js';
 
 export { tierLabel };
 
@@ -306,10 +308,20 @@ export class WorldMap {
       row.append(walkBtn());
       return;
     }
-    const fee = travelFee(here, st);
+    const bag = this.hud.me.inv ?? {};
+    const nw = nowarpItem(bag);
+    if (nw) {
+      card.append(h('div.note.bad', `The waystones won't carry your ${ITEMS[nw].name}. You'll have to walk.`));
+      row.append(walkBtn());
+      return;
+    }
+    // The fee, plus the toll on raw goods you carry (leave them in storage to skip it).
+    const toll = travelToll(bag);
+    const fee = travelFee(here, st) + toll;
     const gold = this.hud.me.gold ?? 0;
     const go = h('button.btn.small.green', { disabled: gold < fee || g.travelling, on: { click: () => this.#travel(st, go) } }, glyph('waystone'), `Travel · ${fmt(fee)} 🪙`);
     row.append(go, walkBtn('Walk instead'));
+    if (toll) card.append(h('div.note', `Includes a ${fmt(toll)} 🪙 toll on the raw goods you're carrying.`));
     if (gold < fee) card.append(h('div.note.bad', `You need ${fmt(fee - gold)} more 🪙.`));
   }
 

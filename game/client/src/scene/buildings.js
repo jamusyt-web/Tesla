@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as assets from './assets.js';
 import { MODULE_PACKS, TEXTURES } from './manifest/index.js';
-import { GATE } from '../../../shared/world.js';
+import { GATE, styleOf, kitOf } from '../../../shared/world.js';
 
 // Assembles Hearthvale's buildings from Kenney's modular Fantasy Town Kit.
 //
@@ -206,13 +206,26 @@ function market(W, D) {
   return { b, nx, nz, top: 1.6 };
 }
 
-const RECIPES = { workshop, shop, townhall, market };
 const COTTAGE_TEX = ['cot_a', 'cot_b', 'cot_c', 'cot_d', 'cot_e'];
+// Building looks by kit, then style. Each recipe takes (W, D, index). Kits
+// other than ftk ship 'cottage' and 'hall' (functional buildings use 'hall');
+// a look a kit doesn't have comes from ftk.
+const RECIPES = {
+  ftk: {
+    cottage: (W, D, i) => cottage(W, D, TEX[COTTAGE_TEX[i % COTTAGE_TEX.length]], i),
+    workshop,
+    shop,
+    townhall,
+    hall: townhall,
+    market,
+  },
+};
+export const recipeOf = (b) => RECIPES[kitOf(b)]?.[styleOf(b)] ?? RECIPES.ftk[styleOf(b)] ?? null;
 
 export const canBuild = () => assets.hasModules(FTK, MODULE_PACKS[FTK]);
 
-// Build a game building (a map `buildings` entry) as one group. Its recipe is
-// its `recipe` field, else its id (workshop, shop, townhall, market).
+// Build a game building (a map `buildings` entry) as one group, from its kit
+// and style (RECIPES above).
 // Returns null if the kit isn't loaded (caller falls back to procedural).
 export function buildModular(b, index) {
   if (!canBuild()) return null;
@@ -220,7 +233,7 @@ export function buildModular(b, index) {
   const swap = b.face === 'e' || b.face === 'w';
   const W = swap ? b.d : b.w;
   const D = swap ? b.w : b.d;
-  const made = b.deco ? cottage(W, D, TEX[COTTAGE_TEX[index % COTTAGE_TEX.length]], index) : RECIPES[b.recipe ?? b.id]?.(W, D);
+  const made = recipeOf(b)?.(W, D, index);
   if (!made) return null;
   const mesh = assets.assemble(made.b.items);
   const [sx, sy, sz] = made.b.S;

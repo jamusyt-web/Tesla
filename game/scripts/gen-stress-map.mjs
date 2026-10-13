@@ -99,7 +99,7 @@ const out = {
 for (const [town, tx, tz] of TOWNS) {
   const move = (e) => ({ ...e, id: `${town}_${e.id}`, x: r2(e.x + tx), z: r2(e.z + tz) });
   const keep = (e) => !nearMirror(e) && !inLake(e.x + tx, e.z + tz);
-  out.buildings.push(...base.buildings.map((b) => ({ ...move(b), ...(b.deco ? {} : { recipe: b.id }) })));
+  out.buildings.push(...base.buildings.map((b) => ({ ...move(b), ...(b.deco ? {} : { style: b.style ?? b.id }) })));
   out.plazas.push(...base.plazas.map(move));
   out.fountains.push(...base.fountains.map(move));
   out.zones.push(...base.zones.map(move));
