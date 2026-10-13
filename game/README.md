@@ -146,6 +146,14 @@ scripts/  bots.js (populate the lobby), dev.js, invite.js, admin.js (server owne
           dungeon-balance.js (simulates dungeon runs with the real numbers)
 ```
 
+## Performance (phones first)
+
+The game is built to run on a mid-range phone. The budgets (draw calls, triangles, textures, shaders, load size) are in `shared/budget.js`.
+
+- **`npm run perf:census`** plays the game in a headless browser at phone size and measures it at fixed spots (default camera, zoomed out, a crowd of 9), then fails if any budget is missed. Add `-- --map stress` to measure the five-town stress map instead (`maps/fixtures/stress.json`, made by `npm run gen:stress`). It needs Playwright installed (`npm i -g playwright`, then run with `NODE_PATH=$(npm root -g)`).
+- **The estimator** (`estimateChunk` in `shared/budget.js`) predicts what a chunk of the map will cost from the map alone, using `shared/slot-stats.js` (made by `node scripts/perf/slot-stats.mjs` from the model files). `server/tests/budget.test.js` keeps it within 15% of the census.
+- **Players' phones** report how the game runs every minute; the server owner sees the summary in the Town Hall's Performance tab.
+
 ## The world map
 
 Everything placed in the world lives in **`maps/world.json`**: the land itself (`lands`: circles that overlap into any coastline, so you can grow the island, join islands with land bridges, or start a new island far out at sea), buildings, the gate, plazas, fountains, lakes and docks, zones, dirt paths, gatherable nodes, monster camps (`spawns`), and every prop, tree and flower. The server loads it on start and sends it to each player's browser (`/api/map`), so both sides always build the same world. Small scatter (grass tufts, stepping stones, reeds, lily pads) is generated from it automatically.

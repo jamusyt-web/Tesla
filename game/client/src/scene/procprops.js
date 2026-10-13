@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mesh, toon } from './toon.js';
 
 // Props drawn in code instead of from a model: map props whose slot starts
@@ -139,12 +140,12 @@ export function buildWaystone(st, { fx, animate }) {
   g.add(at(pillar, 0, 2.1, 0));
   g.add(at(stone(box(0.62, 0.16, 0.62), '#4f5560'), 0, 3.66, 0));
   const glow = toon('#8fe8ff', { emissive: '#4fd0ff', emissiveIntensity: 0.2, unique: true });
-  // Rune marks down the front face (the face leans in a little as the pillar narrows).
-  for (const [y, w, hgt] of [[2.9, 0.22, 0.08], [2.55, 0.08, 0.3], [2.15, 0.26, 0.08], [1.75, 0.08, 0.36], [1.32, 0.2, 0.08]]) {
-    const r = at(new THREE.Mesh(box(w, hgt, 0.04), glow), 0, y, 0.56 - ((y - 0.6) / 3) * 0.18 + 0.03);
-    r.rotation.x = -0.04;
-    g.add(r);
-  }
+  // Rune marks down the front face (the face leans in a little as the pillar
+  // narrows): one mesh, whose glow pulses.
+  const runes = [[2.9, 0.22, 0.08], [2.55, 0.08, 0.3], [2.15, 0.26, 0.08], [1.75, 0.08, 0.36], [1.32, 0.2, 0.08]].map(([y, w, hgt]) => box(w, hgt, 0.04).rotateX(-0.04).translate(0, y, 0.56 - ((y - 0.6) / 3) * 0.18 + 0.03));
+  const rune = new THREE.Mesh(mergeGeometries(runes), glow);
+  rune.userData.live = true;
+  g.add(rune);
   const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), toon('#9ff0ff', { emissive: '#5fd8ff', emissiveIntensity: 0.25, flatShading: true, unique: true }));
   crystal.scale.y = 1.5;
   crystal.userData.live = true; // it floats

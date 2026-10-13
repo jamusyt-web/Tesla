@@ -7,8 +7,9 @@
 // The bones keep animating as before. Parts with see-through or double-sided
 // materials stay as they are.
 //
-// mergeRigid(obj): the same for something that doesn't bend (a tool): one
-// vertex-coloured mesh per kind of glow, and one ink shell, as children of obj.
+// mergeRigid(obj): the same for something that doesn't bend (a tool, a
+// waystone): one vertex-coloured mesh per kind of glow, and one ink shell, as
+// children of obj. Meshes marked userData.live (animated) are left as they are.
 // skinnedCopies(obj, bone): those meshes as SkinnedMeshes riding one bone, so
 // a hero's tools draw with the same shaders as the hero.
 import * as THREE from 'three';
@@ -137,7 +138,11 @@ export function mergeRigid(obj) {
   obj.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(obj.matrixWorld).invert();
   const parts = [];
-  obj.traverse((o) => o.isMesh && !isHull(o) && parts.push(o));
+  const live = (o) => {
+    for (let p = o; p; p = p.parent) if (p.userData.live) return true;
+    return false;
+  };
+  obj.traverse((o) => o.isMesh && !isHull(o) && !live(o) && parts.push(o));
   const byGlow = new Map(); // glow → part geometries
   const hulls = [];
   for (const part of parts) {
@@ -155,7 +160,7 @@ export function mergeRigid(obj) {
     obj.add(m);
     return m;
   };
-  for (const [glow, geos] of byGlow) add(geos, vcolMat(glow));
+  for (const [glow, geos] of byGlow) Object.assign(add(geos, vcolMat(glow)), { castShadow: true, receiveShadow: true });
   if (hulls.length) add(hulls, outlineMat(0)).raycast = () => {};
   return obj;
 }

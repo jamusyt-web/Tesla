@@ -1,16 +1,18 @@
 // A chunk's scenery and gatherable nodes, merged so a dense square costs a
 // few draw calls instead of one (plus an ink hull) per model.
 //
-// Near (the squares around you): one mesh per material, where plain-coloured
-// parts share one vertex-coloured mesh (per glow), and what casts a shadow
-// goes into one more mesh that is only ever drawn into the shadow map (it
-// lives on SHADOW_LAYER; see render.js). Two things are kept per quarter of
-// the square instead, so each can be hidden by distance (see tiles): the ink
-// shells (a fixed 3 cm line in the world, as before; drawn within 40 m) and
-// the small ground detail like flowers and grass (drawn within 48 m).
-// Far: everything but the small detail in one or two vertex-coloured meshes,
-// texture colours and the colour grade baked in, with no ink and no shadow.
-// It sits in the fog.
+// Every opaque part has its colours baked into its vertices (material colour
+// × texture × vertex colour, colour grade included: the packs paint models
+// from palette swatches, so a vertex's texel is its face's colour), so a
+// square's scenery is one mesh per kind of glow and sidedness.
+// Near (the squares around you): big meshes are cut in quarters (each culled
+// on its own), what casts a shadow goes into one more mesh that is only ever
+// drawn into the shadow map (it lives on SHADOW_LAYER; see render.js), and
+// two things are kept per quarter so each can be hidden by distance (see
+// tiles): the ink shells (a fixed 3 cm line in the world; in 24 m tiles,
+// drawn within 40 m)
+// and the small ground detail like flowers and grass (drawn within 48 m).
+// Far: no small detail, no glow, no ink and no shadow; it sits in the fog.
 //
 // Things added under a key (a node's standing or felled look) can be hidden
 // and shown again later without rebuilding: their triangles collapse to a
@@ -22,19 +24,17 @@ import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import * as assets from './assets.js';
 import { toon, outlineMat } from './toon.js';
+import { MERGE, keepDetail } from '../../../shared/budget.js';
 
 export const INK = 0.03; // metres
 export const SHADOW_LAYER = 5; // drawn only into the shadow map
-export const CASTER_MIN = 1.5; // on low, only things this tall (m) cast shadows
-export const DETAIL_MAX = 1.0; // props lower than this (m) are small detail
-const SPLIT_TRIS = 4000; // a near mesh this big is cut in quarters (each culled on its own)
+// The merge rules are shared with the budget estimator (shared/budget.js).
+export const { casterMin: CASTER_MIN, detailMax: DETAIL_MAX, noOutline: NO_OUTLINE, noShadow: NO_SHADOW, splitTris: SPLIT_TRIS } = MERGE;
 // Where the town's sun sits, from what it lights. It never moves, so the
 // shadow-only meshes keep just the faces turned away from it: those are the
 // ones the shadow map is drawn from (if the sun ever moves, drop this).
 export const SUN_TOWN = new THREE.Vector3(40, 34, 10);
 const SUN_DIR = SUN_TOWN.clone().normalize();
-export const NO_OUTLINE = new Set(['deco_flower', 'deco_grass', 'deco_lily_pad', 'deco_mushroom']);
-export const NO_SHADOW = new Set(['deco_flower', 'deco_grass', 'deco_lily_pad']);
 const FAINT = 0.15; // a glow this weak is folded into the colour instead
 
 const _m = new THREE.Matrix4();
@@ -124,7 +124,7 @@ function paint(g, color) {
 // The flat colour a material shows (glow folded in, grade applied).
 function flatColor(mat, graded, out) {
   out.copy(mat.color ?? _t.setRGB(1, 1, 1));
-  if (mat.emissive && mat.emissiveIntensity) out.add(_t.copy(mat.emissive).multiplyScalar(Math.min(1, mat.emissiveIntensity)));
+  if (mat.emissive && mat.emissiveIntensity && !mat.emissiveMap) out.add(_t.copy(mat.emissive).multiplyScalar(Math.min(1, mat.emissiveIntensity)));
   return graded ? assets.gradeColor(out) : out;
 }
 
@@ -171,22 +171,31 @@ class Bucket {
 export class ChunkMerge {
   // x0, z0, size: the square, for splitting it into quarters.
   // shadowOnly: only the shadow-only meshes (for things drawn on their own).
-  constructor({ far = false, low = false, x0 = 0, z0 = 0, size = 96, shadowOnly = false } = {}) {
+  // solid: everything added is closed (buildings), so even two-sided parts
+  // need only their faces turned away from the sun for the shadow.
+  constructor({ far = false, low = false, x0 = 0, z0 = 0, size = 96, shadowOnly = false, solid = false } = {}) {
     this.far = far;
     this.shadowOnly = shadowOnly;
+    this.solid = solid;
     this.low = low;
     this.x0 = x0;
     this.z0 = z0;
     this.half = size / 2;
     this.buckets = new Map(); // tile|look → Bucket
-    this.hulls = [0, 1, 2, 3].map(() => new Bucket(outlineMat(0)));
+    this.hulls = Array.from({ length: 16 }, () => new Bucket(outlineMat(0))); // 4 × 4 tiles
     this.shadow = new Map(); // quarter|side → Bucket
     this.ranges = new Map(); // key → [[bucket, start, count]]
     this.hidden = new Set();
-    this.tiles = []; // [{ mesh, q, kind: 'ink' | 'detail' }]
+    this.tiles = []; // [{ mesh, kind: 'ink' | 'detail', x0, z0, size }]
   }
 
   // Which quarter of the square a world matrix's origin is in (0–3).
+  // Which 24 m tile (of 4 × 4) a world matrix's origin is in.
+  #tile(W) {
+    const e = W.elements;
+    const t = (v) => Math.max(0, Math.min(3, Math.floor((v * 2) / this.half)));
+    return t(e[12] - this.x0) + 4 * t(e[14] - this.z0);
+  }
   #quarter(W) {
     const e = W.elements;
     return (e[12] - this.x0 >= this.half ? 1 : 0) + (e[14] - this.z0 >= this.half ? 2 : 0);
@@ -205,14 +214,27 @@ export class ChunkMerge {
     if (!mat.visible) return;
     if (this.shadowOnly) return cast && !mat.transparent && this.#cast(src, mat, W, key);
     const q = this.far ? -1 : this.#quarter(W);
-    if (this.far) {
-      // Everything vertex-coloured: material colour × texel × vertex colour.
+    const side = mat.side === THREE.DoubleSide ? THREE.DoubleSide : THREE.FrontSide;
+    if (mat.transparent || (mat.emissiveMap && !this.far)) {
+      // See-through, or glowing through a mask (a lantern's glass): its own
+      // material (and see-through things aren't drawn that far out).
+      if (this.far) return;
+      const keep = ['position', 'normal', ...(mat.map || mat.emissiveMap ? ['uv'] : []), ...(mat.vertexColors ? ['color'] : [])];
+      const g = copy(src, keep).applyMatrix4(W);
+      if (mat.vertexColors && !g.attributes.color) paint(g, _t.setRGB(1, 1, 1));
+      this.#bucket(mat.uuid, mat, q, detail).push(g, key);
+    } else {
+      // Opaque: its colours baked into the vertices (material colour × texture
+      // × vertex colour, graded), into the mesh for its glow and sides. The
+      // packs colour models from palette swatches, so a vertex's texel is
+      // the colour of its face.
+      const glow = this.far ? '' : glowOf(mat);
       const g = copy(src, ['position', 'normal']).applyMatrix4(W);
       const n = g.attributes.position.count;
       const col = new Float32Array(n * 3);
       const uv = mat.map ? src.attributes.uv : null;
       const vc = mat.vertexColors ? src.attributes.color : null;
-      const base = flatColor(mat, false, new THREE.Color());
+      const base = glow ? new THREE.Color().copy(mat.color) : flatColor(mat, false, new THREE.Color());
       for (let i = 0; i < n; i++) {
         _c.copy(base);
         if (uv) _c.multiply(assets.texel(mat.map, uv.getX(i), uv.getY(i), _t));
@@ -221,33 +243,16 @@ export class ChunkMerge {
         (col[i * 3] = _c.r), (col[i * 3 + 1] = _c.g), (col[i * 3 + 2] = _c.b);
       }
       g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      const side = mat.side === THREE.DoubleSide ? THREE.DoubleSide : THREE.FrontSide;
-      this.#bucket('far|' + side, proxyMat(side), q, false).push(g, key);
-      return;
-    }
-    if (mat.map || mat.vertexColors || mat.transparent) {
-      // Its own material: textured, already vertex-coloured, or see-through.
-      const keep = ['position', 'normal', ...(mat.map ? ['uv'] : []), ...(mat.vertexColors ? ['color'] : [])];
-      const g = copy(src, keep).applyMatrix4(W);
-      if (mat.vertexColors && !g.attributes.color) paint(g, _t.setRGB(1, 1, 1));
-      this.#bucket(mat.uuid, mat, q, detail).push(g, key);
-    } else {
-      // Plain colour: into the vertex-coloured mesh for its glow and sides.
-      const glow = glowOf(mat);
-      const side = mat.side === THREE.DoubleSide ? THREE.DoubleSide : THREE.FrontSide;
-      const color = glow ? _c.copy(mat.color) : flatColor(mat, false, _c);
-      if (graded) assets.gradeColor(color);
-      const g = paint(copy(src, ['position', 'normal']).applyMatrix4(W), color);
-      const look = `vcol|${glow}|${side}`;
       const vmat = toon('#ffffff', { vertexColors: true, ...(side === THREE.DoubleSide ? { side } : {}), ...(glow ? { emissive: '#' + glow.split('|')[0], emissiveIntensity: +glow.split('|')[1] } : {}) });
-      this.#bucket(look, vmat, q, detail).push(g, key);
+      this.#bucket(`vcol|${glow}|${side}`, vmat, q, detail).push(g, key);
     }
-    if (ink) this.hulls[this.#quarter(W)].push(shell(src, W), key);
+    if (this.far) return;
+    if (ink) this.hulls[this.#tile(W)].push(shell(src, W), key);
     if (cast && !mat.transparent) this.#cast(src, mat, W, key);
   }
   #cast(src, mat, W, key) {
-    const side = mat.side === THREE.DoubleSide ? THREE.DoubleSide : THREE.FrontSide;
-    const k = this.#quarter(W) + '|' + side; // (the sun's view is small: quarters cull well)
+    const side = mat.side === THREE.DoubleSide && !this.solid ? THREE.DoubleSide : THREE.FrontSide;
+    const k = this.#tile(W) + '|' + side; // (the sun's view is small: 24 m tiles cull well)
     let b = this.shadow.get(k);
     if (!b) this.shadow.set(k, (b = new Bucket(proxyMat(side))));
     const g = copy(src, ['position']).applyMatrix4(W);
@@ -262,6 +267,7 @@ export class ChunkMerge {
     const h = P.size.y * (pl.s ?? 1);
     const detail = h < DETAIL_MAX;
     if (detail && this.far) return; // (small detail isn't drawn that far out)
+    if (detail && this.low && !keepDetail(pl.x, pl.z)) return; // (and half of it on phones)
     const cast = !NO_SHADOW.has(pl.slot) && (!this.low || h >= CASTER_MIN);
     for (const part of P.parts) this.#part(part.geometry, part.material, placeMatrix(pl, part.matrix), { key, ink: part.outline && !NO_OUTLINE.has(pl.slot), cast, graded: part.graded, detail });
   }
@@ -307,7 +313,7 @@ export class ChunkMerge {
         m.receiveShadow = true;
         m.matrixAutoUpdate = false;
         group.add(m);
-        if (b.detail) this.tiles.push({ mesh: m, q: b.q, kind: 'detail' });
+        if (b.detail) this.tiles.push({ mesh: m, kind: 'detail', x0: this.x0 + (b.q & 1) * this.half, z0: this.z0 + (b.q >> 1) * this.half, size: this.half });
       }
       yield;
     }
@@ -319,7 +325,8 @@ export class ChunkMerge {
         h.raycast = () => {};
         h.matrixAutoUpdate = false;
         group.add(h);
-        this.tiles.push({ mesh: h, q, kind: 'ink' });
+        const s = this.half / 2;
+        this.tiles.push({ mesh: h, kind: 'ink', x0: this.x0 + (q % 4) * s, z0: this.z0 + Math.floor(q / 4) * s, size: s });
         yield;
       }
       for (const b of this.shadow.values()) {

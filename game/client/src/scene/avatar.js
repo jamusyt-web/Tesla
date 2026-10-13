@@ -11,8 +11,12 @@ const HIP = 0.84;
 const HEAD_Y = 1.9;
 const HEAD_S = 0.76;
 const HOL = OL / HEAD_S; // head children are scaled by HEAD_S; keep their ink line the same weight
-const sph = (r, ws = 18, hs = 14) => new THREE.SphereGeometry(r, ws, hs);
-const cyl = (rt, rb, h, s = 14) => new THREE.CylinderGeometry(rt, rb, h, s);
+// Phones draw heroes with a little less curve detail (setAvatarDetail).
+let DETAIL = 1;
+export const setAvatarDetail = (k) => (DETAIL = k);
+const seg = (n, min) => Math.max(min, Math.round(n * DETAIL));
+const sph = (r, ws = 18, hs = 14) => new THREE.SphereGeometry(r, seg(ws, 6), seg(hs, 4));
+const cyl = (rt, rb, h, s = 14) => new THREE.CylinderGeometry(rt, rb, h, seg(s, 6));
 const ease = (t) => 1 - Math.pow(1 - t, 3);
 const clamp01 = (t) => Math.max(0, Math.min(1, t));
 
@@ -315,12 +319,12 @@ export class Avatar {
       }
       return;
     }
-    const cap = M(new THREE.SphereGeometry(0.535, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.36));
+    const cap = M(new THREE.SphereGeometry(0.535, seg(24, 8), seg(14, 5), 0, Math.PI * 2, 0, Math.PI * 0.36));
     cap.position.y = 0.02;
     cap.rotation.x = -0.12;
     head.add(cap);
     const backLen = { spiky: 0.58, bob: 0.66, long: 0.8, bun: 0.6, ponytail: 0.6 }[c.hairStyle] || 0.6;
-    const back = M(new THREE.SphereGeometry(0.545, 24, 14, Math.PI, Math.PI, 0.1, Math.PI * backLen));
+    const back = M(new THREE.SphereGeometry(0.545, seg(24, 8), seg(14, 5), Math.PI, Math.PI, 0.1, Math.PI * backLen));
     head.add(back);
     // Fringe tufts across the forehead.
     const tufts = c.hairStyle === 'spiky' ? 5 : 4;
@@ -397,7 +401,7 @@ export class Avatar {
         head.add(p, gem);
       }
     } else if (c.hat === 'beanie') {
-      const dome = M(new THREE.SphereGeometry(0.56, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), '#8a3a2e');
+      const dome = M(new THREE.SphereGeometry(0.56, seg(20, 8), seg(12, 5), 0, Math.PI * 2, 0, Math.PI * 0.5), '#8a3a2e');
       dome.position.y = 0.08;
       const fold = M(new THREE.TorusGeometry(0.53, 0.07, 8, 24), '#d9cfb8');
       fold.rotation.x = Math.PI / 2;

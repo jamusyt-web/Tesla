@@ -1,10 +1,12 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mesh, toon, shade } from './toon.js';
 import * as assets from './assets.js';
 import { waterMaterial, seaMaterial, groundTexture } from './water.js';
 import { buildModular, buildGate } from './buildings.js';
 import { PROC_BUILDERS, buildWaystone } from './procprops.js';
 import { ChunkMerge, casters, disposeMerged } from './chunkmerge.js';
+import { mergeRigid } from './merge.js';
 import { CHUNK, COVER, scatterPoints, landDist } from './scatter.js';
 import { DUNGEONS } from '../../../shared/dungeon.js';
 import { biomeAt } from '../../../shared/places.js';
@@ -541,6 +543,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   sky.frustumCulled = false;
   root.add(sky);
   animated.push((dt, t, cam) => {
+    RIPPLE_TIME.value = t;
     sky.position.copy(cam.position);
     sky.scale.setScalar(Math.min(1, (cam.far - 2) / 400)); // inside the far plane
     if (scene.fog) sky.material.uniforms.fogc.value.copy(scene.fog.color);
@@ -668,7 +671,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     live(h) {
       if (h.view) return h.view;
       const ch = h.chunk;
-      if (!ch?.lod) return null;
+      if (!ch?.lod || h.type.kind === 'fish') return null; // (fishing spots are only ripples)
       const v = new NodeView(h.node, fx);
       if (!h.alive) v.setDead();
       v.hp = h.hp;
@@ -784,34 +787,44 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   // fishing spots (always animated, so always their own NodeView).
   function* buildFixed(ch) {
     const ctx = makeCtx(ch);
-    // Their shadows are cast by one shadow-only mesh, except for moving parts.
-    const shadows = new ChunkMerge({ low, shadowOnly: true, x0: ch.ci * CHUNK, z0: ch.cj * CHUNK, size: CHUNK });
     for (const [i, st] of STATICS.entries()) {
       if (st.merge) continue;
       for (const e of B.statics[i].get(ch.key) ?? []) {
         ch.phase = 'static';
         const obj = st.builder(e, ctx);
         if (obj) {
+          // Its shadow is cast by a shadow-only mesh of its own (so only the
+          // ones near you go into the shadow map), except for moving parts.
           obj.updateMatrixWorld(true);
-          shadows.object(obj);
+          const sh = new ChunkMerge({ low, shadowOnly: true, solid: true, x0: ch.ci * CHUNK, z0: ch.cj * CHUNK, size: CHUNK });
+          sh.object(obj);
           obj.traverse((o) => o.isMesh && o.castShadow && !liveUnder(o) && (o.castShadow = false));
-          ch.fixed.add(casters(obj, low));
+          ch.fixed.add(casters(obj, low), sh.finish());
+          // Its ink lines, to hide by distance.
+          obj.traverse((o) => {
+            if (!isHull(o)) return;
+            if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+            const c = o.geometry.boundingSphere.center.clone().applyMatrix4(o.matrixWorld);
+            ch.inks.push({ mesh: o, x: c.x, z: c.z, r: o.geometry.boundingSphere.radius * o.matrixWorld.getMaxScaleOnAxis() });
+          });
         }
         yield;
       }
     }
-    ch.phase = 'static-shadow';
-    yield* shadows.finishSteps();
-    ch.fixed.add(shadows.group);
+    const fish = [];
     for (const h of ch.nodes) {
       h.chunk = ch;
       if (h.type.kind === 'fish') {
-        const v = new NodeView(h.node, fx);
-        h.view = v;
-        h.permanent = true;
-        live.add(h);
-        ch.fixed.add(v.root);
-        ctx.pick(v.root);
+        // Fishing spots: a wide, flat tap target, and ripples (all of this
+        // chunk's in one mesh, below).
+        const pv = pickVolume(PICK_GEO, { node: h.node.id });
+        pv.position.set(h.node.x, -0.15, h.node.z);
+        pv.scale.set(1.4, 0.4, 1.4);
+        pv.matrixAutoUpdate = false;
+        pv.updateMatrix();
+        ch.fixed.add(pv);
+        ctx.pick(pv);
+        fish.push(h.node);
         continue;
       }
       const t = h.type;
@@ -824,6 +837,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       ch.fixed.add(pv);
       ctx.pick(pv);
     }
+    if (fish.length) ch.fixed.add(ripples(fish));
   }
 
   // The detail level's part: ground, grass, stepping stones, and everything
@@ -842,36 +856,41 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     const c = new THREE.Color();
     ch.phase = 'ground';
     if (near.lands.length) {
-      // Ground tile. Normals come from the height function, so neighbouring
-      // tiles shade identically along their shared edge.
-      const SEG = Math.round(CHUNK / (low ? 1.57 : 1.12) / (far ? 2 : 1));
-      const g = new THREE.PlaneGeometry(CHUNK, CHUNK, SEG, SEG);
-      g.rotateX(-Math.PI / 2);
-      g.translate(x0 + CHUNK / 2, 0, z0 + CHUNK / 2);
-      const pos = g.attributes.position;
-      const nor = g.attributes.normal;
-      const colors = new Float32Array(pos.count * 3);
-      const e = 0.5;
-      for (let i = 0; i < pos.count; i++) {
-        const x = pos.getX(i);
-        const z = pos.getZ(i);
-        pos.setY(i, heightAt(x, z, near));
-        const nx = heightAt(x - e, z, near) - heightAt(x + e, z, near);
-        const nz = heightAt(x, z - e, near) - heightAt(x, z + e, near);
-        const l = Math.hypot(nx, 2 * e, nz);
-        nor.setXYZ(i, nx / l, (2 * e) / l, nz / l);
-        colourAt(x, z, near, c);
-        colors[i * 3] = c.r;
-        colors[i * 3 + 1] = c.g;
-        colors[i * 3 + 2] = c.b;
-        if (i % 256 === 255) yield;
+      // Ground: near, a tile per quarter of the square (off-screen ones are
+      // skipped); far, one coarser tile. Normals come from the height
+      // function, so neighbouring tiles shade identically along their edges.
+      const n = far ? 1 : 2;
+      const H = CHUNK / n;
+      const SEG = Math.round(H / (low ? 1.57 : 1.12) / (far ? 2 : 1));
+      for (let q = 0; q < n * n; q++) {
+        const g = new THREE.PlaneGeometry(H, H, SEG, SEG);
+        g.rotateX(-Math.PI / 2);
+        g.translate(x0 + (q % n) * H + H / 2, 0, z0 + Math.floor(q / n) * H + H / 2);
+        const pos = g.attributes.position;
+        const nor = g.attributes.normal;
+        const colors = new Float32Array(pos.count * 3);
+        const e = 0.5;
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i);
+          const z = pos.getZ(i);
+          pos.setY(i, heightAt(x, z, near));
+          const nx = heightAt(x - e, z, near) - heightAt(x + e, z, near);
+          const nz = heightAt(x, z - e, near) - heightAt(x, z + e, near);
+          const l = Math.hypot(nx, 2 * e, nz);
+          nor.setXYZ(i, nx / l, (2 * e) / l, nz / l);
+          colourAt(x, z, near, c);
+          colors[i * 3] = c.r;
+          colors[i * 3 + 1] = c.g;
+          colors[i * 3 + 2] = c.b;
+          if (i % 256 === 255) yield;
+        }
+        g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        const ground = new THREE.Mesh(g, groundMatFor());
+        ground.receiveShadow = true;
+        ground.userData.ground = true;
+        group.add(freeze(ground));
+        ctx.pick(ground);
       }
-      g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      const ground = new THREE.Mesh(g, groundMatFor());
-      ground.receiveShadow = true;
-      ground.userData.ground = true;
-      group.add(freeze(ground));
-      ctx.pick(ground);
       yield;
 
       // Grass tufts everywhere that isn't paved, built on or wet (near only).
@@ -1022,8 +1041,6 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     ch.pending = null;
     ch.group.add(group);
     for (const h of ch.nodes) ctl.sync(h);
-    // Far chunks: no ink on the statics either.
-    ch.fixed.traverse((o) => isHull(o) && (o.visible = !far));
     town.rev++;
   }
 
@@ -1041,7 +1058,6 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       dropView(h);
       h.chunk = null;
       h.pick = null;
-      h.permanent = false;
     }
     for (const set of [ch, ch.lod, ch.pending]) {
       if (!set) continue;
@@ -1073,7 +1089,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
         const fixed = new THREE.Group();
         group.add(fixed);
         root.add(group);
-        const ch = { key, ci, cj, gap: d, pad, group, fixed, lod: null, pending: null, nodes: B.nodes.get(key) ?? [], ...blank() };
+        const ch = { key, ci, cj, gap: d, pad, group, fixed, lod: null, pending: null, nodes: B.nodes.get(key) ?? [], inks: [], ...blank() };
         ch.level = levelFor(d, null);
         ch.job = buildChunk(ch, ch.level);
         chunks.set(key, ch);
@@ -1134,7 +1150,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       for (const h of live) {
         const v = h.view;
         v.update(dt);
-        if (h.permanent || h.st || v.busy) h.idle = 0;
+        if (h.st || v.busy) h.idle = 0;
         else if ((h.idle += dt) > 1.2) {
           // Settled: back into the merged meshes.
           dropView(h);
@@ -1155,15 +1171,17 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
         busy = true;
       }
       if (busy) busy = pump(STEP_MS);
-      // Ink and small detail by quarter, by distance.
-      const H = CHUNK / 2;
+      // Ink and small detail by tile, and the statics' ink, by distance.
       for (const ch of chunks.values()) {
         for (const tl of ch.lod?.merge.tiles ?? []) {
-          const x0 = ch.ci * CHUNK + (tl.q & 1) * H;
-          const z0 = ch.cj * CHUNK + (tl.q >> 1) * H;
-          const d = Math.hypot(Math.max(0, x0 - fx0, fx0 - x0 - H), Math.max(0, z0 - fz0, fz0 - z0 - H));
+          const d = Math.hypot(Math.max(0, tl.x0 - fx0, fx0 - tl.x0 - tl.size), Math.max(0, tl.z0 - fz0, fz0 - tl.z0 - tl.size));
           const r = tl.kind === 'ink' ? INK : DETAIL;
           tl.mesh.visible = d <= (tl.mesh.visible ? r + 4 : r);
+        }
+        const near = ch.lod?.level === 'near';
+        for (const k of ch.inks) {
+          const d = Math.hypot(k.x - fx0, k.z - fz0) - k.r;
+          k.mesh.visible = near && d <= (k.mesh.visible ? INK + 4 : INK);
         }
       }
     },
@@ -1192,6 +1210,43 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       busy = true;
     },
   });
+}
+
+// Fishing spots' ripples: three rings spreading and fading, drawn by the
+// shader, every spot of a chunk in one mesh (a flat square per spot).
+const RIPPLE_TIME = { value: 0 };
+let rippleMat = null;
+function ripples(spots) {
+  rippleMat ??= new THREE.ShaderMaterial({
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { time: { value: 0 } }]),
+    vertexShader: `varying vec2 vP; varying float vSeed;
+      #include <fog_pars_vertex>
+      void main() { vP = (uv - 0.5) * 3.0; vSeed = fract((modelMatrix * vec4(position, 1.0)).x * 0.37);
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `uniform float time; varying vec2 vP; varying float vSeed;
+      #include <fog_pars_fragment>
+      void main() {
+        float d = length(vP), a = 0.0;
+        for (int i = 0; i < 3; i++) {
+          float k = fract(time * 0.5 + float(i) / 3.0 + vSeed);
+          float s = 0.4 + 1.6 * k;
+          a += smoothstep(0.47 * s, 0.5 * s, d) * (1.0 - smoothstep(0.62 * s, 0.65 * s, d)) * 0.7 * (1.0 - k);
+        }
+        if (a < 0.01) discard;
+        gl_FragColor = vec4(1.0, 1.0, 1.0, min(a, 1.0));
+        #include <fog_fragment>
+      }`,
+    transparent: true,
+    depthWrite: false,
+    fog: true,
+  });
+  rippleMat.uniforms.time = RIPPLE_TIME;
+  const geo = mergeGeometries(spots.map((n) => new THREE.PlaneGeometry(3, 3).rotateX(-Math.PI / 2).translate(n.x, 0.05, n.z)));
+  const m = new THREE.Mesh(geo, rippleMat);
+  m.raycast = () => {};
+  return freeze(m);
 }
 
 // Cover rules for a chunk: its biome's (by the chunk's middle), halved on low.
@@ -1240,7 +1295,7 @@ function fadeable(grp) {
 registerChunkStatic(
   () => BUILDINGS,
   (b, ctx) => {
-    const grp = buildModular(b, BUILDINGS.indexOf(b)) || buildHouse(b, mulberry32(hash(b.id)));
+    const grp = buildModular(b, BUILDINGS.indexOf(b)) || mergeRigid(buildHouse(b, mulberry32(hash(b.id))));
     freeze(grp);
     ctx.fade(grp);
     grp.traverse((o) => o.isMesh && (o.userData.building = b.id));
@@ -1377,6 +1432,7 @@ registerChunkStatic(
   () => STONES,
   (st, ctx) => {
     const ws = buildWaystone(st, { fx: ctx.fx, animate: ctx.animate });
+    mergeRigid(ws.group); // the stone in one mesh (+ ink); the runes and crystal move
     ws.group.position.set(st.x, 0, st.z);
     ws.group.rotation.y = st.rot ?? 0;
     ws.group.traverse((o) => {

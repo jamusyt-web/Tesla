@@ -534,8 +534,10 @@ export function findClip(actions, what) {
 
 // ── Modular building assembly ────────────────────────────────────────
 // items: [{ slot, p: [x,y,z], r: degrees, s: number|[x,y,z], tex?: url }]
-// Bakes every module into building space and merges by material, so a whole
-// house is ~2 meshes (+ its outline) instead of hundreds.
+// Bakes every module into building space. Opaque parts have their colours
+// baked into the vertices (material colour × palette texel, graded), so a
+// whole house is one or two meshes (+ its outline) instead of hundreds; see-
+// through or glowing parts keep their own material.
 const ATTRS = ['position', 'normal', 'uv'];
 function normalizeGeo(g) {
   let out = g.index ? g.toNonIndexed() : g.clone();
@@ -545,8 +547,11 @@ function normalizeGeo(g) {
   return out;
 }
 
+const _bc = new THREE.Color();
+const _bt = new THREE.Color();
 export function assemble(items, { castShadow = true } = {}) {
   const solids = new Map(); // key -> { mat, geos }
+  const baked = new Map(); // side → vertex-coloured geometries
   const hulls = [];
   const m4 = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -564,11 +569,29 @@ export function assemble(items, { castShadow = true } = {}) {
       const mtx = new THREE.Matrix4().multiplyMatrices(m4, o.matrixWorld);
       const src = Array.isArray(o.material) ? o.material[0] : o.material;
       const tex = it.tex && textures.get(it.tex);
-      const key = src.uuid + (tex ? it.tex : '');
-      if (!solids.has(key)) solids.set(key, { src, tex, geos: [] });
+      const m = toToon(src, null, {});
       const g = normalizeGeo(o.geometry);
       g.applyMatrix4(mtx);
-      solids.get(key).geos.push(g);
+      if (m.transparent || m.emissiveMap || (m.emissive?.getHex() && m.emissiveIntensity >= 0.15)) {
+        const key = src.uuid + (tex ? it.tex : '');
+        if (!solids.has(key)) solids.set(key, { src, tex, geos: [] });
+        solids.get(key).geos.push(g);
+      } else {
+        const map = tex || m.map;
+        const uv = g.attributes.uv;
+        const n = g.attributes.position.count;
+        const col = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          _bc.copy(m.color);
+          if (map) _bc.multiply(texel(map, uv.getX(i), uv.getY(i), _bt));
+          gradeColor(_bc);
+          (col[i * 3] = _bc.r), (col[i * 3 + 1] = _bc.g), (col[i * 3 + 2] = _bc.b);
+        }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        g.deleteAttribute('uv');
+        const side = m.side === THREE.DoubleSide ? THREE.DoubleSide : THREE.FrontSide;
+        (baked.get(side) ?? baked.set(side, []).get(side)).push(g);
+      }
       if (p.def.outline !== false) {
         const h = hullGeometry(o.geometry).clone();
         h.applyMatrix4(mtx);
@@ -577,6 +600,12 @@ export function assemble(items, { castShadow = true } = {}) {
     });
   }
   const group = new THREE.Group();
+  for (const [side, geos] of baked) {
+    const mesh = new THREE.Mesh(mergeGeometries(geos), toon('#ffffff', { vertexColors: true, ...(side === THREE.DoubleSide ? { side } : {}) }));
+    mesh.castShadow = castShadow;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
   for (const { src, tex, geos } of solids.values()) {
     const geo = mergeGeometries(geos);
     if (!geo) continue;

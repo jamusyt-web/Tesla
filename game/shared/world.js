@@ -49,7 +49,7 @@ export function mulberry32(seed) {
 //   lands     [{ id, x, z, r }]         land: overlapping circles make any coastline
 //   spawn     { x, z }                  where new heroes appear
 //   regions   [{ id, name, tier, kind, x, z, r }]   towns / areas, tier 1 = starter
-//   buildings [{ id, label, action, x, z, w, d, face, deco, ... }]
+//   buildings [{ id, label, action, x, z, w, d, face, deco, recipe?, ... }]   recipe: whose look to build (default: the id)
 //   gates     [{ id, label, x, z, width, scale }]   castle-wall gatehouses
 //   plazas, fountains [{ id, x, z, r }]
 //   lakes     [{ id, x, z, r, deep, kind? }]   water; fishing spots within `deep` are deep water; kind 'ice' is frozen

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Avatar } from './scene/avatar.js';
+import { Avatar, setAvatarDetail } from './scene/avatar.js';
 import { createRenderer, setupPasses, renderFrame, warm, warmModels, updateCamera, fadeOccluders, markShadows } from './scene/render.js';
 import { ensureGroup, onGroup } from './scene/assets.js';
 import { GROUPS } from './scene/manifest/index.js';
@@ -111,6 +111,7 @@ export class GameClient {
 
     const low = isLow();
     this.low = low;
+    if (low) setAvatarDetail(0.7);
     const renderer = createRenderer(low);
     this.renderer = renderer;
     this.el = h('div#game');

@@ -8,8 +8,9 @@
 //   nearWater  only on lake shores
 //   biome      only where near.biomeAt(x, z) is this biome (when given)
 import { mulberry32 } from '../../../shared/world.js';
+import { CHUNK } from '../../../shared/budget.js';
 
-export const CHUNK = 96; // metres: the side of a streaming square
+export { CHUNK }; // metres: the side of a streaming chunk
 
 // biome id → cover rules. Filled from the biome definitions; meadow has none,
 // so Hearthvale keeps exactly its hand-placed cover.

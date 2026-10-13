@@ -211,7 +211,8 @@ const COTTAGE_TEX = ['cot_a', 'cot_b', 'cot_c', 'cot_d', 'cot_e'];
 
 export const canBuild = () => assets.hasModules(FTK, MODULE_PACKS[FTK]);
 
-// Build a game building (a map `buildings` entry) as one group.
+// Build a game building (a map `buildings` entry) as one group. Its recipe is
+// its `recipe` field, else its id (workshop, shop, townhall, market).
 // Returns null if the kit isn't loaded (caller falls back to procedural).
 export function buildModular(b, index) {
   if (!canBuild()) return null;
@@ -219,7 +220,7 @@ export function buildModular(b, index) {
   const swap = b.face === 'e' || b.face === 'w';
   const W = swap ? b.d : b.w;
   const D = swap ? b.w : b.d;
-  const made = b.deco ? cottage(W, D, TEX[COTTAGE_TEX[index % COTTAGE_TEX.length]], index) : RECIPES[b.id]?.(W, D);
+  const made = b.deco ? cottage(W, D, TEX[COTTAGE_TEX[index % COTTAGE_TEX.length]], index) : RECIPES[b.recipe ?? b.id]?.(W, D);
   if (!made) return null;
   const mesh = assets.assemble(made.b.items);
   const [sx, sy, sz] = made.b.S;
