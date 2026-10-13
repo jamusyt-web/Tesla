@@ -229,7 +229,7 @@ export class CraftGame {
   }
 
   // The result card (server-graded).
-  showResult(res, { onAgain, onEquip } = {}) {
+  showResult(res, { onAgain, onEquip, onSell, useIn } = {}) {
     const o = res.out;
     const it = ITEMS[o.item];
     const pips = h('div.craft-pips.big', ...res.steps.map((q) => h('i.q' + q)));
@@ -240,7 +240,7 @@ export class CraftGame {
       h('div.craft-icon.done', iconEl(o.item, '72px')),
       pips,
       res.mastery && this.r && o.q === 0 && ['material', 'consumable'].includes(ITEMS[this.r.out].cat) ? h('div.muted', { style: { textAlign: 'center' } }, res.mastery.quick ? '⚡ Quick crafting unlocked for this recipe' : `Make it ${Math.max(0, 3 - res.mastery.n)} more time${3 - res.mastery.n === 1 ? '' : 's'} at grade B+ to unlock Quick`) : null,
-      h('div.row', { style: { justifyContent: 'center', marginTop: '8px', flexWrap: 'wrap' } }, onAgain ? h('button.btn.green.small', { on: { click: (e) => (e.stopPropagation(), onAgain()) } }, 'Again') : null, onEquip && (it.slot || it.tool) ? h('button.btn.blue.small', { on: { click: (e) => (e.stopPropagation(), onEquip(o.item)) } }, 'Equip') : null, h('button.btn.small', { on: { click: (e) => (e.stopPropagation(), this.close()) } }, 'Done')),
+      h('div.row', { style: { justifyContent: 'center', marginTop: '8px', flexWrap: 'wrap' } }, onAgain ? h('button.btn.green.small', { on: { click: (e) => (e.stopPropagation(), onAgain()) } }, 'Again') : null, onEquip && (it.slot || it.tool) ? h('button.btn.blue.small', { on: { click: (e) => (e.stopPropagation(), onEquip(o.item)) } }, 'Equip') : null, onSell ? h('button.btn.small', { on: { click: (e) => (e.stopPropagation(), onSell.run()) } }, onSell.label) : null, useIn ? h('button.btn.small', { on: { click: (e) => (e.stopPropagation(), useIn.run()) } }, useIn.label) : null, h('button.btn.small', { on: { click: (e) => (e.stopPropagation(), this.close()) } }, 'Done')),
     );
     this.card.style.borderColor = RARITY[it.rarity]?.color || '';
     this.scrim.classList.add('result');

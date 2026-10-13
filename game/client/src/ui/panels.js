@@ -10,6 +10,12 @@ import { HERO_PANELS } from './hero-panel.js';
 import { MARKET_PANELS } from './market.js';
 import { BOARD_PANELS } from './board.js';
 import { BATTLE_PANELS } from './battle-panels.js';
+import { ALMANAC_PANELS } from './almanac.js';
+import { DIGEST_PANELS } from './digest.js';
+import { SKILL_PANELS } from './skills-panel.js';
+import { JOURNAL_PANELS } from './journal.js';
+import { renderEcon, renderEngage } from './owner.js';
+import { REP_RANKS } from '../../../shared/rep.js';
 import { glyph } from './glyphs.js';
 import { townBuilding } from '../../../shared/places.js';
 import { doorPoint } from '../../../shared/world.js';
@@ -21,7 +27,7 @@ export { iconEl }; // (other UI files import it from here)
 
 // Every panel by name: fn.call(panels, c, args) fills panel c. The Workshop
 // and Town Hall live in this file (p_craft, p_townhall); the rest in their own.
-const PANELS = { ...HERO_PANELS, ...MARKET_PANELS, ...BOARD_PANELS, ...BATTLE_PANELS, ...SHOP_PANELS, ...DUNGEON_PANELS };
+const PANELS = { ...HERO_PANELS, ...MARKET_PANELS, ...BOARD_PANELS, ...BATTLE_PANELS, ...SHOP_PANELS, ...DUNGEON_PANELS, ...ALMANAC_PANELS, ...DIGEST_PANELS, ...SKILL_PANELS, ...JOURNAL_PANELS };
 
 // Add panels from another module ({ name: fn }); each name once.
 export function registerPanels(table) {
@@ -48,7 +54,7 @@ export class Panels {
     const titleEl = h('h3');
     const place = this.#placeFor(name, args);
     const walk = place ? h('button.walk', { title: `Walk to the ${place.label}`, on: { click: () => (this.close(), this.hud.travel(place.id)) } }, glyph('run'), h('span', 'Walk there')) : null;
-    const panel = h('div.panel' + (['profile', 'result', 'dleave', 'dloot'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, walk, h('button.close', { 'aria-label': 'Close', on: { click: () => this.close() } }, '✕')), body);
+    const panel = h('div.panel' + (['profile', 'result', 'dleave', 'dloot', 'lore'].includes(name) ? '.narrow' : ''), h('div.panel-head', titleEl, walk, h('button.close', { 'aria-label': 'Close', on: { click: () => this.close() } }, '✕')), body);
     const scrim = h('div.scrim', { on: { pointerdown: (e) => e.target === scrim && this.close() } }, panel);
     this.hud.el.append(scrim);
     this.cur = { name, scrim, body, titleEl, args, refresh: null, onClose: null };
@@ -199,7 +205,10 @@ export class Panels {
     let tab = args.tab || 'online';
     let info = null;
     let perf = null;
-    const tabs = [['online', 'Online'], ['jobs', 'Jobs'], ['shops', 'Shops'], ['leaders', 'Leaders'], ['channels', 'Channels'], ['invites', 'Invites'], ...(this.hud.me.admin ? [['perf', 'Performance']] : [])];
+    let econ = null;
+    let engage = null;
+    let standing = null;
+    const tabs = [['online', 'Online'], ['standing', 'Standing'], ['jobs', 'Jobs'], ['shops', 'Shops'], ['leaders', 'Leaders'], ['channels', 'Channels'], ['invites', 'Invites'], ...(this.hud.me.admin ? [['perf', 'Performance'], ['econ', 'Economy'], ['engage', 'Engagement']] : [])];
     const render = () => {
       clear(c.body);
       if (this.hud.me.admin)
@@ -241,6 +250,31 @@ export class Panels {
             c.body.append(
               h('div.rowcard', h('div.ic', r.device.endsWith('-low') ? '📱' : '💻'), h('div.grow', h('div.t', `${r.region} · ${r.device.endsWith('-low') ? 'phone' : 'computer'} ${r.device.split('-')[0]}`), h('div.s', `${r.fps50} fps typical, ${r.fps5} in the worst moments (lowest ${r.fps5min}) · ${fmt(r.draws95)} draws · ${fmt(r.tris95)} triangles · loads in ${(r.loadMs / 1000).toFixed(1)} s · ${r.n} reports`))),
             );
+      } else if (tab === 'standing') {
+        // Your reputation in each town, curios to hand in, skills.
+        c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, 'Orders, the Big Order, quests and journal pages earn you standing in a town.'));
+        if (!standing) {
+          c.body.append(h('div.empty', 'Loading…'));
+          this.sock.rpc('rep.get').then((r) => ((standing = r), render())).catch((e) => this.hud.toast(e.message, 'err'));
+        } else {
+          const towns = Object.entries(standing);
+          if (!towns.length) c.body.append(h('div.empty', 'No standing anywhere yet. Fill an order on the Order Board to start.'));
+          for (const [t, v] of towns)
+            c.body.append(h('div.rowcard', h('div.ic', '🏅'), h('div.grow', h('div.t', `${t[0].toUpperCase() + t.slice(1)}: ${v.name}`), h('div.s', v.next ? `${v.points} / ${v.next} to ${REP_RANKS.find((r) => r.at === v.next)?.name}` : `${v.points} points: the highest rank`))));
+        }
+        const curios = Object.keys(this.me.inv ?? {}).filter((id) => ITEMS[id]?.tag === 'curio' && this.me.inv[id] > 0);
+        if (curios.length) c.body.append(h('div.rowcard', h('div.ic', '✨'), h('div.grow', h('div.t', 'Curios to hand in'), h('div.s', curios.map((id) => ITEMS[id].name).join(', '))), h('button.btn.small.green', { on: { click: () => this.rpc('curio.return').then((r) => (this.hud.toast(`The Town Hall thanks you: +${r.rep} standing.`, 'gold'), (standing = null), render())) } }, 'Hand in')));
+        c.body.append(h('button.btn', { style: { marginTop: '8px' }, on: { click: () => this.open('skills') } }, 'Skills and level-40 choices'));
+      } else if (tab === 'econ') {
+        if (!econ) {
+          c.body.append(h('div.empty', 'Loading…'));
+          this.sock.rpc('owner.econ', { days: 7 }).then((r) => ((econ = r), render())).catch((e) => this.hud.toast(e.message, 'err'));
+        } else renderEcon.call(this, c.body, econ, () => ((econ = null), render()));
+      } else if (tab === 'engage') {
+        if (!engage) {
+          c.body.append(h('div.empty', 'Loading…'));
+          this.sock.rpc('owner.engage', { days: 7 }).then((r) => ((engage = r), render())).catch((e) => this.hud.toast(e.message, 'err'));
+        } else renderEngage.call(this, c.body, engage);
       } else if (tab === 'invites') {
         c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, 'Hearthvale is invite-only. Each hero can invite up to 5 friends.'));
         for (const inv of info.invites)

@@ -178,10 +178,9 @@ export function suggest(state, now = Date.now()) {
   const found = state.journal?.found ?? new Set();
   const seen = state.journal?.seen ?? new Set();
   const page = (state.journal?.pages ?? []).find((p) => p.id === hero.region);
-  for (const l of LANDMARKS) {
-    if (found.has(l.id)) continue;
+  const near = LANDMARKS.filter((l) => !found.has(l.id) && dist(pos, l) <= 150).sort((a, b) => dist(pos, a) - dist(pos, b)).slice(0, 2); // the nearest two
+  for (const l of near) {
     const d = dist(pos, l);
-    if (d > 150) continue;
     add({ id: `lm:${l.id}`, src: 'landmark', text: seen.has(l.id) ? `Find ${l.name}, ${bearing(pos, l)}` : `Something to find, ${bearing(pos, l)}`, why: 'Discover', target: { kind: 'point', x: l.x, z: l.z }, score: (page?.pct ?? 0) < 25 ? SCORE.landmarkNew - d / 30 : SCORE.landmark });
   }
   // A page nearly done.

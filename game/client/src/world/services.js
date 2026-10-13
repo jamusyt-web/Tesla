@@ -4,13 +4,18 @@
 // right here, which today only the crypt offers). Each takes the GameClient g.
 import * as THREE from 'three';
 import { CraftGame } from '../ui/craftgame.js';
-import { RECIPE_BY_ID } from '../../../shared/recipes.js';
-import { spotsOf, stationPos } from '../../../shared/stations.js';
+import { RECIPE_BY_ID, RECIPES } from '../../../shared/recipes.js';
+import { spotsOf, stationPos, inYard } from '../../../shared/stations.js';
 import { STATIONS } from '../../../shared/crafting.js';
 import { ITEMS } from '../../../shared/items.js';
-import { BUILDINGS, GATE, PROPS, doorPoint, stoneById, stoneFront, STONE_RANGE, ENTRANCES, entranceFront } from '../../../shared/world.js';
+import { BUILDINGS, GATE, PROPS, STONES, LANDMARKS, NODE_TYPES, FISH_RANGE, doorPoint, stoneById, stoneFront, STONE_RANGE, ENTRANCES, entranceFront } from '../../../shared/world.js';
 import { ENTRANCE_RANGE, word } from '../../../shared/dungeon.js';
 import { passageAt, passageOpen, passageNeeds } from '../../../shared/travel.js';
+import { LANDMARK_INFO, LANDMARK_RANGE } from '../../../shared/journal.js';
+import { townBuilding, townAt } from '../../../shared/places.js';
+import { MONSTERS } from '../../../shared/monsters.js';
+import { levelFromXp } from '../../../shared/skills.js';
+import { pickContext } from '../../../shared/goals.js';
 
 // Walk to the recipe's station, then make it by hand.
 export function goCraft(g, recipe, batch = 1) {
@@ -87,9 +92,15 @@ export function craftDone(g, res, cr) {
   if (res.xp) g.hud.onXp(res.xp);
   const cg = g.hud.craftGame;
   if (!cg) return g.hud.toast(`${res.out.qty}× ${ITEMS[res.out.item].name} (grade ${res.grade})`, 'good');
+  // What next: sell them to this town's merchant, or the recipe they go into.
+  const out = res.out;
+  const qty = g.hud.me.inv?.[out.item] ?? out.qty;
+  const use = RECIPES.find((r) => r.in[out.item] && !r.town && (g.hud.me.inv?.[out.item] ?? 0) >= r.in[out.item]);
   cg.showResult(res, {
     onAgain: cr ? () => (cg.close(), g.goCraft(cr.recipe, cr.batch)) : null,
     onEquip: (id) => g.sock.rpc('equip', { item: id }).then(() => g.hud.toast(`Equipped ${ITEMS[id].name}!`, 'good')).catch((e) => g.hud.toast(e.message, 'err')),
+    onSell: ITEMS[out.item]?.cat !== 'gear' && ITEMS[out.item]?.cat !== 'tool' ? { label: `Sell ${qty} here`, run: () => g.sock.rpc('npcSell', { item: out.item, qty }).then((r) => (g.hud.toast(`Sold ${qty}× ${ITEMS[out.item].name}: +${r.gold} 🪙`, 'gold'), cg.close())).catch((e) => g.hud.toast(e.message, 'err')) } : null,
+    useIn: use ? { label: `Make ${ITEMS[use.out]?.name}`, run: () => (cg.close(), g.goCraft(use.id)) } : null,
   });
 }
 
@@ -204,15 +215,117 @@ export const travelHome = (g) => trip(g, 'travel.home', {}, (r) => g.hud.toast(`
 export const travelToMember = (g, member) => trip(g, 'travel.party', { member }, (r) => g.hud.toast(`Travelled to ${stoneById(r.to)?.name ?? 'the waystone'} (−${r.fee + (r.toll ?? 0)} 🪙)`, 'gold'));
 export const usePassage = (g, id) => trip(g, 'passage.use', { id }, () => {});
 
-// Out in the world: hop through the passage you're standing at. Without
-// its skill or kit the button shows, greyed, what it takes.
+// Out in the world (SPEC §5.3): the context button's rules, first match
+// wins. It always offers something: last of all, the Compass's top goal.
 const PASSAGE_VERB = { squeeze: 'Squeeze through', climb: 'Climb', swim: 'Swim across' };
-function worldAction(g, L) {
+const VERB = { tree: 'Chop', rock: 'Mine', herb: 'Pick', fish: 'Cast at' };
+function worldAction(g, L, cur) {
+  const me = g.hud.me;
+  const slack = (key) => (cur === key ? 1.5 : 0); // a little hysteresis for the one showing
+  const d = (x, z) => Math.hypot(x - L.x, z - L.z);
+  const c = [];
+  // 1. A friend's fight nearby.
+  for (const b of g.battles.values()) {
+    const mv = g.mobs.get(b.mob);
+    if (!mv || b.fighters.length >= 4 || b.fighters.some((f) => f.id === g.myId) || d(mv.x, mv.z) > 20 + slack('fight')) continue;
+    c.push({ rule: 'fight', d: d(mv.x, mv.z), label: `Join ${b.fighters[0]?.name ?? 'the'}'s fight`, glyph: 'swords', fn: () => g.goMob(b.mob) });
+  }
+  // 3. Gold or goods waiting right here.
+  const shop = townBuilding('shop', L.x, L.z);
+  const till = me.shop?.till ?? g.hud.till ?? 0;
+  if (shop && till > 0) {
+    const [dx, dz] = doorPoint(shop);
+    if (d(dx, dz) < 6 + slack('collect')) c.push({ rule: 'collect', d: d(dx, dz), label: `Collect ${till} 🪙`, glyph: 'coins', fn: () => g.enterShop(g.myId) });
+  }
+  const mk = townBuilding('market', L.x, L.z);
+  const town = townAt(L.x, L.z)?.id;
+  if (mk && town && (me.storage?.[town] ?? 0) > 0) {
+    const [dx, dz] = doorPoint(mk);
+    if (d(dx, dz) < 6 + slack('collect')) c.push({ rule: 'collect', d: d(dx, dz), label: 'Collect storage', glyph: 'bag', fn: () => g.sock.rpc('storage.collect').then((r) => g.hud.toast(`Collected ${r.moved?.length ?? 0} kinds of goods.`, 'good')).catch((e) => g.hud.toast(e.message, 'err')) });
+  }
+  // 4. Something to hand in at the board you're at.
+  const board = PROPS.filter((p) => p.slot === 'proc_job_board').find((p) => d(p.x, p.z) < 5 + slack('deliver'));
+  if (board) {
+    const ready = g.hud.goal.compass?.state().ready.filter((r) => r.kind === 'order') ?? [];
+    c.push({ rule: 'deliver', d: d(board.x, board.z), label: ready.length ? `Hand in: ${ready[0].text.replace(/^Hand in at the Order Board: /, '')}` : 'Read the board', glyph: 'scroll', fn: () => g.hud.panels.open('jobs', { tab: 'orders' }) });
+  }
+  // 5. A passage.
   const at = passageAt(L.x, L.z);
-  if (!at) return null;
-  const p = at.p;
-  if (!passageOpen(p, g.hud.me.skills, g.hud.me.inv)) return { label: passageNeeds(p), glyph: 'lock', off: true, fn: () => g.hud.toast(`You need ${passageNeeds(p)}.`, 'err') };
-  return { label: PASSAGE_VERB[p.kind] ?? 'Go through', glyph: 'run', fn: () => usePassage(g, p.id) };
+  if (at) {
+    const p = at.p;
+    if (!passageOpen(p, me.skills, me.inv)) c.push({ rule: 'passage', d: 0, label: passageNeeds(p), glyph: 'lock', off: true, fn: () => g.hud.toast(`You need ${passageNeeds(p)}.`, 'err') });
+    else c.push({ rule: 'passage', d: 0, label: PASSAGE_VERB[p.kind] ?? 'Go through', glyph: 'run', fn: () => usePassage(g, p.id) });
+  }
+  // 6. A waystone: travel.
+  for (const st of STONES) if (d(st.x, st.z) < STONE_RANGE + slack('stone')) c.push({ rule: 'stone', d: d(st.x, st.z), label: 'Travel', glyph: 'waystone', fn: () => g.hud.worldMap.open({}) });
+  // 7. A dungeon door.
+  for (const e of ENTRANCES) {
+    const [fx, fz] = entranceFront(e);
+    if (d(fx, fz) < ENTRANCE_RANGE + slack('door')) c.push({ rule: 'door', d: d(fx, fz), label: `Enter the ${word(e.kind)}`, glyph: 'crypt', fn: () => g.goCrypt(e.id) });
+  }
+  // 8. A landmark: open, look, read, pray, talk…
+  for (const lm of LANDMARKS) {
+    const info = LANDMARK_INFO[lm.kind];
+    const dd = d(lm.x, lm.z);
+    if (!info?.verb || dd > LANDMARK_RANGE + (lm.r ?? 0) * 0.25 + slack('landmark')) continue;
+    const wait = g.hud.goal.compass?.landmarkWait?.[lm.id];
+    c.push({ rule: 'landmark', d: dd, label: wait ? `${lm.name}: come back later` : info.verb, glyph: info.glyph, off: !!wait, fn: () => (wait ? g.hud.toast(wait) : useLandmark(g, lm)) });
+  }
+  // 9. The Compass's recipe, in a yard.
+  const goal = g.hud.goal.shown;
+  if (goal?.recipe && inYard(L.x, L.z)) c.push({ rule: 'craft', d: 0, label: `Make ${ITEMS[RECIPE_BY_ID[goal.recipe]?.out]?.name ?? 'it'}`, glyph: 'hammer', fn: () => goCraft(g, goal.recipe) });
+  // 10. Gathering: the next one like the one you just felled, else what's in reach.
+  const last = g.lastBroke && Date.now() - g.lastBroke.at < 20_000 ? g.lastBroke : null;
+  let node = null;
+  for (const n of g.allNodes()) {
+    const t = NODE_TYPES[n.type];
+    if (!t || t.kind === 'fish' || !g.town.nodes.get(n.id)?.alive) continue;
+    const dd = d(n.x, n.z);
+    const same = last && n.type === last.type;
+    if (dd > (same ? 30 : 12) + slack('node')) continue;
+    if (levelFromXp(me.skills?.[t.skill] || 0) < t.lvl) continue;
+    const k = (same ? 0 : 1000) + dd;
+    if (!node || k < node.k) node = { n, t, dd, k, same };
+  }
+  if (node) c.push({ rule: 'node', d: node.dd, label: node.same ? `Next ${node.t.name} (${Math.round(node.dd)} m)` : `${VERB[node.t.kind] ?? 'Gather'} ${node.t.name}`, glyph: node.t.kind === 'tree' ? 'pine' : node.t.kind === 'rock' ? 'pick' : 'herbs', fn: () => g.goNode(node.n.id) });
+  // 11. Fishing: cast (again).
+  const spot = g.nearestNode('fish_spot');
+  if (spot && d(spot.x, spot.z) < FISH_RANGE + 2 + slack('cast')) c.push({ rule: 'cast', d: d(spot.x, spot.z), label: g.lastFish && Date.now() - g.lastFish < 30_000 ? 'Cast again' : 'Cast', glyph: 'rod', fn: () => g.goNode(spot.id) });
+  // 12. A monster you can take on.
+  const con = g.conLevel?.() ?? me.level ?? 1;
+  for (const m of g.mobs.values()) {
+    if (m.state === 'dead' || m.battle) continue;
+    const dd = d(m.x, m.z);
+    const lvl = MONSTERS[m.type]?.lvl ?? 1;
+    if (dd > 15 + slack('monster') || lvl > con + 3) continue;
+    c.push({ rule: 'monster', d: dd, label: `Fight ${MONSTERS[m.type]?.name ?? m.type}`, glyph: 'swords', fn: () => g.goMob(m.id) });
+  }
+  // 13. The Compass's top goal.
+  if (goal) c.push({ rule: 'compass', d: 0, label: `→ ${goal.text.replace(/^[^:]*\d+\/\d+: /, '')}`, glyph: 'compass', fn: () => g.hud.goal.take(goal) });
+  const best = pickContext(c);
+  return best ? { ...best, key: best.rule } : { rule: 'compass', key: 'compass', label: 'Look around', glyph: 'compass', fn: () => g.hud.toggleMap() };
+}
+
+// Use a landmark, and show what it gave.
+export async function useLandmark(g, lm) {
+  try {
+    const r = await g.sock.rpc('landmark.use', { id: lm.id });
+    const C = g.hud.goal.compass;
+    C?.markUsed?.(lm.id, r);
+    if (r.kind === 'vista') {
+      g.lookToward?.(r.look ?? 0);
+      for (const id of r.pins ?? []) C?.seen.add(id);
+      g.hud.toast(`You can see the whole region from here: ${r.pins?.length ?? 0} places marked on your map.`, 'good');
+    }
+    const lootText = r.loot ? [r.loot.gold ? `${r.loot.gold} 🪙` : null, ...Object.entries(r.loot.items ?? {}).map(([id, n]) => `${n}× ${ITEMS[id]?.name ?? id}`)].filter(Boolean).join(', ') : '';
+    if (r.kind === 'cache') g.hud.toast(`${r.glimmer ? 'A glimmering cache! ' : ''}${lootText || 'Empty'}`, 'gold');
+    if (r.kind === 'shrine') g.hud.toast("Wayfarer's Blessing: +15% walk speed for 10 minutes.", 'good');
+    if (r.lore || r.lines || r.page) g.hud.panels.open('lore', { name: r.name, lore: r.lore, lines: r.lines, loot: lootText, page: r.page });
+    else if (lootText && r.kind !== 'cache') g.hud.toast(lootText, 'gold');
+    if (r.atlasDone) g.hud.levelUp('Cartographer!', "Ysolde's Atlas is complete.");
+  } catch (e) {
+    g.hud.toast(e.message, 'err');
+  }
 }
 
 // Server owners: jump anywhere on land (to check on building work).
@@ -264,11 +377,11 @@ export function guideToCrypt(g, kind = 'hollow_crypt') {
 }
 
 // The best thing to do right here (the round button and E/Space).
-export function contextAction(g) {
+export function contextAction(g, cur = null) {
   const v = g.dungeon;
   const L = g.me?.local;
   if (!L || g.battle) return null;
-  if (!v) return worldAction(g, L);
+  if (!v) return g.room ? null : worldAction(g, L, cur);
   const room = g.myRoom();
   // A friend fighting in this room: join them.
   for (const b of g.battles.values()) {

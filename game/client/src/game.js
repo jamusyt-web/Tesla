@@ -15,7 +15,8 @@ import { Townsfolk } from './scene/townsfolk.js';
 import { RoomView } from './room.js';
 import { Labels } from './ui/labels.js';
 import { DungeonView } from './scene/dungeon.js';
-import { goCraft, craftDone, resumeCraft, goBuilding, goBoard, goStone, travelTo, travelHome, travelToMember, ownerTeleport, goCrypt, enterCrypt, guideToCrypt, contextAction } from './world/services.js';
+import { goCraft, craftDone, resumeCraft, goBuilding, goBoard, goStone, travelTo, travelHome, travelToMember, ownerTeleport, goCrypt, enterCrypt, guideToCrypt, contextAction, useLandmark } from './world/services.js';
+import './scene/landmarks.js'; // (registers the landmarks with the chunk streamer)
 import { glyph } from './ui/glyphs.js';
 import { stationPos } from '../../shared/stations.js';
 import { h } from './util/dom.js';
@@ -25,7 +26,7 @@ import { ITEMS } from '../../shared/items.js';
 import { MONSTERS } from '../../shared/monsters.js';
 import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
-  NODES, buildColliders, buildRoads, NavGrid, stepPath, MOVE_SPEED, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById, MAP,
+  NODES, buildColliders, buildRoads, NavGrid, stepPath, MOVE_SPEED, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById, MAP, LANDMARKS,
 } from '../../shared/world.js';
 import { USE_RANGE, DUNGEONS } from '../../shared/dungeon.js';
 
@@ -243,8 +244,35 @@ export class GameClient {
   guideToCrypt(kind) {
     return guideToCrypt(this, kind);
   }
-  contextAction() {
-    return contextAction(this);
+  contextAction(cur = null) {
+    return contextAction(this, cur);
+  }
+  // Walk up to a landmark and use it (open the cache, take in the view…).
+  goLandmark(id) {
+    const lm = LANDMARKS.find((l) => l.id === id);
+    if (!lm || this.battle) return;
+    if (this.dungeon) return this.underground();
+    const L = this.me.local;
+    const use = () => useLandmark(this, lm);
+    if (Math.hypot(L.x - lm.x, L.z - lm.z) < 3.5) return use();
+    this.stopGather();
+    const dx = L.x - lm.x;
+    const dz = L.z - lm.z;
+    const d = Math.hypot(dx, dz) || 1;
+    if (!this.walkTo(lm.x + (dx / d) * 2, lm.z + (dz / d) * 2, true, use)) this.hud.toast("Can't reach that.");
+  }
+  // Every gathering node on the map (for the context button).
+  allNodes() {
+    return STATIC.nodes.values();
+  }
+  // The level monsters are compared against (name colours, "Fight" offers).
+  conLevel() {
+    return this.#conLevel();
+  }
+  // Turn the camera to look a way (a view's landmark): a slow pan.
+  lookToward(rot) {
+    if (!this.cam) return;
+    this.cam.yaw = rot + Math.PI;
   }
 
 
@@ -841,6 +869,7 @@ export class GameClient {
       if (u.station) return { kind: 'station', id: u.station, point: hit.point };
       if (u.stone) return { kind: 'stone', id: u.stone, point: hit.point };
       if (u.crypt) return { kind: 'crypt', id: u.crypt, point: hit.point };
+      if (u.landmark) return { kind: 'landmark', id: u.landmark, point: hit.point };
       if (u.dtap) return { kind: 'dtap', what: u.dtap, point: hit.point };
       if (u.tap) return { kind: 'tap', what: u.tap, point: hit.point };
       if (u.building) return { kind: 'building', id: u.building, point: hit.point };
@@ -879,6 +908,7 @@ export class GameClient {
     if (hit.kind === 'station') return this.hud.panels.open('craft', { station: hit.id });
     if (hit.kind === 'stone') return this.goStone(hit.id, { openMap: true });
     if (hit.kind === 'crypt') return this.goCrypt(hit.id);
+    if (hit.kind === 'landmark') return this.goLandmark(hit.id);
     if (hit.kind === 'dtap') return this.useThing(hit.what);
     if (hit.kind === 'tap' && hit.what === 'jobs') return this.goBoard(null, hit.point);
     if (hit.kind === 'npc') {
@@ -903,8 +933,8 @@ export class GameClient {
     const L = this.me?.local;
     if (!L || this.battle) return;
     if (this.dungeon) return this.contextAction()?.fn();
-    const ctx = this.contextAction();
-    if (ctx && !ctx.off) return ctx.fn();
+    const ctx = this.hud.context.ctx ?? this.contextAction();
+    if (ctx && !ctx.off) return this.hud.context.ctx ? this.hud.context.press() : ctx.fn();
     let best = null;
     for (const n of STATIC.nodes.values()) {
       const t = NODE_TYPES[n.type];
@@ -1115,6 +1145,8 @@ export class GameClient {
 
   onLoot(m) {
     const view = this.town.nodes.get(m.node);
+    const node = STATIC.nodes.get(m.node);
+    if (node) this.lastBroke = { type: node.type, at: Date.now() }; // "Next Oak" on the context button
     const base = (view ? view.root.position.clone() : this.me.av.root.position.clone()).setY(2.7);
     let i = 0;
     for (const [id, q] of Object.entries(m.loot)) {
@@ -1214,6 +1246,7 @@ export class GameClient {
   }
 
   onFishResult(m) {
+    this.lastFish = Date.now(); // "Cast again"
     const bob = this.fishing?.bob.position.clone();
     this.endFishing();
     const pos = this.me.av.root.position.clone().setY(3);
@@ -1466,7 +1499,7 @@ export class GameClient {
       this.me.av.setState('idle');
       this.me.av.hold(null);
       if (m.victory) this.me.av.play('cheer');
-      this.hud.battleEnd({ ...r, inRun: !!m.inRun });
+      this.hud.battleEnd({ ...r, inRun: !!m.inRun, type: mv?.type ?? null, mob: m.mob });
     }, 900);
   }
 

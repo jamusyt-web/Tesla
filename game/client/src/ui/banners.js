@@ -25,8 +25,9 @@ export class Banners {
     this.place = { zone, region };
     if (g.battle) return;
     if (region && region !== prev?.region) {
-      const kind = { town: 'Town', wild: 'Wild lands', outlaw: 'Outlaw zone · full-loot PvP' }[region.kind];
-      this.show(region.name, [tierLabel(region.tier), kind].filter(Boolean).join(' · '));
+      const kind = { town: 'Town', wild: 'Wild lands', outpost: 'Outpost' }[region.kind];
+      const page = this.hud.goal.compass?.pages.find((p) => p.id === region.id);
+      this.show(region.name, [tierLabel(region.tier), kind, page ? `Discovered ${page.found}/${page.places} (${page.pct}%)` : null].filter(Boolean).join(' · '));
     } else if (zone && zone !== prev?.zone) {
       const what = { forest: 'Woodcutting', quarry: 'Mining', garden: 'Herb gathering', lake: 'Fishing', wilds: 'Monsters roam here' }[zone.kind ?? zone.id];
       this.show(zone.label, what || region?.name || '', true);

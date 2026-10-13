@@ -1,5 +1,5 @@
 // The dock of big buttons along the bottom. It changes with where you are:
-// in town (bag, craft, market, shop, town), inside a shop (leave, bag, the
+// in town (bag, craft, market, shop, book, town), inside a shop (leave, bag, the
 // ledger if it's yours, other shops) and down a dungeon (leave, bag, map, party).
 import { h } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
@@ -16,6 +16,7 @@ export class Dock {
       dockBtn('anvil', 'Craft', () => hud.openPlace('craft')),
       dockBtn('scales', 'Market', () => hud.openPlace('market')),
       dockBtn('shop', 'Shop', () => hud.game?.enterShop(hud.myId), this.shopBadge),
+      dockBtn('book', 'Book', () => hud.panels.open('book')),
       dockBtn('castle', 'Town', () => hud.openPlace('townhall')),
     );
     this.ledgerBtn = dockBtn('scroll', 'Ledger', () => hud.panels.open('ledger'));

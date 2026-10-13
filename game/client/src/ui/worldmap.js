@@ -1,12 +1,14 @@
+import { grid, hasBit, regionCells, cellCentre, CELL } from '../../../shared/journal.js';
 import { h, clear, fmt } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
 import { glyph } from './glyphs.js';
 import { paintWorld, tierLabel } from './mapdraw.js';
-import { LANDS, EXTENT, STONES, ENTRANCES, placeAt, stoneNear, stoneFront, travelFee } from '../../../shared/world.js';
+import { LANDS, EXTENT, STONES, ENTRANCES, LANDMARKS, placeAt, stoneNear, stoneFront, travelFee } from '../../../shared/world.js';
 import { travelToll, nowarpItem } from '../../../shared/travel.js';
 import { ITEMS } from '../../../shared/items.js';
 
 export { tierLabel };
+const PIN = { vista: '🔭', ruin: '🏛️', shrine: '⛩️', cache: '🎁', secret: '🔍', curio: '✨', npc: '🧑', landmark: '🚩' };
 
 // The full world map (M, or tap the minimap): every land, town, path and
 // waystone, where you and the other heroes are, and fast travel. Tap a
@@ -212,6 +214,7 @@ export class WorldMap {
     paintWorld(x, this, { known: new Set(this.hud.me.stones ?? []), picked: this.sel?.stone, here: this.#here()?.id });
     const g = this.hud.game;
     const me = g.myPos();
+    this.#fog(x);
     // A picked spot to walk to.
     if (this.sel && !this.sel.stone) {
       const [sx, sy] = this.#toScreen(this.sel.x, this.sel.z);
@@ -251,6 +254,34 @@ export class WorldMap {
     x.strokeStyle = '#5a2e10';
     x.stroke();
     x.restore();
+  }
+
+  // Fog over land you haven't walked yet, and the places you've found (or
+  // seen from a view) as pins.
+  #fog(x) {
+    const C = this.hud.goal.compass;
+    if (!C?.bits) return;
+    const G = grid();
+    const w = CELL * this.s;
+    x.fillStyle = 'rgba(28, 34, 42, 0.62)';
+    for (const list of regionCells().values())
+      for (const k of list) {
+        if (hasBit(C.bits, k)) continue;
+        const c = cellCentre(G, k);
+        const [sx, sy] = this.#toScreen(c.x - CELL / 2, c.z - CELL / 2);
+        x.fillRect(sx - 0.5, sy - 0.5, w + 1, w + 1);
+      }
+    x.font = `${Math.max(12, Math.min(22, 7 * this.s))}px sans-serif`;
+    x.textAlign = 'center';
+    x.textBaseline = 'middle';
+    for (const l of LANDMARKS) {
+      const found = C.found.has(l.id);
+      if (!found && !C.seen.has(l.id)) continue;
+      const [sx, sy] = this.#toScreen(l.x, l.z);
+      x.globalAlpha = found ? 1 : 0.6;
+      x.fillText(PIN[l.kind] ?? '📍', sx, sy);
+    }
+    x.globalAlpha = 1;
   }
 
   // ── The card at the bottom: travel / walk ────────────────────────────

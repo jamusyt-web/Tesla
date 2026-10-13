@@ -31,6 +31,8 @@ export class Labels {
           ? h('div.place.stone', { on: { click: (e) => (e.stopPropagation(), g.goStone(l.id, { openMap: true })) } }, h('span.ic', glyph(l.glyph)), l.text)
         : l.kind === 'crypt'
           ? h('div.place.crypt', { on: { click: (e) => (e.stopPropagation(), g.goCrypt(l.id)) } }, h('span.ic', glyph(l.glyph)), l.text)
+        : l.kind === 'landmark'
+          ? h('div.place', { on: { click: (e) => (e.stopPropagation(), g.goLandmark(l.id)) } }, h('span.ic', glyph(l.glyph)), l.text)
           : h('div.zone-tag', l.text);
     if (this.staticHidden) l.el.style.display = l.el._disp = 'none';
     this.layer.append(l.el);

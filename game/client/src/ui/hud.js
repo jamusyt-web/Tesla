@@ -15,6 +15,8 @@ import { GoalCard } from './goalcard.js';
 import { Dock } from './dock.js';
 import { Banners } from './banners.js';
 import { ContextButton } from './context.js';
+import { LevelUp } from './levelup.js';
+import { setOverrides } from '../../../shared/economy.js';
 import { newFight, stepFight, FISH_TICK } from '../../../shared/fishing.js';
 
 const RATING = { easy: ['Easy', '#437a36'], fair: ['Fair', '#8a6a2a'], tough: ['Tough', '#a8551e'], brutal: ['Brutal', '#a63a2e'] };
@@ -39,6 +41,7 @@ export class Hud {
 
   attach(game) {
     this.game = game;
+    this.goal.attach(game);
   }
 
   // Put a feature's element in a HUD slot ('root', 'top' or 'left'); returns it.
@@ -92,6 +95,8 @@ export class Hud {
     for (const el of this.dock.els) this.mount('root', el);
     this.context = new ContextButton(this);
     this.mount('root', this.context.el);
+    this.levelup = new LevelUp(this);
+    this.mount('root', this.levelup.el);
     this.prompts = h('div.prompts');
     this.el.append(this.prompts);
     this.lowHp = h('div.lowhp.hidden');
@@ -124,12 +129,30 @@ export class Hud {
     const s = this.sock;
     s.on('me', (m) => this.setMe(m));
     s.on('toast', (m) => this.toast(m.text, m.kind));
-    s.on('tutorial', (m) => {
-      this.me.tutorial = m.step;
-      this.toast(`Quest complete! +${m.reward} 🪙`, 'gold');
-      sfx.coin();
-      this.goal.render();
+    // Quests: a step done (with its reward), a quest finished.
+    s.on('quest', (m) => {
+      if (m.stepDone != null) {
+        const r = m.text ? ` ${m.text.replace(/(\d+) g\b/, '+$1 🪙')}` : '';
+        this.toast(m.done ? `Quest complete!${r}` : `Step done!${r}`, 'gold');
+        sfx.coin();
+        if (m.done) this.confetti(50);
+      }
+      this.goal.rank(true);
+      this.panels.refresh('book');
     });
+    s.on('notice', (m) => this.toast(m.text, m.kind === 'rep' ? 'gold' : ''));
+    s.on('banner', (m) => this.showBanner(m.kind === 'big' ? 'Festive!' : 'News', m.text));
+    s.on('discover', (m) => {
+      this.banners.show(m.name, `Discovered${m.pct != null ? ` · ${m.region ? m.region[0].toUpperCase() + m.region.slice(1) : ''} ${m.pct}%` : ''}`, true);
+      sfx.coin();
+      this.goal.rank(true);
+    });
+    s.on('title', (m) => this.toast(`New title: ${m.title}${m.worn ? ' (shown on your name)' : ''}`, 'gold'));
+    s.on('record', (m) => this.toast(`New record! ${m.kg} kg ${ITEMS[m.item]?.name ?? ''} (was ${m.prev} kg)`, 'gold'));
+    s.on('unlock', (m) => this.levelup.add(m));
+    s.on('digest', (m) => setTimeout(() => this.panels.open('digest', m), 1200));
+    s.on('econ', (m) => setOverrides(m.overrides));
+    s.on('xp', (m) => this.onXp(m.xp));
     s.on('shopSale', (m) => this.#onShopSale(m));
     // Goods waiting in storage, per town; the market panel shows them.
     s.on('storage', (m) => {
@@ -174,7 +197,7 @@ export class Hud {
     this.setMe(y);
     this.setTill(y.shop?.till || 0);
     this.#renderFace();
-    this.goal.render();
+    this.goal.onWelcome();
     if (!this.mapBase) this.#drawMapBase(); // the island never changes while you play
     if (m.dungeon) this.chatLine({ sys: true, text: `${m.dungeon.layout.name} · ${TIERS[m.dungeon.layout.tier]?.name ?? ''}${m.players.length ? ` · with ${m.players.map((p) => p.name).join(', ')}` : ''}` });
     else this.chatLine({ sys: true, text: `Welcome to Hearthvale — Channel ${m.channel}. ${m.players.length ? `${m.players.length} other ${m.players.length === 1 ? 'hero is' : 'heroes are'} here!` : 'Invite friends from the Town Hall!'}` });
@@ -217,7 +240,7 @@ export class Hud {
   onXp(xp) {
     if (!xp) return;
     const sk = SKILLS[xp.skill];
-    this.toast(`${sk.icon} +${xp.amount} ${sk.name} XP`);
+    this.toast(`${sk.icon} +${xp.amount} ${sk.name} XP${xp.bonus ? ` (${xp.bonus} bonus)` : ''}`);
     if (xp.leveled) {
       this.levelUp(`${sk.name} ${xp.level}!`, sk.perk);
       if (xp.skill === 'combat' && xp.level === 5 && ENTRANCES.length) setTimeout(() => this.toast('Strong enough for the Hollow Crypt now. Look for the skull on your map!', 'good'), 2800);

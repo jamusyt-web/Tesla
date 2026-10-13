@@ -88,4 +88,4 @@ export function orderText(o) {
   if (o.kind === 'hunt') return `Thin out ${o.qty} ${plural(MONSTERS[o.monster]?.name ?? o.monster, o.qty)}`;
   return `${o.qty}× ${ITEMS[o.item]?.name ?? o.item}`;
 }
-export const plural = (name, n) => (n === 1 || /s$/.test(name) ? name : /[^aeiou]y$/.test(name) ? name.slice(0, -1) + 'ies' : /(sh|ch|x)$/.test(name) ? name + 'es' : name + 's');
+export const plural = (name, n) => (n === 1 || /s$/.test(name) ? name : /[^aeiou]y$/.test(name) ? name.slice(0, -1) + 'ies' : /(sh|ch|x)$/.test(name) ? name + 'es' : /[lr]f$/.test(name) ? name.slice(0, -1) + 'ves' : name + 's');
