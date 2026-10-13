@@ -551,7 +551,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     const cx = (EXTENT.x0 + EXTENT.x1) / 2;
     const cz = (EXTENT.z0 + EXTENT.z1) / 2;
     const size = Math.max(EXTENT.x1 - EXTENT.x0, EXTENT.z1 - EXTENT.z0) + 840;
-    const sea = new THREE.Mesh(new THREE.PlaneGeometry(size, size), seaMaterial({ lands: LANDS, center: [cx, cz], shallow: '#58a8bc', deep: '#1b4f74', fog: scene.fog }));
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(size, size), seaMaterial({ lands: LANDS, center: [cx, cz], size, shallow: '#58a8bc', deep: '#1b4f74', fog: scene.fog }));
     sea.rotation.x = -Math.PI / 2;
     sea.position.set(cx, -2.2, cz);
     root.add(sea);
@@ -1469,7 +1469,7 @@ registerChunkStatic(
 registerChunkStatic(
   () => LAKES,
   (l, ctx) => {
-    const water = new THREE.Mesh(new THREE.CircleGeometry(l.r + 0.6, 64), waterMaterial({ radius: l.r + 0.6, foamAt: l.r + 0.1, shallow: '#5fb3c4', deep: '#1f5f86', fog: ctx.scene.fog, opacity: 0.93 }));
+    const water = new THREE.Mesh(new THREE.CircleGeometry(l.r + 0.6, 64), waterMaterial({ id: l.id, radius: l.r + 0.6, foamAt: l.r + 0.1, shallow: '#5fb3c4', deep: '#1f5f86', fog: ctx.scene.fog, opacity: 0.93, ice: l.kind === 'ice' }));
     water.rotation.x = -Math.PI / 2;
     water.position.set(l.x, -0.12, l.z);
     water.userData.water = true;

@@ -51,7 +51,7 @@ export function mulberry32(seed) {
 //   buildings [{ id, label, action, x, z, w, d, face, deco, ... }]
 //   gates     [{ id, label, x, z, width, scale }]   castle-wall gatehouses
 //   plazas, fountains [{ id, x, z, r }]
-//   lakes     [{ id, x, z, r, deep }]   water; fishing spots within `deep` are deep water
+//   lakes     [{ id, x, z, r, deep, kind? }]   water; fishing spots within `deep` are deep water; kind 'ice' is frozen
 //   docks     [{ id, x, z, w, d }]      walkable piers over water
 //   zones     [{ id, kind, label, x, z, r, ground }]  named areas, tinted ground
 //   paths     [{ id, pts: [[x, z], ...], w }]          dirt paths (w = half-width)
