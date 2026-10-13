@@ -49,7 +49,7 @@ Alongside the towns come guidance systems so there's always a next thing to do (
 - **The plan:** `game/docs/world/SPEC.md`, with the phases in §10. It's large, so read only the sections you need.
 - **How to pick up the work:** `game/docs/world/HANDOFF.md`.
 - **Background research:** `game/docs/world/briefs/`, covering the engine, content, economy, 3D assets, engagement and phone performance.
-- **Progress:** check `git log` on the game branch. Phase 0 (seams) is done. In Phase 1, P1 (compressed downloads) and P2 (render loop, about 850 → 310 draw calls at spawn) are done. When you finish a package, update this line.
+- **Progress:** check `git log` on the game branch. Phase 0 (seams) is done. In Phase 1, P1 (compressed downloads), P2 (render loop, about 850 → 310 draw calls at spawn) and P3 (assets: textures 87 → 7 MB, shaders under 40, all compiled up front, lazy model groups) are done. When you finish a package, update this line.
 
 ## How to work here
 
