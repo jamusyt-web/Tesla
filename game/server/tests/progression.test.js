@@ -186,3 +186,36 @@ test('rich and ancient nodes: one per region on the clock; a higher gate, more l
     done();
   }
 });
+
+test('a whetstone wears on tool swings, not herbs; a Keeper standing near regrows nodes sooner', () => {
+  const { game, hero, done } = harness();
+  try {
+    const c = hero('Sage');
+    const ch = c.ch;
+    c.hero.buffs = applyBuff({}, 'whetstone');
+    c.fxChanged();
+    const herbs = [...ch.nodes.values()].filter((n) => n.type === 'herb_mint' && n.alive && !n.st);
+    const [h1, h2] = herbs;
+    let now = Date.now();
+    Object.assign(c.ent, { x: h1.x, z: h1.z, path: null });
+    hitNode(game, c, h1.id, now);
+    assert.equal(c.hero.buffs.tonic.left, 60, 'picking a herb leaves the whetstone alone');
+    assert.equal(h1.alive, false);
+    assert.equal(h1.respawnAt, now + NODE_TYPES.herb_mint.respawn * 1000, 'no Keeper near: the usual wait');
+    // A Herb Keeper standing by, not picking: the next one regrows a quarter sooner.
+    const k = hero('Keep');
+    assert.equal(k.ch, ch);
+    k.fx = { at: Date.now() + 1e9, E: { auraRegrowHerb: 0.25 } };
+    Object.assign(k.ent, { x: h2.x + 5, z: h2.z, path: null });
+    Object.assign(c.ent, { x: h2.x, z: h2.z, path: null });
+    hitNode(game, c, h2.id, (now += 5000));
+    assert.equal(h2.respawnAt, now + NODE_TYPES.herb_mint.respawn * 1000 * 0.75);
+    // A tree swing does wear it.
+    const oak = [...ch.nodes.values()].find((x) => x.type === 'tree_oak' && x.alive && !x.st);
+    Object.assign(c.ent, { x: oak.x + 1.6, z: oak.z });
+    hitNode(game, c, oak.id, (now += 5000));
+    assert.equal(c.hero.buffs.tonic.left, 59);
+  } finally {
+    done();
+  }
+});

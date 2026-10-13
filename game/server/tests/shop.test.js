@@ -132,6 +132,15 @@ test('an old save upgrades in place: shelves kept, old history counts as seen', 
   assert.equal(openDb(file).prepare('PRAGMA user_version').get().user_version, 6, 'migrations run once');
 });
 
+test("each town's NPC demand is its share: Amberfold's customers want about 0.3x Hearthvale's", () => {
+  const { shops } = setup();
+  const t = Date.now();
+  const hv = shops.demand('oak_plank', t, 'hearthvale').cap;
+  assert.equal(hv, demandCap(ITEMS.oak_plank.value), "Hearthvale keeps today's");
+  assert.equal(shops.demand('oak_plank', t, 'amberfold').cap, Math.round(hv * 0.3));
+  assert.equal(shops.demand('oak_plank', t, 'starfall').cap, Math.round(hv * 0.2));
+});
+
 test('shop constants stay sane', () => {
   assert.ok(SHOP.P2P_FEE_PM === 40 && SHOP.NPC_FEE_PM > SHOP.P2P_FEE_PM);
   for (const id of Object.keys(ITEMS)) assert.ok(demandCap(ITEMS[id].value) >= SHOP.DEMAND_CAP_MIN);

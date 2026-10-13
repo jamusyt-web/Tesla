@@ -99,6 +99,32 @@ test("a town's own recipe is refused anywhere else", () => {
   }
 });
 
+test("quick crafting keeps to a town's own recipes and to the right station", () => {
+  const c = hero('Quin');
+  try {
+    // Unlocked by hand already: Quick is still Testvale's alone.
+    db.prepare('INSERT INTO craft_mastery (account_id, recipe, n, best) VALUES (?,?,?,?)').run(c.hero.id, 'tv_plank', 5, 90);
+    db.prepare('INSERT INTO craft_mastery (account_id, recipe, n, best) VALUES (?,?,?,?)').run(c.hero.id, 'oak_plank', 5, 90);
+    game.heroes.addItem(c.hero.id, 'oak_log', 10);
+    game.heroes.addGold(c.hero.id, 500);
+    const hv = spotsOf('workbench', 0, 0)[0];
+    put(c, hv.x, hv.z);
+    assert.match(err(() => dispatch(game, c, 'craft.quick', { recipe: 'tv_plank' })), /can only be made in Testvale/);
+    assert.equal(game.heroes.count(c.hero.id, 'oak_log'), 10, 'nothing taken');
+    // In the yard but by a station of another kind, well away from any workbench.
+    const far = W.PROPS.find((p) => p.station && p.station !== 'workbench' && townAt(p.x, p.z)?.id === 'hearthvale' && !W.PROPS.some((q) => q.station === 'workbench' && Math.hypot(q.x - p.x, q.z - p.z) <= 10));
+    if (far) {
+      put(c, far.x, far.z);
+      assert.match(err(() => dispatch(game, c, 'craft.quick', { recipe: 'oak_plank' })), /Quick crafting works near a Workbench/);
+    }
+    const tv = spotsOf('workbench', TV.x, TV.z)[0];
+    put(c, tv.x, tv.z);
+    assert.equal(dispatch(game, c, 'craft.quick', { recipe: 'tv_plank' }).qty, 1, 'made in Testvale');
+  } finally {
+    game.disconnect(c);
+  }
+});
+
 test('the dock opens the services of the town you are in; looks come from style and kit', () => {
   assert.equal(townBuilding('craft', TV.x + 5, TV.z).id, 'testvale_workshop');
   assert.equal(townBuilding('market', TV.x - 30, TV.z).id, 'testvale_market', 'in Testvale even when nearer the edge');

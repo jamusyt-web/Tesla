@@ -65,6 +65,28 @@ test('thornguard sends damage back; frostbite chills; Second Stance charges twic
   }
 });
 
+test('frostbite chills only the monster it hit, not the next of the pack', () => {
+  const { game, hero, done } = harness();
+  try {
+    const c = hero('Rime');
+    const b = fight(game, c, 'wolf');
+    const next = [...c.ch.mobs.values()].find((m) => m !== b.mob && m.state !== 'dead' && !m.battle);
+    next.battle = b;
+    b.queue.push(next);
+    const f = b.fighters.get(c.id);
+    f.hp = f.max = 10_000;
+    b.chill = { cut: 0.2, rounds: 2 };
+    b.mobHp = 1;
+    b.choose(c, 'attack');
+    b.resolve();
+    assert.equal(b.mob, next, 'the next one stepped in');
+    assert.equal(b.chill, null, 'and it is not chilled');
+    b.end(false);
+  } finally {
+    done();
+  }
+});
+
 test('mentor: a hero 8+ levels above lifts a newer hero’s combat xp; rally lifts both', () => {
   const { game, hero, done } = harness();
   try {

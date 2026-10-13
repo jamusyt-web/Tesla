@@ -19,6 +19,8 @@ const BY_KIND = {
   rock: { power: 'rockPower', double: 'doubleOre', perfect: 'perfectRock', regrow: 'auraRegrowRock' },
   herb: { power: null, double: 'doubleHerb', perfect: null, regrow: 'auraRegrowHerb' },
 };
+// How near a Keeper must be for their aura to speed a node's regrowth.
+const KEEPER_RANGE = 20;
 // Trees whose sap a forager can tap (SPEC §4.8, Foraging 15).
 const SAP_TREES = new Set(['tree_maple', 'tree_frostpine']);
 
@@ -66,7 +68,7 @@ export function hitNode(g, c, nodeId, now) {
   const dmg = power * (perfect ? 2 : 1);
   n.hp = Math.max(0, n.hp - dmg);
   n.hitters.add(c.hero.id);
-  c.useBuffs('swing');
+  if (t.tool) c.useBuffs('swing'); // (a whetstone helps tools, so herbs don't wear it)
   ch.broadcast({ t: 'nh', id: n.id, by: c.hero.id, hp: n.hp, dmg, perfect, rot: q2(e.rot) });
   if (n.hp > 0) return { hp: n.hp, perfect };
 
@@ -81,9 +83,9 @@ export function hitNode(g, c, nodeId, now) {
   // Broken! Everyone who helped gets a full roll (co-op friendly).
   n.alive = false;
   n.brokeAt = now;
-  // A Grove Keeper (or Stone/Herb Keeper) among the helpers: it regrows sooner.
+  // A Grove Keeper (or Stone/Herb Keeper) within 20 m: it regrows sooner, for everyone.
   let regrow = 0;
-  for (const pid of n.hitters) regrow = Math.max(regrow, ch.players.get(pid)?.effects?.()[K.regrow] || 0);
+  for (const o of ch.players.values()) if (Math.hypot(o.ent.x - n.x, o.ent.z - n.z) <= KEEPER_RANGE) regrow = Math.max(regrow, o.effects?.()[K.regrow] || 0);
   n.respawnAt = now + t.respawn * 1000 * (1 - regrow);
   // Everyone working it puts their tool away (others saw them frozen mid-chop).
   for (const pid of n.hitters) {

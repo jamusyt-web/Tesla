@@ -253,6 +253,7 @@ export class Battle {
       next.x = fallen.x + (next.x - fallen.x) * 0.25;
       next.z = fallen.z + (next.z - fallen.z) * 0.25;
       this.mob = next;
+      this.chill = null; // frostbite chilled the one that fell, not this one
       this.peak = 0;
       this.def = this.ch.monsterDef(next, 1);
       this.mobMax = this.mobHp = this.def.hp;

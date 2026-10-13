@@ -1,5 +1,6 @@
 import { ITEMS, isItem, isTradeable } from '../shared/items.js';
-import { SHOP, customersOf, demandCap, fillNow, npcBuyChance, buyQtyMax, footfall, poisson, pickDisplay } from '../shared/shop.js';
+import { SHOP, customersOf, fillNow, npcBuyChance, buyQtyMax, footfall, poisson, pickDisplay } from '../shared/shop.js';
+import { townDemandCap } from '../shared/economy.js';
 import { REGIONS } from '../shared/world.js';
 import { tx, fail } from './db.js';
 
@@ -76,7 +77,7 @@ export class Shops {
   // Town-wide NPC demand for one item: fill (0..1), pool size, units available.
   demand(item, t = Date.now(), town = 'hearthvale') {
     const fill = fillNow(this.q.demandGet.get(town, item), t);
-    const cap = demandCap(ITEMS[item].value);
+    const cap = townDemandCap(ITEMS[item].value, town);
     return { fill, cap, avail: Math.floor(fill * cap + 1e-9) };
   }
   demandMap(items, t = Date.now(), town = 'hearthvale') {

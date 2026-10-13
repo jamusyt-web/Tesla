@@ -62,6 +62,12 @@ export const DEMAND_POOL_GOLD = 2400;
 export const DEMAND_CAP_MIN = 12;
 export const DEMAND_CAP_MAX = 400;
 export const demandCap = (v) => Math.max(DEMAND_CAP_MIN, Math.min(DEMAND_CAP_MAX, Math.round(DEMAND_POOL_GOLD / v)));
+// Each town's share of the shops' NPC demand (SPEC §3.2): Hearthvale keeps
+// today's, the others add up to one more, so the whole ceiling is 2x today's.
+export const DEMAND_WEIGHT = { hearthvale: 1, amberfold: 0.3, rimeholt: 0.25, sandmere: 0.25, starfall: 0.2 };
+export const demandWeight = (town) => knob(`demand.${town}`, DEMAND_WEIGHT[town] ?? CONTENT.trade?.[town]?.demandWeight ?? 0.25);
+// A town's NPC demand pool for an item worth v (at least one unit).
+export const townDemandCap = (v, town = 'hearthvale') => Math.max(1, Math.round(demandCap(v) * demandWeight(town)));
 
 // A merchant pool now: { floorLeft, premFill }, refilled since it was last
 // stored (row = { floor_left, prem_fill, at }; no row is a full pool).
