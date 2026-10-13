@@ -500,6 +500,15 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .ed-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 6px; }
 .ed-status { position: absolute; left: 8px; right: 344px; bottom: calc(8px + var(--safe-bottom)); background: var(--hud-bg); border: 1px solid var(--hud-edge); border-radius: 6px; padding: 7px 12px; font-size: 13px; font-weight: 700; color: var(--bone); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ed-status.err { color: #f0a090; border-color: #c0503f; }
+.ed-status[data-meter='amber'] { border-left: 6px solid #e0a83a; }
+.ed-status[data-meter='red'] { border-left: 6px solid #d0453a; }
+.ed-status[data-meter='green'] { border-left: 6px solid #5fae4a; }
+.ed-lint b { text-transform: uppercase; font-size: 11px; color: #8a4a2a; margin-right: 4px; }
+.ed-item.ed-red { border-left: 5px solid #d0453a; }
+.ed-item.ed-amber { border-left: 5px solid #e0a83a; }
+.ed-jump { font-size: 13px; padding: 4px; border-radius: 4px; max-width: 140px; }
+.ed-pair { display: flex; gap: 6px; }
+.ed-pair > * { flex: 1; min-width: 0; }
 .ed-modal { position: absolute; inset: 0; background: rgba(10, 6, 3, 0.55); display: grid; place-items: center; padding: 16px; z-index: 50; }
 .ed-dialog { width: min(440px, 100%); max-height: 80vh; overflow: auto; background: var(--paper); color: var(--ink); border: 2px solid #3a2a1c; border-radius: 10px; box-shadow: 0 0 0 2px var(--brass), 0 0 0 4px #241a12, var(--shadow); padding: 16px; }
 .ed-dialog ul { padding-left: 18px; margin: 8px 0; font-size: 14px; }

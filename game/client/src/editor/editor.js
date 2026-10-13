@@ -11,8 +11,11 @@ import { PROC_BUILDERS } from '../scene/procprops.js';
 import { GROUPS } from '../scene/manifest/index.js';
 import { setWorld, mapProblems, formatMap, upgradeMap, buildColliders, buildRoads, NavGrid, approachPoint, doorPoint, NODE_TYPES, stoneFront, STONE_RANGE, EXTENT, entranceFront } from '../../../shared/world.js';
 import { paintWorld } from '../ui/mapdraw.js';
-import { KINDS, KIND_KEYS, PALETTE, show, store } from './kinds.js';
+import { KINDS, KIND_KEYS, PALETTE, SKYLINE_MAX, show, store } from './kinds.js';
 import { DUNGEONS } from '../../../shared/dungeon.js';
+import { mapLints } from '../../../shared/mapkit.js';
+import { estimateChunk, BUDGET, CHUNK } from '../../../shared/budget.js';
+import { snap as snapshot, diff, apply, touched, saveDraft, loadDraft, dropDraft } from './history.js';
 
 // The world editor: a top-down view of the real world where the server owner
 // places, moves and removes things, then saves the map back to the server.
@@ -24,7 +27,10 @@ const ROT_STEP = Math.PI / 12; // 15°
 const SEL = '#ffd84a';
 // Big areas: click to select them first, so dragging inside one still pans.
 const AREAS = new Set(['spawns', 'zones', 'lakes', 'plazas', 'regions', 'paths', 'lands']);
-const AREA_COL = { lands: '#e8d9a8', spawns: '#e0503a', zones: '#7fc06a', lakes: '#5fb3e0', plazas: '#d9c7a3', regions: '#b48cff', docks: '#c9a24a' };
+const AREA_COL = { lands: '#e8d9a8', spawns: '#e0503a', zones: '#7fc06a', lakes: '#5fb3e0', plazas: '#d9c7a3', regions: '#b48cff', docks: '#c9a24a', landmarks: '#ffb35a' };
+// Edits to these only need the chunks around them rebuilt; anything else
+// (land, water, ground, paths, the map's own settings) rebuilds the view.
+const INCREMENTAL = new Set(['props', 'nodes', 'buildings', 'spawns', 'fountains', 'landmarks', 'passages', 'skyline']);
 const json = (o) => JSON.stringify(o);
 const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -133,41 +139,52 @@ class Editor {
     return this.opts.snap ? Math.round(v / GRID) * GRID : r2(v);
   }
 
-  // Every edit goes through here: it can be undone, and the view catches up.
+  // Every edit goes through here: it can be undone (kept as a diff of the
+  // entries it changed), and the view catches up.
   change(fn, { rebuild = true } = {}) {
-    const before = json(this.map);
+    const before = snapshot(this.map);
     fn();
-    if (json(this.map) === before) return;
-    this.undoStack.push(before);
-    if (this.undoStack.length > 120) this.undoStack.shift();
-    this.redoStack.length = 0;
-    this.#afterChange(rebuild);
+    const d = diff(before, this.map);
+    if (!d) return;
+    this.#record(d);
+    this.#afterChange(rebuild, d);
   }
-  #afterChange(rebuild = true) {
-    try {
-      localStorage.setItem(DRAFT_KEY, json({ base: this.base, map: this.map, t: Date.now() }));
-    } catch {}
+  #record(d) {
+    this.undoStack.push(d);
+    if (this.undoStack.length > 300) this.undoStack.shift();
+    this.redoStack.length = 0;
+  }
+  #afterChange(rebuild = true, d = null) {
+    clearTimeout(this.draftTimer);
+    this.draftTimer = setTimeout(() => saveDraft(DRAFT_KEY, { base: this.base, map: this.map, t: Date.now() }), 400);
+    this.lintCache = null;
     if (this.sel && !this.find()) this.sel = null;
-    if (rebuild) this.scheduleRebuild();
+    if (rebuild) this.scheduleRebuild(d);
     else this.drawOverlay();
     this.#drawSide();
     this.#drawTop();
   }
   undo() {
-    if (!this.undoStack.length) return;
-    this.redoStack.push(json(this.map));
-    this.map = JSON.parse(this.undoStack.pop());
-    this.#afterChange();
+    const d = this.undoStack.pop();
+    if (!d) return;
+    apply(this.map, d, 'before');
+    this.redoStack.push(d);
+    this.#afterChange(true, d);
   }
   redo() {
-    if (!this.redoStack.length) return;
-    this.undoStack.push(json(this.map));
-    this.map = JSON.parse(this.redoStack.pop());
-    this.#afterChange();
+    const d = this.redoStack.pop();
+    if (!d) return;
+    apply(this.map, d, 'after');
+    this.undoStack.push(d);
+    this.#afterChange(true, d);
   }
 
   // ── Rebuilding the 3D world from the working map ───────────────────
-  scheduleRebuild() {
+  // d: the edit's diff; when it only moved, added or removed things that
+  // stand on the ground, just the chunks around them are rebuilt.
+  scheduleRebuild(d = null) {
+    if (d && !Object.keys(d.top).length && d.changes.every((c) => INCREMENTAL.has(c.list))) this.spots = [...(this.spots ?? []), ...touched(d)];
+    else this.fullRebuild = true;
     clearTimeout(this.rebuildTimer);
     this.rebuildTimer = setTimeout(() => this.rebuildNow(), 40);
     this.drawOverlay();
@@ -180,10 +197,18 @@ class Editor {
       this.say(e.message, true);
       return;
     }
-    if (this.town) disposeTown(this.town);
-    this.town = buildTown(this.scene, this.fx, { focus: { x: this.cam.x, z: this.cam.z } });
+    if (this.town && !this.fullRebuild && this.spots) {
+      for (const p of this.spots) this.town.rebuildChunksAround(p.x, p.z, p.r);
+      this.town.focus(this.cam.x, this.cam.z, 250); // build them now, not a few ms a frame
+    } else {
+      if (this.town) disposeTown(this.town);
+      this.town = buildTown(this.scene, this.fx, { focus: { x: this.cam.x, z: this.cam.z } });
+    }
+    this.spots = null;
+    this.fullRebuild = false;
     this.town.viewRadius = this.#viewRadius();
     this.buildMs = Math.round(performance.now() - t0);
+    this.meterKey = null;
     this.drawOverlay();
   }
 
@@ -230,6 +255,13 @@ class Editor {
         }
         out.push({ kind, id: e.id, score: K.order * 1000 + d / Math.max(size, 0.5) });
       }
+      // A second handle (a passage's other end).
+      if (K.ends)
+        for (const e of this.list(kind))
+          for (const end of K.ends(e)) {
+            const d = Math.hypot(x - end.x, z - end.z);
+            if (d <= 1.8) out.push({ kind, id: e.id, keys: end.keys, score: K.order * 1000 + d });
+          }
     }
     return out.sort((a, b) => a.score - b.score);
   }
@@ -255,6 +287,15 @@ class Editor {
 
   // ── Actions ─────────────────────────────────────────────────────────
   place(item, x, z) {
+    if (item.kind === 'stamp') return this.#stamp(item, this.snap(x), this.snap(z));
+    if (item.kind === 'set') {
+      const add = item.make(this.snap(x), this.snap(z), this.map, this.opts);
+      this.change(() => {
+        for (const [k, list] of Object.entries(add)) for (const e of list) this.list(k).push({ id: this.newId(k), ...e });
+      });
+      return this.say('Placed. Each piece can be moved on its own.');
+    }
+    if (item.kind === 'skyline' && this.list('skyline').length >= SKYLINE_MAX) return this.say(`At most ${SKYLINE_MAX} skyline beacons (they're seen from everywhere).`, true);
     const e = { id: this.newId(item.kind), ...item.make(this.snap(x), this.snap(z), this.map, this.opts) };
     this.change(() => this.list(item.kind).push(e));
     // Plants, props and nodes: keep placing. Anything bigger: select it to set it up.
@@ -264,11 +305,35 @@ class Editor {
     }
     return e;
   }
+  // Stamp a whole town kit or an outpost: asks for its id and name first.
+  async #stamp(item, x, z) {
+    const id = h('input', { type: 'text', value: '', placeholder: item.stamp === 'town' ? 'e.g. amberfold' : 'e.g. fourways' });
+    const name = h('input', { type: 'text', value: '' });
+    const tier = h('input', { type: 'number', min: 1, max: 5, value: 1 });
+    const go = await this.dialog(
+      item.stamp === 'town' ? 'Stamp a town' : 'Stamp an outpost',
+      h('div', h('label.ed-field', h('span', 'Id (lowercase, no spaces)'), id), h('label.ed-field', h('span', 'Name'), name), h('label.ed-field', h('span', 'Tier'), tier), h('p.ed-muted', item.stamp === 'town' ? 'Places a plaza, waystone, market, workshop with its five stations, shop, town hall, order board and supplier stall, laid out like every town.' : 'Places a waystone with a campfire, a cookpot and a notice post.')),
+      [['Cancel'], ['Stamp', 'green']],
+    );
+    if (go !== 1) return;
+    const t = id.value.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (!t) return this.say('It needs an id.', true);
+    const add = item.make(x, z, this.map, { id: t, name: name.value.trim() || undefined, tier: Math.max(1, Math.min(5, Number(tier.value) || 1)) });
+    const used = new Set(KIND_KEYS.flatMap((k) => this.list(k).map((e) => e.id)));
+    const clash = Object.values(add).flat().filter((e) => used.has(e.id)).map((e) => e.id);
+    if (clash.length) return this.say(`Those ids are taken already: ${clash.slice(0, 4).join(', ')}. Pick another id.`, true);
+    this.change(() => {
+      for (const [k, list] of Object.entries(add)) this.list(k).push(...list);
+    });
+    this.setTool('select');
+    this.select({ kind: 'regions', id: t });
+    this.say(`Stamped ${add.regions[0].name}. Move or delete any piece; the Checks tab says if a town is missing something.`);
+  }
   remove() {
     const e = this.find();
     if (!e) return;
-    if (e.station) return this.say("Crafting stations can be moved but not deleted (the Workshop needs all five).", true);
-    if (this.sel.kind === 'buildings' && !e.deco) return this.say(`The ${e.label} can be moved but not deleted: the game needs it.`, true);
+    // A service building can go as long as another does the same job.
+    if (this.sel.kind === 'buildings' && !e.deco && !this.list('buildings').some((b) => b !== e && b.action === e.action)) return this.say(`The ${e.label} can be moved but not deleted: it's the only one.`, true);
     if (this.sel.kind === 'gates' && this.list('gates').length === 1) return this.say('The world needs at least one gatehouse.', true);
     if (this.sel.kind === 'lands' && this.list('lands').length === 1) return this.say('The world needs some land.', true);
     const { kind, id } = this.sel;
@@ -278,7 +343,7 @@ class Editor {
   }
   duplicate() {
     const e = this.find();
-    if (!e || e.station || (this.sel.kind === 'buildings' && !e.deco)) return this.say("That one can't be copied.", true);
+    if (!e || (this.sel.kind === 'skyline' && this.list('skyline').length >= SKYLINE_MAX)) return this.say("That one can't be copied.", true);
     const copy = { ...structuredClone(e), id: this.newId(this.sel.kind) };
     if (copy.pts) copy.pts = copy.pts.map(([x, z]) => [x + 2, z + 2]);
     else Object.assign(copy, { x: e.x + 2, z: e.z + 2 });
@@ -378,9 +443,8 @@ class Editor {
     this.base = body.etag;
     this.map.rev = body.rev;
     this.savedJson = json(this.map);
-    try {
-      localStorage.removeItem(DRAFT_KEY);
-    } catch {}
+    clearTimeout(this.draftTimer);
+    dropDraft(DRAFT_KEY);
     this.#drawTop();
     this.#drawSide();
     this.say(`Saved (version ${body.rev}). Everyone in the world was sent back in to the new version.`);
@@ -421,10 +485,7 @@ class Editor {
     location.href = '/';
   }
   async #offerDraft() {
-    let d = null;
-    try {
-      d = JSON.parse(localStorage.getItem(DRAFT_KEY));
-    } catch {}
+    const d = await loadDraft(DRAFT_KEY);
     if (!d?.map || json(d.map) === this.savedJson) return;
     const same = d.base === this.base;
     const when = new Date(d.t).toLocaleString();
@@ -435,11 +496,7 @@ class Editor {
         Object.assign(this.map, upgradeMap(d.map));
       });
       this.say('Draft restored.');
-    } else {
-      try {
-        localStorage.removeItem(DRAFT_KEY);
-      } catch {}
-    }
+    } else dropDraft(DRAFT_KEY);
   }
 
   // ── Overlay: selection, areas, colliders, spawn point ──────────────
@@ -475,6 +532,14 @@ class Editor {
       for (const c of col.circles) ring(c.x, c.z, c.r, '#ffffff', 0.08, 0.7);
       for (const r of col.rects) rect(r.x, r.z, r.w, r.d, '#ffffff', 0.08, 0.7);
     }
+    // Passages: both ends and the hop between them; landmarks: where they're found.
+    for (const p of this.list('passages')) {
+      line([p.x, p.z], [p.tx, p.tz], '#ffb35a', 0.12, 0.7);
+      ring(p.x, p.z, 1.2, '#ffb35a', 0.2, 0.9);
+      ring(p.tx, p.tz, 1.2, '#ffb35a', 0.2, 0.9);
+      label(p.name || 'Passage', (p.x + p.tx) / 2, (p.z + p.tz) / 2, 'landmarks');
+    }
+    if (this.opts.areas) for (const l of this.list('landmarks')) (ring(l.x, l.z, l.r ?? 8, AREA_COL.landmarks, 0.12, 0.6), label(KINDS.landmarks.name(l), l.x, l.z, 'landmarks'));
     // Spawn point: where new heroes appear.
     const sp = this.map.spawn;
     ring(sp.x, sp.z, 0.9, '#6fe36b', 0.25, 0.95);
@@ -595,24 +660,29 @@ class Editor {
         if (i >= 0) {
           this.pathPoint = i;
           this.drag.mode = 'point';
-          this.drag.before = json(this.map);
+          this.drag.before = snapshot(this.map);
           this.drawOverlay();
           return;
         }
-      } else if (this.candidates(ground.x, ground.z).some((c) => c.kind === this.sel.kind && c.id === this.sel.id)) return this.#startMove(sel, ground);
+      } else {
+        const c = this.candidates(ground.x, ground.z).find((x) => x.kind === this.sel.kind && x.id === this.sel.id);
+        if (c) return this.#startMove(sel, ground, c.keys);
+      }
     }
     // Grabbing something solid moves it straight away; big areas need a click first.
     const top = this.candidates(ground.x, ground.z)[0];
     if (top && !AREAS.has(top.kind)) {
       this.select(top);
-      return this.#startMove(this.find(), ground);
+      return this.#startMove(this.find(), ground, top.keys);
     }
     this.drag.mode = 'pan';
   }
-  #startMove(e, ground) {
+  // keys: which coordinates the drag moves (['tx', 'tz'] for a passage's far end).
+  #startMove(e, ground, keys = ['x', 'z']) {
     this.drag.mode = 'move';
-    this.drag.before = json(this.map);
-    this.drag.off = { x: e.x - ground.x, z: e.z - ground.z };
+    this.drag.before = snapshot(this.map);
+    this.drag.keys = keys;
+    this.drag.off = { x: e[keys[0]] - ground.x, z: e[keys[1]] - ground.z };
   }
   #move(e) {
     const p = this.pointers.get(e.pointerId);
@@ -647,11 +717,12 @@ class Editor {
     } else if (d.mode === 'move' && d.moved && g) {
       const e2 = this.find();
       if (e2) {
-        e2.x = this.snap(g.x + d.off.x);
-        e2.z = this.snap(g.z + d.off.z);
-        if (!this.ghost.children.length && (this.sel.kind === 'props' || this.sel.kind === 'nodes' || this.sel.kind === 'buildings')) this.#makeGhost({ kind: this.sel.kind }, e2);
-        this.ghost.visible = true;
-        this.ghost.position.set(e2.x, 0, e2.z);
+        const [kx, kz] = d.keys ?? ['x', 'z'];
+        e2[kx] = this.snap(g.x + d.off.x);
+        e2[kz] = this.snap(g.z + d.off.z);
+        if (kx === 'x' && !this.ghost.children.length && (this.sel.kind === 'props' || this.sel.kind === 'nodes' || this.sel.kind === 'buildings')) this.#makeGhost({ kind: this.sel.kind }, e2);
+        this.ghost.visible = kx === 'x';
+        this.ghost.position.set(e2[kx], 0, e2[kz]);
         this.drawOverlay();
         this.#drawSide();
       }
@@ -676,10 +747,10 @@ class Editor {
     if ((d.mode === 'move' || d.mode === 'point') && d.moved) {
       // The move happened live; record it as one undoable step.
       this.#clearGhost();
-      if (json(this.map) !== d.before) {
-        this.undoStack.push(d.before);
-        this.redoStack.length = 0;
-        this.#afterChange();
+      const df = diff(d.before, this.map);
+      if (df) {
+        this.#record(df);
+        this.#afterChange(true, df);
       }
       return;
     }
@@ -757,7 +828,19 @@ class Editor {
       l.el.style.display = on ? '' : 'none';
       if (on) l.el.style.transform = `translate(${((v.x + 1) / 2) * innerWidth}px, ${((1 - v.y) / 2) * innerHeight}px) translate(-50%, -50%)`;
     }
-    this.statusEl.textContent = `${this.statusMsg ?? ''}${this.cursorText ? `   ·   ${this.cursorText}` : ''}`;
+    const ci = Math.floor(this.cam.x / CHUNK);
+    const cj = Math.floor(this.cam.z / CHUNK);
+    if (this.meterKey !== `${ci},${cj}`) {
+      this.meterKey = `${ci},${cj}`;
+      try {
+        this.meter = this.meterOf(ci, cj);
+      } catch {
+        this.meter = null;
+      }
+    }
+    const m = this.meter;
+    this.statusEl.textContent = `${this.statusMsg ?? ''}${this.cursorText ? `   ·   ${this.cursorText}` : ''}${m ? `   ·   this square: ${m.scenery.draws + m.statics.draws} draws (${Math.round(m.use * 100)}% of budget)` : ''}`;
+    this.statusEl.dataset.meter = m?.level ?? '';
     requestAnimationFrame((t) => this.loop(t));
   }
   say(msg, err = false) {
@@ -771,17 +854,28 @@ class Editor {
     clear(this.topEl).append(
       h('div.ed-group', b('Select', () => this.setTool('select'), { on: this.tool === 'select', title: 'Select and move (V)' }), b('Place', () => ((this.tab = 'place'), this.#drawSide(), this.setTool('select')), { on: this.tool === 'place', title: 'Pick something to place from the panel' }), b('Path', () => this.setTool('path'), { on: this.tool === 'path', title: 'Draw a dirt path (P)' })),
       h('div.ed-group', b('Undo', () => this.undo(), { title: 'Ctrl+Z' }), b('Redo', () => this.redo(), { title: 'Ctrl+Y' })),
-      h('div.ed-group', b('Map', () => this.overview(), { title: 'The whole world from above: click anywhere to jump there (M)' })),
+      h('div.ed-group', b('Map', () => this.overview(), { title: 'The whole world from above: click anywhere to jump there (M)' }), this.#jumpList()),
       h('div.ed-group', b('Snap', () => this.toggle('snap'), { on: this.opts.snap, title: 'Snap to a half-metre grid (G)' }), b('Areas', () => this.toggle('areas'), { on: this.opts.areas, title: 'Show zones, camps and regions' }), b('Solid', () => this.toggle('colliders'), { on: this.opts.colliders, title: 'Show what blocks walking' })),
       h('div.ed-group', b(this.dirty ? 'Save •' : 'Save', () => this.save(), { cls: this.dirty ? '.hot' : '', title: 'Save to the world (Ctrl+S)' }), b('Export', () => this.export(), { title: 'Download the map as a file' }), b('Import', () => this.import(), { title: 'Load a map file' }), b('Exit', () => this.exit())),
     );
   }
+  // Jump straight to a region.
+  #jumpList() {
+    const s = h('select.ed-jump', { title: 'Jump to a region' }, h('option', { value: '' }, 'Go to…'), ...this.list('regions').map((r) => h('option', { value: r.id }, r.name)));
+    s.onchange = () => {
+      const r = this.list('regions').find((x) => x.id === s.value);
+      if (r) (this.#jump(r), this.select({ kind: 'regions', id: r.id }));
+      s.value = '';
+    };
+    return s;
+  }
   #drawSide() {
-    const tabs = [['place', 'Place'], ['selected', 'Selected'], ['world', 'World']];
+    const tabs = [['place', 'Place'], ['selected', 'Selected'], ['world', 'World'], ['checks', this.lintCache?.length ? `Checks (${this.lintCache.length})` : 'Checks']];
     const body = h('div.ed-body');
     clear(this.sideEl).append(h('div.ed-tabs', ...tabs.map(([k, l]) => h('button' + (this.tab === k ? '.on' : ''), { on: { click: () => ((this.tab = k), this.#drawSide()) } }, l))), body);
     if (this.tab === 'place') this.#palette(body);
     else if (this.tab === 'selected') this.#inspector(body);
+    else if (this.tab === 'checks') this.#checks(body);
     else this.#world(body);
   }
   #palette(body) {
@@ -806,10 +900,19 @@ class Editor {
     const kind = this.sel.kind;
     const K = KINDS[kind];
     body.append(h('div.ed-title', K.name(e)), h('div.ed-muted', `${K.label} · ${e.id}`));
-    for (const f of K.fields(e)) {
+    for (const f of K.fields(e, this.map)) {
       let input;
+      if (f.type === 'req') {
+        // A skill and level, or nothing.
+        const skill = h('select', h('option', { value: '', selected: !e.req }, '(none)'), ...f.skills.map((k) => h('option', { value: k, selected: e.req?.skill === k }, k)));
+        const lvl = h('input', { type: 'number', min: 1, max: 50, value: e.req?.lvl ?? 10 });
+        const set = () => this.change(() => (e.req = skill.value ? { skill: skill.value, lvl: Math.max(1, Math.min(50, Math.round(Number(lvl.value) || 1))) } : null), { rebuild: false });
+        skill.onchange = lvl.onchange = set;
+        body.append(h('label.ed-field', h('span', f.label), h('div.ed-pair', skill, lvl)));
+        continue;
+      }
       if (f.type === 'readonly') input = h('span.ed-ro', String(e[f.key] ?? ''));
-      else if (f.type === 'select') input = h('select', ...f.options.map(([v, l]) => h('option', { value: v, selected: e[f.key] === v }, l)));
+      else if (f.type === 'select') input = h('select', ...f.options.map(([v, l]) => h('option', { value: v, selected: (e[f.key] ?? f.def ?? '') === v }, l)));
       else if (f.type === 'check') input = h('input', { type: 'checkbox', checked: !!e[f.key] });
       else if (f.type === 'color') input = h('input', { type: 'color', value: e[f.key] || '#74a04c' });
       else if (f.type === 'text') input = h('input', { type: 'text', value: e[f.key] ?? '' });
@@ -878,6 +981,68 @@ class Editor {
       h('div.ed-sec', 'Keys'),
       h('p.ed-muted', 'Drag ground: pan · Right-drag: turn the view · Wheel: zoom · WASD: move · M: whole-world map · Q/E: turn selection · Del: delete · Ctrl+D: copy · Ctrl+Z / Ctrl+Y: undo / redo · G: snap · Ctrl+S: save'),
     );
+  }
+  // Lints (each jumps to its spot), the chunk budget census and the patch report.
+  #checks(body) {
+    const lints = (this.lintCache ??= mapLints(this.map, { gzBytes: this.gzBytes ?? null }));
+    const jump = (p) => this.#jump(p);
+    body.append(h('div.ed-title', 'Checks'), h('p.ed-muted', 'Things worth a look before you save. Click one to go there.'));
+    if (!lints.length) body.append(h('p.ed-muted', 'All good.'));
+    for (const l of lints) body.append(h('button.ed-item.ed-lint', { on: { click: () => jump(l) } }, h('b', l.kind), ` ${l.text}`));
+    this.#mapSize();
+    body.append(
+      h('div.ed-sec', 'Phone budget'),
+      h('p.ed-muted', 'What each 96 m square of the world will cost a phone to draw, estimated from the map. Red squares need thinning out.'),
+      h('div.ed-actions', h('button.ed-btn', { on: { click: () => this.#census(body) } }, 'Check every square'), h('button.ed-btn', { on: { click: () => this.#patchReport() } }, 'Patch report')),
+    );
+  }
+  // The map's gzipped size (for the size lint), measured in the background.
+  async #mapSize() {
+    if (this.gzBusy || typeof CompressionStream === 'undefined') return;
+    this.gzBusy = true;
+    try {
+      const stream = new Blob([json(this.map)]).stream().pipeThrough(new CompressionStream('gzip'));
+      const n = (await new Response(stream).arrayBuffer()).byteLength;
+      if (n !== this.gzBytes) {
+        this.gzBytes = n;
+        this.lintCache = null;
+        if (this.tab === 'checks') this.#drawSide();
+      }
+    } finally {
+      this.gzBusy = false;
+    }
+  }
+  // Green / amber / red for one chunk: its scenery and statics against the budget.
+  meterOf(i, j) {
+    const e = estimateChunk(i, j);
+    const use = Math.max(e.scenery.draws / BUDGET.chunkNear.draws, e.statics.draws / BUDGET.chunkStatics.draws);
+    return { ...e, use, level: use > 1 ? 'red' : use > 0.8 ? 'amber' : 'green' };
+  }
+  #census(body) {
+    setWorld(this.map);
+    const out = [];
+    for (let i = Math.floor(EXTENT.x0 / CHUNK); i <= Math.floor(EXTENT.x1 / CHUNK); i++)
+      for (let j = Math.floor(EXTENT.z0 / CHUNK); j <= Math.floor(EXTENT.z1 / CHUNK); j++) {
+        const m = this.meterOf(i, j);
+        if (m.level !== 'green') out.push({ i, j, ...m });
+      }
+    out.sort((a, b) => b.use - a.use);
+    const list = h('div', h('p.ed-muted', out.length ? `${out.length} square${out.length === 1 ? '' : 's'} over 80% of the budget:` : 'Every square is within budget.'), ...out.slice(0, 30).map((c) => h('button.ed-item.ed-' + c.level, { on: { click: () => this.#jump({ x: (c.i + 0.5) * CHUNK, z: (c.j + 0.5) * CHUNK }) } }, `${c.level === 'red' ? 'Over' : 'Near'}: square ${c.i}, ${c.j} · ${c.scenery.draws + c.statics.draws} draws · ${Math.round((c.scenery.tris + c.statics.tris) / 1000)}k triangles`)));
+    body.append(list);
+  }
+  async #patchReport() {
+    let r;
+    try {
+      const res = await fetch('/api/map/patches', { headers: { authorization: `Bearer ${getToken() || ''}` } });
+      r = await res.json();
+      if (!res.ok) throw new Error(r.error || `HTTP ${res.status}`);
+    } catch (e) {
+      return this.say(`Couldn't get the patch report: ${e.message}`, true);
+    }
+    const rows = r.report.length
+      ? r.report.map((p) => h('li', h('b', p.patch), `: ${p.status}${p.added ? ` (${p.added} added)` : ''}`, p.skipped.length ? h('ul', ...p.skipped.slice(0, 12).map((x) => h('li', `${x.list} ${x.id}: ${x.why}`))) : null))
+      : [h('li', 'No new patches this time.')];
+    this.dialog('Map patches', h('div', h('p', `Applied so far: ${r.applied.length ? r.applied.join(', ') : 'none'}.`), h('ul', ...rows)), [['OK']]);
   }
   // Zoomed out, the editor shows more of the world than the game ever does.
   #viewRadius() {
