@@ -112,3 +112,24 @@ test('a quest that hands over a letter: given on start, and it stays out of ways
     done();
   }
 });
+
+test('a once-only step already done counts: a stone attuned before the quest got there', () => {
+  const { game, hero, done } = harness();
+  try {
+    const c = hero('Early');
+    game.heroes.attune(c.hero, 'stone_wildwatch'); // walked past it on day one
+    game.quests.skipTo(c, 'hv_intro', 4);
+    emit(c, 'craft', { out: 'pick_copper', item: 'pick_copper', qty: 1 });
+    assert.equal(c.quests.get('hv_intro|0').step, 6, 'the attune step went straight through');
+    assert.ok(c.sent.some((m) => m.t === 'quest' && m.id === 'hv_intro' && m.stepDone === 5));
+    // And a hero stuck on it from before is let through on connect.
+    const d = hero('Stuck');
+    game.heroes.attune(d.hero, 'stone_wildwatch');
+    game.db.prepare("UPDATE quest_progress SET step = 5 WHERE account_id = ? AND quest = 'hv_intro'").run(d.id);
+    game.quests.load(d);
+    game.quests.ensure(d);
+    assert.equal(d.quests.get('hv_intro|0').step, 6);
+  } finally {
+    done();
+  }
+});

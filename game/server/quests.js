@@ -7,6 +7,7 @@
 import { ITEMS } from '../shared/items.js';
 import { QUESTS, questDef, stepGain, stepNeed, canStart, rewardText } from '../shared/quests.js';
 import { townAt, regionAt, townName } from '../shared/places.js';
+import { LANDMARKS } from '../shared/world.js';
 import { tx, fail } from './db.js';
 import { on, emit } from './events.js';
 import { register } from './rpc.js';
@@ -49,6 +50,10 @@ export class Quests {
   // every new hero gets it.
   ensure(c, now = Date.now()) {
     if (!c.quests) this.load(c);
+    for (const row of [...c.quests.values()]) {
+      const def = questDef(row.quest);
+      if (def && c.quests.has(key(row.quest, row.period))) this.#catchUp(c, row, def, now);
+    }
     const at = this.#stepsAt(c);
     for (const def of Object.values(QUESTS)) {
       if (def.repeat || c.questsDone.has(def.id) || c.quests.has(key(def.id, 0))) continue;
@@ -76,6 +81,7 @@ export class Quests {
     c.quests.set(key(id, period), row);
     c.send({ t: 'quest', id, period, step: 0, n: 0, started: true });
     if (def.give) c.pushInventory();
+    this.#catchUp(c, row, def, now);
     return row;
   }
   // (The Almanac's name for it.)
@@ -143,7 +149,27 @@ export class Quests {
     c.send({ t: 'quest', id: row.quest, period: row.period, step: last ? def.steps.length : row.step, n: 0, stepDone: doneStep, done: last, reward, text: reward ? rewardText(reward) : '' });
     c.pushInventory();
     emit(c, last ? 'questDone' : 'questStep', { id: row.quest, period: row.period, step: doneStep, repeat: def.repeat ?? null });
+    if (!last) this.#catchUp(c, row, def, now);
     if (last || def.id === 'hv_intro') this.ensure(c, now); // the next chains open up
+  }
+
+  // A step about something that only happens once (attuning a stone,
+  // finding places, a once-only landmark) the hero had already done before
+  // the quest got there: it counts.
+  #catchUp(c, row, def, now = Date.now()) {
+    const step = def.steps[row.step];
+    const have = Math.min(stepNeed(step), this.#already(c, step));
+    if (have > row.n) this.#advance(c, row, def, have - row.n, now);
+  }
+  #already(c, step) {
+    const m = step?.match ?? {};
+    if (step?.ev === 'attune' && m.id) return c.hero.stones?.includes(m.id) ? stepNeed(step) : 0;
+    if (step?.ev === 'discover' && !Object.keys(m).length) return this.game.journal?.ids(c.hero.id, 'place').size ?? 0;
+    if (step?.ev === 'landmark' && m.kind && Object.keys(m).length === 1) {
+      const used = this.db.prepare('SELECT landmark FROM landmark_uses WHERE account_id = ?').all(c.hero.id).map((r) => r.landmark);
+      return used.some((id) => LANDMARKS.find((l) => l.id === id)?.kind === m.kind) ? stepNeed(step) : 0;
+    }
+    return 0;
   }
 
   // Pay a reward (inside the caller's transaction). The server is the only
