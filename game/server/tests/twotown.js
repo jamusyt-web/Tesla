@@ -4,11 +4,39 @@
 // maps/fixtures/twotown.json.)
 import fs from 'node:fs';
 import { SHIPPED_MAP } from '../map.js';
+import { DUNGEONS, CHESTS, standardChests } from '../../shared/dungeon.js';
 
 export const TV = { x: 400, z: 0 };
 const at = (dx, dz) => ({ x: TV.x + dx, z: TV.z + dz });
 
-export function twoTownMap() {
+// Testvale's own dungeon kind: a cave (its kit falls back to the crypt's
+// pieces until the cave models ship), with its own reagent and chests.
+export function addTestvaleCave() {
+  if (DUNGEONS.testvale_cave) return;
+  DUNGEONS.testvale_cave = {
+    name: 'Testvale Cave',
+    word: 'cave',
+    blurb: 'A damp cave under Testvale.',
+    town: 'testvale',
+    kit: 'cave',
+    skin: 'variation-a',
+    dust: 'slime_gel',
+    dressing: ['mushroom'],
+    fog: '#3a4a5a',
+    tiers: { 1: 13, 2: 16, 3: 19, 4: 25 },
+    pool: ['thrall', 'crypt_skeleton', 'crypt_wisp'],
+    elite: ['crypt_skeleton'],
+    boss: { monster: 'pale_count', adds: ['thrall', 'crypt_wisp'] },
+  };
+  CHESTS.testvale_cave = standardChests({ rec1: 13, bar: 'iron_bar', food: 'grilled_fish', gem: 'sapphire', sets: ['barrow_plate'], charm: 'charm_wayfarer' });
+}
+export const removeTestvaleCave = () => {
+  delete DUNGEONS.testvale_cave;
+  delete CHESTS.testvale_cave;
+};
+
+// cave: add the cave's door (register the kind first with addTestvaleCave).
+export function twoTownMap({ cave = false } = {}) {
   const m = JSON.parse(fs.readFileSync(SHIPPED_MAP, 'utf8'));
   m.lands.push({ id: 'testvale_land', ...TV, r: 90 }, { id: 'testvale_islet', ...at(0, -125), r: 14 });
   m.regions.push({ id: 'testvale', name: 'Testvale', tier: 2, kind: 'town', ...TV, r: 70, stone: 'stone_testvale' });
@@ -23,5 +51,6 @@ export function twoTownMap() {
   for (const [kind, slot, dx, dz] of st) m.props.push({ id: `tv_${kind}`, slot, ...at(dx, dz), rot: 0, r: 0.7, station: kind });
   // From the north shore of Testvale over to the islet.
   m.passages = [{ id: 'pass_tv', name: 'Smugglers’ Squeeze', kind: 'squeeze', ...at(0, -80), tx: TV.x, tz: TV.z - 120, req: { skill: 'mining', lvl: 10 }, kit: 'test_lantern' }];
+  if (cave) m.entrances.push({ id: 'door_tv_cave', kind: 'testvale_cave', ...at(-30, 30), rot: 0 });
   return m;
 }

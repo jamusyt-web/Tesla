@@ -94,13 +94,14 @@ export class Mood {
     this.g.weather.set(w?.kind ?? null, w?.rate);
   }
 
-  // Crypt light: dark blue-grey fog, a cool moon overhead, a touch more exposure.
-  setCrypt(crypt) {
+  // Crypt light: dark blue-grey fog (or the dungeon kind's own), a cool
+  // moon overhead, a touch more exposure.
+  setCrypt(crypt, fog = null) {
     const g = this.g;
     const f = g.scene.fog;
     if (crypt) {
       this.townLight ??= { fog: f.color.clone(), near: f.near, far: f.far, hemi: [g.hemi.color.clone(), g.hemi.groundColor.clone(), g.hemi.intensity], sun: [g.sun.color.clone(), g.sun.intensity], exp: g.renderer.toneMappingExposure, clear: g.renderer.getClearColor(new THREE.Color()) };
-      f.color.set('#1b1e27');
+      f.color.set(fog ?? '#1b1e27');
       // (Not scene.background: that would clear the screen on each of the frame's three passes.)
       g.renderer.setClearColor(f.color);
       g.hemi.color.set('#a9b8d6');

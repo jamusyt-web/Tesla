@@ -181,7 +181,7 @@ export const SHOP_PANELS = {
         h('div.till', h('div', h('div.muted', 'In the till'), h('div.big.gold', `${fmt(L.till)} 🪙`)), h('button.btn.green', { disabled: !L.till, on: { click: () => this.rpc('shop.collect', {}).then((r) => (sfx.coin(), this.hud.toast(`Collected ${fmt(r.gold)} 🪙`, 'gold'), this.hud.setTill?.(0), draw())) } }, 'Collect')),
         h('div.kv', h('span', 'Last 24 hours'), h('b', `${L.day.count} sales · ${fmt(L.day.gross - L.day.fee)} 🪙`)),
         h('div.kv', h('span', 'All time'), h('b', `${fmt(st.stats?.sales || 0)} sold · ${fmt(st.stats?.earned || 0)} 🪙`)),
-        homeTown.call(this, st, draw),
+        ...[homeTown.call(this, st, draw)].filter(Boolean),
         h('div.muted', { style: { fontSize: '12px', margin: '4px 0 8px' } }, `Fees: ${Math.round(MARKET_TAX * 100)}% on sales to players (like the market), ${SHOP.NPC_FEE_PM / 10}% guild levy on sales to townsfolk.`),
         h('div.row.wrap', h('label.qty', 'Name ', name), h('button.btn.small', { on: { click: () => this.rpc('shop.setup', { name: name.value }, 'Renamed!').then(draw) } }, 'Rename'), h('button.btn.small' + (st.open ? '.red' : '.green'), { on: { click: () => this.rpc('shop.setup', { open: !st.open }, st.open ? 'Shop closed.' : 'Shop open!').then(draw) } }, st.open ? 'Close shop' : 'Open shop')),
         h('div.section-title', 'Recent sales'),

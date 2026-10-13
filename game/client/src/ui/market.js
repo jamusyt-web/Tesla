@@ -43,7 +43,7 @@ export const MARKET_PANELS = {
       const list = () => {
         clear(listEl);
         // Fine/Masterwork versions only show up once someone's trading them, you own one, or you search for them.
-        const listed = (id) => !ITEMS[id].q || st.summary[id] || this.me.inv[id] > 0 || st.q;
+        const listed = (id) => !ITEMS[id].bound && (!ITEMS[id].q || st.summary[id] || this.me.inv[id] > 0 || st.q);
         const ids = Object.keys(ITEMS).filter((id) => listed(id) && (st.cat === 'all' || ITEMS[id].cat === st.cat) && ITEMS[id].name.toLowerCase().includes(st.q.toLowerCase()));
         ids.sort((a, b) => (st.summary[b]?.vol || 0) + (st.summary[b] ? 1 : 0) - ((st.summary[a]?.vol || 0) + (st.summary[a] ? 1 : 0)) || ITEMS[a].value - ITEMS[b].value);
         for (const id of ids) {
@@ -60,7 +60,7 @@ export const MARKET_PANELS = {
           );
         }
       };
-      c.body.append(search, h('div.filters', ...[['all', 'All'], ...Object.entries(CATEGORIES)].map(([k, l]) => h('button.chip' + (st.cat === k ? '.on' : ''), { on: { click: () => ((st.cat = k), render()) } }, l))), listEl);
+      c.body.append(search, h('div.filters', ...[['all', 'All'], ...Object.entries(CATEGORIES).filter(([k]) => k !== 'special')].map(([k, l]) => h('button.chip' + (st.cat === k ? '.on' : ''), { on: { click: () => ((st.cat = k), render()) } }, l))), listEl);
       list();
     };
     c.refresh = () => {

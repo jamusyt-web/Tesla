@@ -93,7 +93,7 @@ export const BOARD_PANELS = {
 };
 
 function jobForm(body, post, done) {
-  const items = Object.entries(ITEMS).filter(([id]) => !qOf(id)).sort((a, b) => a[1].name.localeCompare(b[1].name));
+  const items = Object.entries(ITEMS).filter(([id, it]) => !qOf(id) && !it.bound).sort((a, b) => a[1].name.localeCompare(b[1].name));
   const pick = h('select', ...Object.entries(CATEGORIES).map(([cat, label]) => h('optgroup', { label }, ...items.filter(([, it]) => it.cat === cat).map(([id, it]) => h('option', { value: id, selected: id === post.item }, it.name)))));
   const qty = h('input', { type: 'number', min: 1, max: 999, value: post.qty, inputMode: 'numeric' });
   const per = h('input', { type: 'number', min: 1, value: post.per ?? Math.ceil(ITEMS[post.item].value * 1.25), inputMode: 'numeric' });

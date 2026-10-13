@@ -1,7 +1,7 @@
 import { h, clear, fmt } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
 import { ITEMS } from '../../../shared/items.js';
-import { DUNGEONS, MAX_WIPES } from '../../../shared/dungeon.js';
+import { DUNGEONS, MAX_WIPES, word } from '../../../shared/dungeon.js';
 import { glyph } from './glyphs.js';
 import { iconEl } from './panels.js';
 
@@ -48,27 +48,29 @@ export const DUNGEON_PANELS = {
         h(
           'div.tabs',
           ...info.tiers.map((t) =>
-            h('button' + (t.tier === tier ? '.on' : '') + (t.unlocked ? '' : '.locked'), { on: { click: () => (t.unlocked ? ((tier = t.tier), render()) : this.hud.toast(`Clear ${info.tiers[t.tier - 2].name} first.`, 'err')) } }, t.unlocked ? '' : glyph('lock'), t.name),
+            h('button' + (t.tier === tier ? '.on' : '') + (t.unlocked ? '' : '.locked'), { on: { click: () => (t.unlocked ? ((tier = t.tier), render()) : this.hud.toast(t.lock ?? 'Not yet.', 'err')) } }, t.unlocked ? '' : glyph('lock'), t.name),
           ),
         ),
-        h('div.kv', h('span', 'Suggested'), h('b', `Level ${T.rec.level}+ · ${T.rec.gear}`)),
+        ...(info.featured ? [h('div.rowcard.dmod', h('div.ic', glyph('trophy')), h('div.grow', h('div.t', 'Featured today'), h('div.s', 'Double treasure in the boss chest for everyone.')))] : []),
+        h('div.kv', h('span', 'Suggested'), h('b', `Combat ${T.rec.level}+${T.rec.gear ? ` · ${T.rec.gear}` : ''}`)),
+        ...(T.nightmare ? [h('div.warn', 'This week only: every monster is as strong as a level 46 one. Bring friends.')] : []),
         h('div.kv', h('span', 'Monsters'), h('b', T.hp === 1 ? 'Normal' : `${Math.round(T.hp * 100)}% health · ${Math.round(T.atk * 100)}% damage`)),
         h('div.kv', h('span', 'Loot'), h('b.gold', T.loot === 1 ? 'Normal' : `×${T.loot}`)),
         h('div.kv', h('span', 'First clear today'), h('b', T.firstToday ? h('span.gold', 'Bonus chest: double treasure!') : 'Done (come back tomorrow)')),
-        h('div.section-title', 'Crypt'),
+        h('div.section-title', `${(info.word ?? 'crypt')[0].toUpperCase()}${(info.word ?? 'crypt').slice(1)}`),
         h(
           'div.tabs',
           h('button' + (mode === 'random' ? '.on' : ''), { on: { click: () => ((mode = 'random'), render()) } }, 'New every time'),
           h('button' + (mode === 'weekly' ? '.on' : ''), { on: { click: () => ((mode = 'weekly'), render()) } }, 'This week’s'),
         ),
-        h('div.muted', { style: { margin: '-6px 0 10px', fontSize: '13px' } }, mode === 'weekly' ? `The same crypt for everyone until it changes in ${fmtIn(info.nextWeekIn)}: race the board below.` : 'A fresh crypt each time you go in.'),
-        h('div.muted', { style: { fontSize: '13px', marginBottom: '10px' } }, `Groups face more halls, tougher monsters and elites with two powers, and every hero earns more gold and treasure. Health doesn't come back on its own down there: rest at the brazier, pray at the shrine, clear rooms. ${MAX_WIPES + 1} wipes and the crypt throws you out.`),
+        h('div.muted', { style: { margin: '-6px 0 10px', fontSize: '13px' } }, mode === 'weekly' ? `The same ${info.word ?? 'crypt'} for everyone until it changes in ${fmtIn(info.nextWeekIn)}: race the board below.` : `A fresh ${info.word ?? 'crypt'} each time you go in.`),
+        h('div.muted', { style: { fontSize: '13px', marginBottom: '10px' } }, `Groups face more halls, tougher monsters and elites with two powers, and every hero earns more gold and treasure. Health doesn't come back on its own down there: rest at the brazier, pray at the shrine, clear rooms. ${MAX_WIPES + 1} wipes and the ${info.word ?? 'crypt'} throws you out.`),
       );
       // Going in
       const enter = (party) => (this.close(), g.enterCrypt(kind, { tier, mode, party }));
       const run = info.partyRun;
       if (g.dungeon) c.body.append(h('div.empty', 'You are in a dungeon right now.'));
-      else if (run?.canJoin) c.body.append(h('button.btn.green.block.big', { on: { click: () => (this.close(), this.rpc('dungeon.join', { run: run.id })) } }, glyph('people'), `Join your party (${run.inside} inside, ${info.tiers[run.tier - 1].name})`));
+      else if (run?.canJoin) c.body.append(h('button.btn.green.block.big', { on: { click: () => (this.close(), this.rpc('dungeon.join', { run: run.id })) } }, glyph('people'), `Join your party (${run.inside} inside, ${info.tiers.find((t) => t.tier === run.tier)?.name ?? ''})`));
       else if (run) c.body.append(h('div.empty', 'Your party is inside, but you can’t join this run.'));
       else {
         if (lead && others.length) c.body.append(h('button.btn.green.block.big', { on: { click: () => enter(true) } }, glyph('people'), `Go in with your party (${others.length + 1})`));
@@ -149,7 +151,7 @@ export const DUNGEON_PANELS = {
   // Leaving: a word of warning before you go (you can't come back to this run).
   dleave(c) {
     const g = this.hud.game;
-    this.title(c, 'Leave the crypt?', 'stairs');
+    this.title(c, `Leave the ${word(this.hud.game?.dungeon?.layout?.kind ?? 'hollow_crypt')}?`, 'stairs');
     const done = g.run?.state.boss;
     c.body.append(
       h('p', done ? 'The Pale Count is dust. Back to the surface?' : 'You keep everything you’ve found, but you can’t come back into this run.'),

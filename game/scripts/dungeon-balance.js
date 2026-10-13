@@ -1,13 +1,15 @@
 // Dungeon balance check: simulates whole runs (every room, the boss, wipes,
 // Last Light, the shrine, potions and revives) with the real numbers from
 // shared/, for heroes of different levels, gear and party sizes.
-//   node scripts/dungeon-balance.js        (N=500 for steadier numbers)
+//   node scripts/dungeon-balance.js        (N=500 for steadier numbers;
+//   KIND=<dungeon kind> for another kind than the Hollow Crypt)
 import { generateDungeon, scaledDef, ROOM_HEAL, KO_HP, MAX_WIPES } from '../shared/dungeon.js';
 import { MONSTERS, heroStats, damage } from '../shared/monsters.js';
 import { ITEMS } from '../shared/items.js';
 
+const KIND = process.env.KIND || 'hollow_crypt';
 function sim({ n, level, gear, tier = 1, potions = 3, seed }) {
-  const L = generateDungeon(seed, { party: n, tier });
+  const L = generateDungeon(seed, { kind: KIND, party: n, tier });
   const st = heroStats(level, level, gear.map((g) => ITEMS[g]));
   const heroes = Array.from({ length: n }, () => ({ ...st, max: st.hp, charge: 0, pots: potions, alive: true, ll: false }));
   let wipes = 0, rounds = 0, shrine = false;
@@ -101,6 +103,7 @@ const cases = [
   ['T2 four L8 iron+plate', { n: 4, level: 8, gear: ['sword_iron', 'armor_iron'], tier: 2 }],
   ['T3 solo L12 gold', { n: 1, level: 12, gear: ['sword_gold', 'armor_iron', 'amulet_sapphire'], tier: 3 }],
   ['T3 four L12 gold', { n: 4, level: 12, gear: ['sword_gold', 'armor_iron', 'amulet_sapphire'], tier: 3 }],
+  ['Deep four L18 gold', { n: 4, level: 18, gear: ['sword_gold~master', 'armor_iron~master', 'amulet_sapphire~master'], tier: 4 }],
 ];
 for (const [name, c] of cases) {
   let ok = 0, w = 0, r = 0; const N = +(process.env.N || 200);

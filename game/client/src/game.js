@@ -27,7 +27,7 @@ import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
   NODES, buildColliders, buildRoads, NavGrid, stepPath, MOVE_SPEED, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById, MAP,
 } from '../../shared/world.js';
-import { USE_RANGE } from '../../shared/dungeon.js';
+import { USE_RANGE, DUNGEONS } from '../../shared/dungeon.js';
 
 const INTERP_DELAY = 130; // ms behind real time we render other players
 const lerpAngle = (a, b, t) => {
@@ -1526,7 +1526,7 @@ export class GameClient {
     this.guide.dots.count = 0;
     this.labels.showStatic(false);
     this.labels.makeDungeon(view);
-    this.mood.setCrypt(true);
+    this.mood.setCrypt(true, DUNGEONS[d.layout.kind]?.fog ?? null);
     Object.assign(this.cam, { yaw: 0, curYaw: 0, pitch: 0.95, curPitch: 0.95, dist: isTouch ? 15 : 16 });
     this.#syncRun(d.state, false);
     this.hud.setMode('dungeon');

@@ -9,7 +9,7 @@ import { spotsOf, stationPos } from '../../../shared/stations.js';
 import { STATIONS } from '../../../shared/crafting.js';
 import { ITEMS } from '../../../shared/items.js';
 import { BUILDINGS, GATE, PROPS, doorPoint, stoneById, stoneFront, STONE_RANGE, ENTRANCES, entranceFront } from '../../../shared/world.js';
-import { ENTRANCE_RANGE } from '../../../shared/dungeon.js';
+import { ENTRANCE_RANGE, word } from '../../../shared/dungeon.js';
 import { passageAt, passageOpen, passageNeeds } from '../../../shared/travel.js';
 
 // Walk to the recipe's station, then make it by hand.
@@ -251,7 +251,7 @@ export function enterCrypt(g, kind, opts = {}) {
       .catch((err) => g.hud.toast(err.message, 'err'));
   if (Math.hypot(L.x - fx, L.z - fz) <= ENTRANCE_RANGE - 2) return go();
   g.stopGather();
-  g.hud.toast('Walking to the crypt…');
+  g.hud.toast(`Walking to the ${word(kind)}…`);
   if (!g.walkTo(fx, fz, true, go)) g.hud.toast("Can't find the way there.", 'err');
 }
 

@@ -3,7 +3,7 @@ import * as assets from './assets.js';
 import { mesh } from './toon.js';
 import { SHADOW_LAYER } from './chunkmerge.js';
 import { NavGrid } from '../../../shared/world.js';
-import { dungeonCol, dungeonWalkable, dungeonBounds, setGate, roomAt, linkAt, trapUp, trapWarn, CELL } from '../../../shared/dungeon.js';
+import { dungeonCol, dungeonWalkable, dungeonBounds, setGate, roomAt, linkAt, trapUp, trapWarn, CELL, DUNGEONS } from '../../../shared/dungeon.js';
 
 // A dungeon run, drawn from the layout the server sends (shared/dungeon.js
 // makes it): 4 m floor tiles, walls on every floor edge that meets rock,
@@ -81,6 +81,10 @@ export class DungeonView {
     this.scene = scene;
     this.fx = fx;
     this.layout = layout;
+    // Which dungeon model kit draws it (SPEC §4.7); a kind whose kit isn't
+    // loaded falls back to the crypt's pieces.
+    const K = DUNGEONS[layout.kind] ?? {};
+    this.kit = K.kit && assets.has(`${K.kit}:template-wall`) ? K.kit : 'modular-dungeon';
     this.low = low;
     const L = layout;
     this.root = new THREE.Group();
@@ -136,7 +140,7 @@ export class DungeonView {
         if (rock(0, 1) && rock(1, 0)) corners.se.push({ x: x + 2, z: z + 2, rot: Math.PI, sv, room });
         if (rock(0, 1) && rock(-1, 0)) corners.sw.push({ x: x - 2, z: z + 2, rot: Math.PI / 2, sv, room });
       }
-    this.floors = ['template-floor', 'template-floor-detail', 'template-floor-detail-a'].map((n, v) => new Copies(this.root, `modular-dungeon:${n}`, floors[v], { castShadow: false, outline: false }));
+    this.floors = ['template-floor', 'template-floor-detail', 'template-floor-detail-a'].map((n, v) => new Copies(this.root, `${this.kit}:${n}`, floors[v], { castShadow: false, outline: false }));
     for (const f of this.floors)
       f.each((m) => {
         m.userData.ground = true;
@@ -147,19 +151,19 @@ export class DungeonView {
     for (const side of Object.keys(SIDES)) {
       const g = new THREE.Group();
       this.root.add(g);
-      const parts = [new Copies(g, 'modular-dungeon:template-wall', walls[side][0], { castShadow: false }), new Copies(g, 'modular-dungeon:template-wall-detail-a', walls[side][1], { castShadow: false })];
+      const parts = [new Copies(g, `${this.kit}:template-wall`, walls[side][0], { castShadow: false }), new Copies(g, `${this.kit}:template-wall-detail-a`, walls[side][1], { castShadow: false })];
       this.walls[side] = { group: g, parts, h: 1, sides: [side] };
     }
     for (const type of Object.keys(corners)) {
       const g = new THREE.Group();
       this.root.add(g);
-      this.walls[type] = { group: g, parts: [new Copies(g, 'modular-dungeon:template-wall-corner', corners[type], { castShadow: false })], h: 1, sides: [...type] };
+      this.walls[type] = { group: g, parts: [new Copies(g, `${this.kit}:template-wall-corner`, corners[type], { castShadow: false })], h: 1, sides: [...type] };
     }
     // Without the kit: plain blocks, so a missing model never leaves you in the void.
-    if (!assets.has('modular-dungeon:template-wall')) this.#fallbackWalls(walls);
+    if (!assets.has(`${this.kit}:template-wall`)) this.#fallbackWalls(walls);
 
     // ── The way out ─────────────────────────────────────────────────────
-    const stairs = assets.make('modular-dungeon:stairs');
+    const stairs = assets.make(`${this.kit}:stairs`);
     if (stairs) {
       stairs.object.scale.set(0.9, 0.5, 0.48);
       stairs.object.rotation.y = ex.rot;
@@ -172,7 +176,7 @@ export class DungeonView {
     // ── Gates (bars that drop into the floor) and arches ────────────────
     this.gates = new Map();
     for (const g of L.gates) {
-      const made = assets.make('modular-dungeon:gate-metal-bars');
+      const made = assets.make(`${this.kit}:gate-metal-bars`);
       const obj = made?.object ?? mesh(new THREE.BoxGeometry(4, 4, 0.3), '#4a4540');
       obj.position.set(g.x, 0, g.z);
       obj.rotation.y = g.dir === 'n' || g.dir === 's' ? 0 : Math.PI / 2;
@@ -194,7 +198,7 @@ export class DungeonView {
       this.gates.set(g.id, gv);
     }
     this.arches = L.arches.map((a, i) => {
-      const made = assets.make('modular-dungeon:gate');
+      const made = assets.make(`${this.kit}:gate`);
       if (!made) return null;
       made.object.position.set(a.x, 0, a.z);
       made.object.rotation.y = a.dir === 'n' || a.dir === 's' ? 0 : Math.PI / 2;

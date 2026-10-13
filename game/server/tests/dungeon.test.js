@@ -179,7 +179,8 @@ test('a solo run: door, gates, no regen, Last Light, key, vault, boss, chest, re
   toDoor(a);
   const townPos = { x: client(a).ent.x, z: client(a).ent.z };
   const info0 = (await a.call('dungeon.info', { kind: 'hollow_crypt' })).data;
-  assert.deepEqual(info0.tiers.map((t) => t.unlocked), [true, false, false]);
+  assert.deepEqual(info0.tiers.map((t) => t.unlocked), [true, ...info0.tiers.slice(1).map(() => false)]);
+  assert.deepEqual(info0.tiers.slice(0, 4).map((t) => t.name), ['Tier 1', 'Tier 2', 'Tier 3', 'Deep']);
   assert.ok(info0.tiers[0].firstToday);
   assert.match((await a.call('dungeon.enter', { kind: 'hollow_crypt', tier: 2 })).err, /Clear Tier 1 first/);
   const w = a.next((m) => m.t === 'welcome' && m.dungeon, 3000, a.inbox.length);
@@ -289,7 +290,7 @@ test('a solo run: door, gates, no regen, Last Light, key, vault, boss, chest, re
 
   // Tier 2 is open now; the day's bonus is spent.
   const info = (await a.call('dungeon.info', { kind: 'hollow_crypt' })).data;
-  assert.deepEqual(info.tiers.map((t) => t.unlocked), [true, true, false]);
+  assert.deepEqual(info.tiers.map((t) => t.unlocked).slice(0, 4), [true, true, false, false]);
   assert.equal(info.tiers[0].firstToday, false);
   assert.equal(info.tiers[0].best[0].party, 1);
   assert.match((await a.call('dungeon.enter', { kind: 'hollow_crypt', tier: 2 })).err, /Catch your breath/);
@@ -301,13 +302,13 @@ test('a solo run: door, gates, no regen, Last Light, key, vault, boss, chest, re
   assert.ok(run2.monsterDef(m2, 1).hp > MONSTERS[m2.type].hp * 1.3, 'tier 2 monsters are tougher');
   // This week's crypt is the same for everyone.
   assert.equal(run2.layout.seed, weeklySeed('hollow_crypt', 2));
-  // The day's bonus is per tier: Tier 2's first clear still earns it.
+  // The day's bonus is once per dungeon kind (any tier): Tier 2 doesn't earn it again.
   const unrig2 = rig(run2, weak);
   const bossMob = [...run2.mobs.values()].find((m) => m.boss);
   await fight(a, bossMob);
   unrig2();
   assert.ok(run2.bossDown);
-  assert.equal(run2.grants.get(a.id).boss.firstToday, true);
+  assert.equal(run2.grants.get(a.id).boss.firstToday, false);
   assert.equal(game.bestTier(a.id, 'hollow_crypt'), 2);
   await a.call('dungeon.leave');
   a.ws.close();
@@ -510,7 +511,7 @@ test('safety: no skipping tiers by joining, a run closing mid-fight ends the fig
   await rookie.next((m) => m.t === 'partyInvite');
   await rookie.call('party.answer', { accept: true });
   toDoor(vet);
-  assert.match((await vet.call('dungeon.enter', { kind: 'hollow_crypt', tier: 2, party: true })).err, /hasn't cleared Tier 1/);
+  assert.match((await vet.call('dungeon.enter', { kind: 'hollow_crypt', tier: 2, party: true })).err, /Rookie can't go in yet: Clear Tier 1 first/);
   assert.ok((await vet.call('dungeon.enter', { kind: 'hollow_crypt', tier: 2 })).ok, 'alone is fine');
   const run = runOf(vet);
   assert.equal(run.tier, 2);
@@ -544,4 +545,100 @@ test('safety: no skipping tiers by joining, a run closing mid-fight ends the fig
   assert.ok(!game.runs.has(run.id));
   unrig();
   for (const p of [vet, rookie]) p.ws.close();
+});
+
+// ── Dungeon kinds (Phase 1, M5) ──
+import fs from 'node:fs';
+import { useMap, SHIPPED_MAP } from '../map.js';
+import { rebuildWorld } from '../static.js';
+import { Battle } from '../battle.js';
+import { mobStats } from '../../shared/monsters.js';
+import { xpForLevel } from '../../shared/skills.js';
+import { DUNGEONS, TIERS, NIGHTMARE, DEEP, nightmareKind, featuredKind, KINDS, recFor, word, standardChests } from '../../shared/dungeon.js';
+import { harness } from './harness.js';
+import { twoTownMap, addTestvaleCave, removeTestvaleCave, TV } from './twotown.js';
+
+test("Nightmare restats every monster to level 46; Deep is the fourth tier", () => {
+  const n = scaledDef(MONSTERS.thrall, 1, { tier: NIGHTMARE });
+  assert.deepEqual([n.hp, n.atk, n.def], [1301, 122, 46]);
+  const boss = scaledDef(MONSTERS.pale_count, 1, { tier: NIGHTMARE });
+  assert.deepEqual([boss.hp, boss.atk, boss.def], [2602, 128, 48]);
+  const s = mobStats(46, 'normal');
+  assert.equal(n.xp, s.xp * 4, 'tier 1 multipliers, loot ×4');
+  assert.equal(TIERS[NIGHTMARE].loot, 4);
+  const deep = scaledDef(MONSTERS.thrall, 1, { tier: DEEP });
+  assert.equal(deep.hp, Math.round(MONSTERS.thrall.hp * 3.0));
+  assert.equal(TIERS[DEEP].name, 'Deep');
+  assert.deepEqual(recFor('hollow_crypt', DEEP), { level: 18, gear: null });
+  assert.equal(word('hollow_crypt'), 'crypt');
+  assert.ok(KINDS().includes(nightmareKind()) && KINDS().includes(featuredKind()));
+});
+
+test("Testvale's cave kind generates, runs to the boss, and pays its own reagent", () => {
+  addTestvaleCave();
+  useMap(twoTownMap({ cave: true }));
+  rebuildWorld();
+  const { game, hero, call, done } = harness();
+  try {
+    for (let seed = 1; seed <= 20; seed++) {
+      const L = generateDungeon(seed, { kind: 'testvale_cave', tier: 2 });
+      assert.equal(L.kind, 'testvale_cave');
+      assert.ok(L.spawns.some((x) => x.boss && x.monster === 'pale_count'));
+    }
+    const c = hero('Caver');
+    const door = W.ENTRANCES.find((e) => e.kind === 'testvale_cave');
+    Object.assign(c.ent, { x: door.x, z: door.z + 6 });
+    assert.match(call(c, 'dungeon.enter', { kind: 'testvale_cave', tier: DEEP }).err, /Clear Tier 3 first/);
+    const info = call(c, 'dungeon.info', { kind: 'testvale_cave' }).data;
+    assert.equal(info.word, 'cave');
+    assert.deepEqual(info.tiers.find((t) => t.tier === 1).rec, { level: 13, gear: null });
+    assert.ok(call(c, 'dungeon.enter', { kind: 'testvale_cave', tier: 1 }).ok);
+    const run = c.ch;
+    assert.ok(run.isRun && run.kind === 'testvale_cave');
+    // Fight the boss's pack down (the test skips the walk).
+    c.fx = { at: Date.now() + 1e9, E: {} };
+    const boss = [...run.mobs.values()].find((m) => m.boss);
+    const b = new Battle(run, boss);
+    run.battles.set(b.id, b);
+    b.join(c);
+    for (let k = 0; k < 20 && !b.over; k++) {
+      b.fighters.get(c.id).hp = 9999;
+      b.mobHp = 1;
+      b.choose(c, 'attack');
+      b.resolve();
+    }
+    assert.ok(run.bossDown, 'the boss fell');
+    const loot = run.grants.get(c.id)?.boss;
+    assert.ok(loot.items.slime_gel >= 3, `the cave's reagent: ${JSON.stringify(loot.items)}`);
+    assert.equal(loot.firstToday, true);
+    assert.ok(loot.gold >= 24 * 13, 'gold scaled by its Tier 1 level');
+    // A second clear of the same kind today (any tier) pays no first-clear bonus.
+    assert.equal(game.firstClearToday(c.id, 'testvale_cave'), false);
+    assert.equal(game.firstClearToday(c.id, 'hollow_crypt'), true, 'another kind still has its own');
+  } finally {
+    done();
+    useMap(JSON.parse(fs.readFileSync(SHIPPED_MAP, 'utf8')));
+    rebuildWorld();
+    removeTestvaleCave();
+  }
+});
+
+test("the week's Nightmare needs Tier 3 and Combat 40, and only in its week", () => {
+  const { game, hero, done } = harness();
+  try {
+    const c = hero('Dreamer');
+    const kind = nightmareKind();
+    assert.match(game.tierLock(c.id, kind, NIGHTMARE), /Clear Tier 3 first/);
+    game.db.prepare("INSERT INTO dungeon_runs (kind, tier, mode, week, party, heroes, hero_ids, seconds, finished_at) VALUES (?, 3, 'random', 0, 1, '[]', ?, 100, ?)").run(kind, JSON.stringify([c.id]), Date.now());
+    assert.match(game.tierLock(c.id, kind, NIGHTMARE), /Combat 40/);
+    c.hero.skills.combat = xpForLevel(40);
+    assert.equal(game.tierLock(c.id, kind, NIGHTMARE), null);
+    assert.equal(game.tierLock(c.id, kind, DEEP), null, 'Deep opens after Tier 3');
+    // Chests by the standard rule: nothing is a real outcome, and the boss rolls twice.
+    const C = standardChests({ rec1: 10, bar: 'iron_bar', food: 'grilled_fish', gem: 'sapphire' });
+    assert.deepEqual(C.vault.gold, [100, 180]);
+    assert.equal(C.boss.rolls, 2);
+  } finally {
+    done();
+  }
 });

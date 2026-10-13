@@ -22,7 +22,7 @@ import { Channel, q2 } from './channel.js';
 import { Battle } from './battle.js';
 import { DungeonRun } from './dungeons.js';
 import { Parties } from './party.js';
-import { DUNGEONS, TIERS, MODIFIERS, ENTRANCE_RANGE, MAX_RUN_HEROES, MAX_RUNS, READY_MS, ENTER_COOLDOWN_MS, ENGAGE_PATH, modifierFor, weeklySeed, weekIndex, dayIndex } from '../shared/dungeon.js';
+import { DUNGEONS, TIERS, MODIFIERS, ENTRANCE_RANGE, MAX_RUN_HEROES, MAX_RUNS, READY_MS, ENTER_COOLDOWN_MS, ENGAGE_PATH, NIGHTMARE, NIGHTMARE_COMBAT, modifierFor, weeklySeed, weekIndex, dayIndex, nightmareKind, featuredKind, recFor, word } from '../shared/dungeon.js';
 import { world, rebuildWorld } from './static.js';
 import { register, dispatch, allowedInRun } from './rpc.js';
 import { emit } from './events.js';
@@ -424,15 +424,29 @@ export class Game {
   bestTier(heroId, kind) {
     return this.db.prepare('SELECT MAX(r.tier) AS t FROM dungeon_runs r, json_each(r.hero_ids) j WHERE r.kind = ? AND j.value = ?').get(kind, heroId)?.t ?? 0;
   }
+  // Why a hero can't go into a tier, or null. Tiers 2–3 and Deep open as the
+  // one before is cleared; the week's Nightmare needs Tier 3 and Combat 40.
+  tierLock(heroId, kind, tier, now = Date.now()) {
+    if (tier === NIGHTMARE) {
+      if (nightmareKind(now) !== kind) return `This week's Nightmare is in ${DUNGEONS[nightmareKind(now)]?.name ?? 'another dungeon'}.`;
+      if (this.bestTier(heroId, kind) < 3) return `Clear ${TIERS[3].name} first.`;
+      const h = this.online.get(heroId)?.hero ?? this.heroes.load(heroId);
+      if (levelFromXp(h?.skills?.combat || 0) < NIGHTMARE_COMBAT) return `The Nightmare needs Combat ${NIGHTMARE_COMBAT}.`;
+      return null;
+    }
+    if (tier > 1 && this.bestTier(heroId, kind) < tier - 1) return `Clear ${TIERS[tier - 1].name} first.`;
+    return null;
+  }
   #checkEntry(c, kind, tier, mode) {
     if (!DUNGEONS[kind]) fail('No such dungeon.');
     if (!TIERS[tier]) fail('No such tier.');
     if (mode !== 'random' && mode !== 'weekly') fail('Bad mode.');
     this.#notBusy(c);
-    if (!ENTRANCES.some((e) => e.kind === kind && Math.hypot(c.ent.x - e.x, c.ent.z - e.z) <= ENTRANCE_RANGE + 4)) fail('Walk up to the crypt door first.');
-    if (tier > 1 && this.bestTier(c.hero.id, kind) < tier - 1) fail(`Clear ${TIERS[tier - 1].name} first.`);
+    if (!ENTRANCES.some((e) => e.kind === kind && Math.hypot(c.ent.x - e.x, c.ent.z - e.z) <= ENTRANCE_RANGE + 4)) fail(`Walk up to the ${word(kind)} door first.`);
+    const lock = this.tierLock(c.hero.id, kind, tier);
+    if (lock) fail(lock);
     if (Date.now() - (c.lastRunAt || 0) < ENTER_COOLDOWN_MS) fail('Catch your breath a moment first.');
-    if ([...this.runs.values()].filter((r) => !r.ended).length >= MAX_RUNS) fail('The crypt is crowded right now. Try again in a minute.');
+    if ([...this.runs.values()].filter((r) => !r.ended).length >= MAX_RUNS) fail(`The ${word(kind)} is crowded right now. Try again in a minute.`);
   }
   #newRun(kind, tier, mode, size, partyId) {
     const now = Date.now();
@@ -460,7 +474,7 @@ export class Game {
     for (const id of p.members) {
       if (id === c.hero.id) continue;
       const o = this.online.get(id);
-      if (o && tier > 1 && this.bestTier(id, kind) < tier - 1) fail(`${o.hero.name} hasn't cleared ${TIERS[tier - 1].name} yet.`);
+      if (o && this.tierLock(id, kind, tier)) fail(`${o.hero.name} can't go in yet: ${this.tierLock(id, kind, tier)}`);
     }
     p.ready = { kind, tier, mode, leader: c.hero.id, yes: new Set([c.hero.id]), no: new Set(), asked: new Set(p.members.filter((id) => this.online.has(id))), until: Date.now() + READY_MS };
     for (const id of p.members) if (id !== c.hero.id) this.online.get(id)?.send({ t: 'dready', from: c.hero.name, kind, tier, mode, expiresIn: READY_MS });
@@ -469,14 +483,14 @@ export class Game {
     return { ready: true, expiresIn: READY_MS };
   }
   #tierOk(heroId, kind, tier) {
-    return tier <= 1 || this.bestTier(heroId, kind) >= tier - 1;
+    return !this.tierLock(heroId, kind, tier);
   }
   readyAnswer(c, yes) {
     const p = this.parties.get(c.hero.id);
     if (!p?.ready) fail('There is no ready check right now.');
     if (yes) {
       this.#notBusy(c);
-      if (!this.#tierOk(c.hero.id, p.ready.kind, p.ready.tier)) fail(`Clear ${TIERS[p.ready.tier - 1].name} first.`);
+      if (!this.#tierOk(c.hero.id, p.ready.kind, p.ready.tier)) fail(this.tierLock(c.hero.id, p.ready.kind, p.ready.tier));
       p.ready.yes.add(c.hero.id);
     } else p.ready.no.add(c.hero.id);
     this.#checkReady(p);
@@ -511,7 +525,7 @@ export class Game {
     const p = this.parties.get(c.hero.id);
     if (!run.partyId || p?.id !== run.partyId) fail("That isn't your party's run.");
     this.#notBusy(c);
-    if (!this.#tierOk(c.hero.id, run.kind, run.tier)) fail(`Clear ${TIERS[run.tier - 1].name} first.`);
+    if (!this.#tierOk(c.hero.id, run.kind, run.tier)) fail(this.tierLock(c.hero.id, run.kind, run.tier));
     if (!run.canJoin(c.hero.id)) fail(run.bossDown ? 'They have already beaten the boss.' : run.full ? 'That run is full.' : "You can't rejoin a run you left.");
     this.#intoRun(c, run);
     this.parties.push(p);
@@ -566,21 +580,30 @@ export class Game {
     const p = run.partyId && this.parties.parties.get(run.partyId);
     if (p) this.parties.push(p);
   }
+  // The day's first clear of a kind pays the bonus (once per hero and kind per day, any tier).
+  firstClearToday(heroId, kind, now = Date.now()) {
+    return this.db.prepare('SELECT MAX(day) AS day FROM dungeon_daily WHERE account_id = ? AND kind = ?').get(heroId, kind)?.day !== dayIndex(now);
+  }
   endAllRuns() {
-    for (const run of [...this.runs.values()]) this.closeRun(run, 'The crypt is being rebuilt. Back to the surface!');
+    for (const run of [...this.runs.values()]) this.closeRun(run, `The ${word(run.kind)} is being rebuilt. Back to the surface!`);
   }
   dungeonInfo(c, kind) {
     const K = DUNGEONS[kind];
     if (!K) fail('No such dungeon.');
     const now = Date.now();
     const db = this.db;
-    const tierRows = Object.keys(TIERS).map(Number).map((t) => ({
+    const firstToday = this.firstClearToday(c.hero.id, kind, now);
+    // The Nightmare shows only in the week it's here.
+    const tiers = Object.keys(TIERS).map(Number).filter((t) => t !== NIGHTMARE || nightmareKind(now) === kind);
+    const tierRows = tiers.map((t) => ({
       tier: t,
       ...TIERS[t],
-      unlocked: t === 1 || this.bestTier(c.hero.id, kind) >= t - 1,
+      rec: recFor(kind, t),
+      unlocked: !this.tierLock(c.hero.id, kind, t, now),
+      lock: this.tierLock(c.hero.id, kind, t, now),
       best: db.prepare("SELECT party, MIN(seconds) AS seconds FROM dungeon_runs WHERE kind = ? AND tier = ? AND mode = 'random' GROUP BY party").all(kind, t),
       weekly: db.prepare("SELECT party, heroes, seconds FROM dungeon_runs WHERE kind = ? AND tier = ? AND mode = 'weekly' AND week = ? ORDER BY seconds LIMIT 5").all(kind, t, weekIndex(now)).map((r) => ({ ...r, heroes: JSON.parse(r.heroes) })),
-      firstToday: db.prepare('SELECT day FROM dungeon_daily WHERE account_id = ? AND kind = ? AND tier = ?').get(c.hero.id, kind, t)?.day !== dayIndex(now),
+      firstToday,
     }));
     const p = this.parties.get(c.hero.id);
     const run = p ? this.runForParty(p.id) : null;
@@ -588,8 +611,10 @@ export class Game {
     return {
       kind,
       name: K.name,
+      word: word(kind),
       blurb: K.blurb,
       tiers: tierRows,
+      featured: featuredKind(now) === kind,
       mod: { id: mod, ...MODIFIERS[mod] },
       party: p ? this.parties.view(p) : null,
       partyRun: run ? { id: run.id, inside: run.players.size, tier: run.tier, canJoin: run.canJoin(c.hero.id) } : null,
@@ -614,7 +639,7 @@ export class Game {
       const h = HANDLERS[m.t];
       if (!h) return;
       // Inside a dungeon only some things make sense (no fishing, travel, shops…).
-      if (c.ch?.isRun && !RUN_OK.has(m.t) && !(m.t === 'rpc' && allowedInRun(String(m.m)))) fail('Not inside the crypt.');
+      if (c.ch?.isRun && !RUN_OK.has(m.t) && !(m.t === 'rpc' && allowedInRun(String(m.m)))) fail(`Not inside the ${word(c.ch.kind)}.`);
       const res = h(this, c, m, now);
       if (m.rid) c.send({ t: 'res', rid: m.rid, ok: true, data: res ?? null });
     } catch (e) {
@@ -641,7 +666,7 @@ const HANDLERS = {
     if (!mob || mob.state === 'dead') fail('It ran off.');
     if (c.battle) fail('Already fighting!');
     if (dist(c.ent, mob) > 6) fail('Get closer first.');
-    if (c.ch.isRun && c.ch.ended) fail('The crypt is closing.');
+    if (c.ch.isRun && c.ch.ended) fail(`The ${word(c.ch.kind)} is closing.`);
     if (c.ch.isRun) {
       // No fighting through bars: you must be able to walk to it.
       const path = c.ch.nav.findPath(c.ent.x, c.ent.z, mob.x, mob.z);

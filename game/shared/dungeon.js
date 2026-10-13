@@ -10,6 +10,7 @@
 // an Elite drops. Everything here is deterministic from the seed.
 import { mulberry32 } from './world.js';
 import { CONTENT, mergeInto } from './content/index.js';
+import { mobStats } from './monsters.js';
 
 export const CELL = 4; // metres per cell
 export const PLAYER_R = 0.45;
@@ -20,22 +21,56 @@ const HALL = 2; // corridor
 const GRID = 26;
 
 // ── Dungeons, tiers and the day's twist ───────────────────────────────
+// A dungeon kind (SPEC §4.7): its look (kit and skin of the dungeon model
+// kit, dressing props, fog), its monsters, its reagent (`dust`), the town
+// it belongs to, the recommended Combat level per tier, and what to call
+// it in words ("the crypt", "the warren").
 export const DUNGEONS = {
   hollow_crypt: {
     name: 'The Hollow Crypt',
+    word: 'crypt',
     blurb: 'An old barrow under the Wilds, where the dead do not stay down. Its master, the Pale Count, keeps a fortune in his chamber.',
+    town: 'hearthvale',
+    kit: 'modular-dungeon',
+    skin: 'default',
+    dust: 'grave_dust',
+    dressing: [],
+    fog: null,
+    tiers: { 1: 5, 2: 8, 3: 12, 4: 18 },
+    gear: { 1: 'a Copper Sword', 2: 'an Iron Sword and Iron Plate', 3: 'a Sunforged Blade, Iron Plate and a Sapphire Amulet' },
     pool: ['thrall', 'crypt_skeleton', 'crypt_wisp'],
     elite: ['crypt_skeleton', 'thrall'],
     boss: { monster: 'pale_count', adds: ['thrall', 'thrall', 'crypt_skeleton'] },
   },
 };
 mergeInto(DUNGEONS, CONTENT.dungeons, 'dungeons');
-// Each tier is the same crypt, harder; clearing one unlocks the next.
+// The kinds in their fixed order (Hearthvale's first), for the week's
+// Nightmare and the day's featured dungeon.
+export const KINDS = () => Object.keys(DUNGEONS);
+export const word = (kind) => DUNGEONS[kind]?.word ?? 'dungeon';
+
+// Tiers are the same for every kind: each is the same place, harder.
+// Clearing one unlocks the next; Deep (4) opens after Tier 3, and the
+// week's Nightmare (5) at Combat 40 once Tier 3 is cleared.
+export const DEEP = 4;
+export const NIGHTMARE = 5;
+export const NIGHTMARE_LVL = 46; // its monsters are restatted to this level
+export const NIGHTMARE_COMBAT = 40;
 export const TIERS = {
-  1: { name: 'Tier 1', hp: 1, atk: 1, def: 0, loot: 1, rec: { level: 5, gear: 'a Copper Sword' } },
-  2: { name: 'Tier 2', hp: 1.6, atk: 1.35, def: 3, loot: 1.6, rec: { level: 8, gear: 'an Iron Sword and Iron Plate' } },
-  3: { name: 'Tier 3', hp: 2.45, atk: 1.9, def: 5, loot: 2.5, rec: { level: 12, gear: 'a Sunforged Blade, Iron Plate and a Sapphire Amulet' } },
+  1: { name: 'Tier 1', hp: 1, atk: 1, def: 0, loot: 1 },
+  2: { name: 'Tier 2', hp: 1.6, atk: 1.35, def: 3, loot: 1.6 },
+  3: { name: 'Tier 3', hp: 2.45, atk: 1.9, def: 5, loot: 2.5 },
+  4: { name: 'Deep', hp: 3.0, atk: 2.2, def: 8, loot: 3.5 },
+  5: { name: 'Nightmare', hp: 1, atk: 1, def: 0, loot: 4, nightmare: true },
 };
+// What a tier asks of you: { level, gear? } (the kind's recommended Combat level).
+export const recFor = (kind, tier) => {
+  const K = DUNGEONS[kind];
+  return { level: tier === NIGHTMARE ? NIGHTMARE_COMBAT : (K?.tiers?.[tier] ?? K?.tiers?.[1] ?? 1), gear: K?.gear?.[tier] ?? null };
+};
+// The week's Nightmare kind and the day's featured kind (double boss rolls).
+export const nightmareKind = (now = Date.now()) => KINDS()[weekIndex(now) % KINDS().length];
+export const featuredKind = (now = Date.now()) => KINDS()[dayIndex(now) % KINDS().length];
 // One twist a day, the same for everyone.
 export const MODIFIERS = {
   restless: { name: 'Restless Dead', text: 'One more monster in every hall, but they carry 30% more gold.', extra: 1, gold: 1.3 },
@@ -56,7 +91,7 @@ export const weeklySeed = (kind, tier, now = Date.now()) => {
 
 // ── Run rules ─────────────────────────────────────────────────────────
 export const MAX_RUN_HEROES = 4;
-export const MAX_RUNS = 16;
+export const MAX_RUNS = 24;
 export const ROOM_HEAL = 0.2; // clearing a room gives the heroes in it this share of their health back
 export const KO_HP = 0.5; // after a wipe you wake in the Entry Hall with this much
 export const MAX_WIPES = 3; // the fourth wipe ends the run
@@ -103,10 +138,13 @@ export const partyScale = (n) => {
 // heroes fighting it, the tier, the day's twist, and an elite's affixes. It
 // acts once per hero standing each round (the battle engine's perFighter), so
 // a group is pressed at least as hard as a hero alone.
+// Nightmare restats every monster to mobStats(46): a normal one, or a
+// dungeon boss (with Tier 1's multipliers on top).
 export function scaledDef(base, n, { elite = false, affixes = [], tier = 1, mod = 'still' } = {}) {
   const s = partyScale(n);
   const T = TIERS[tier] ?? TIERS[1];
   const M = MODIFIERS[mod] ?? MODIFIERS.still;
+  if (T.nightmare) base = { ...base, ...mobStats(NIGHTMARE_LVL, base.boss ? 'dboss' : 'normal') };
   const def = {
     ...base,
     hp: Math.round(base.hp * s.hp * (elite ? 2 : 1) * T.hp * (M.hp ?? 1)),
@@ -158,24 +196,40 @@ export const CHESTS = {
   },
 };
 mergeInto(CHESTS, CONTENT.chests, 'chests');
+// A new kind's chests by the standard rule (SPEC §4.7): gold scaled by its
+// Tier 1 level, its reagent, and a table of the town's bar, healing food,
+// gem, and (boss only) a set piece and its charm.
+export function standardChests({ rec1, bar, food, gem, sets = [], charm = null }) {
+  const g = (a, b) => [Math.round(a * rec1), Math.round(b * rec1)];
+  const base = [{ id: bar, w: 35, n: 3 }, { id: food, w: 30, n: 2 }, { id: gem, w: 10, n: 1 }];
+  const nothing = { id: null, w: 18, n: 0 };
+  return {
+    vault: { gold: g(10, 18), dust: [2, 3], table: [...base, nothing] },
+    boss: { gold: g(24, 40), dust: [3, 5], rolls: 2, table: [...base, ...(sets.length ? [{ id: sets, w: 4, n: 1 }] : []), ...(charm ? [{ id: charm, w: 3, n: 1 }] : []), nothing] },
+  };
+}
 export const FIRST_CLEAR_GOLD = 150;
-export function rollChest(kind, chest, { party = 1, tier = 1, mod = 'still', firstToday = false, rng = Math.random } = {}) {
+// featured: the day's featured kind (double boss rolls for everyone).
+export function rollChest(kind, chest, { party = 1, tier = 1, mod = 'still', firstToday = false, featured = false, rng = Math.random } = {}) {
   const C = CHESTS[kind][chest];
   const s = partyScale(party);
   const T = TIERS[tier] ?? TIERS[1];
   const M = MODIFIERS[mod] ?? MODIFIERS.still;
   const ri = (a, b) => a + Math.floor(rng() * (b - a + 1));
   let gold = Math.round(ri(...C.gold) * s.reward * T.loot * (M.gold ?? 1));
-  const items = { grave_dust: Math.max(1, Math.round(ri(...C.dust) * T.loot)) };
-  let rolls = 1 + (chest === 'boss' ? s.bossRolls : 0) + (M.rolls ?? 0);
+  const dust = C.dustItem ?? DUNGEONS[kind]?.dust ?? 'grave_dust';
+  const items = { [dust]: Math.max(1, Math.round(ri(...C.dust) * T.loot)) };
+  let rolls = (C.rolls ?? 1) + (chest === 'boss' ? s.bossRolls : 0) + (M.rolls ?? 0);
   if (chest === 'boss' && firstToday) {
     rolls *= 2;
     gold += Math.round(FIRST_CLEAR_GOLD * T.loot);
   }
+  if (chest === 'boss' && featured) rolls *= 2;
   const total = C.table.reduce((a, e) => a + e.w, 0);
   for (let r = 0; r < rolls; r++) {
     let x = rng() * total;
     const e = C.table.find((t) => (x -= t.w) < 0) ?? C.table[0];
+    if (!e.id) continue; // nothing this time
     const id = Array.isArray(e.id) ? e.id[Math.floor(rng() * e.id.length)] : e.id;
     const n = e.n > 1 ? Math.max(1, Math.round(e.n * T.loot)) : 1;
     items[id] = (items[id] || 0) + n;

@@ -9,7 +9,7 @@
 import { Channel } from './channel.js';
 import {
   generateDungeon, dungeonCol, dungeonWalkable, dungeonBounds, setGate, scaledDef, roomAt, linkAt, DUNGEONS, CELL, TIERS, MODIFIERS,
-  TRAP, trapUp, ROOM_HEAL, KO_HP, MAX_WIPES, rollChest, USE_RANGE, RUN_MAX_MS, SEAT_GRACE_MS, MAX_RUN_HEROES, dayIndex, weekIndex,
+  TRAP, trapUp, ROOM_HEAL, KO_HP, MAX_WIPES, rollChest, USE_RANGE, RUN_MAX_MS, SEAT_GRACE_MS, MAX_RUN_HEROES, dayIndex, weekIndex, featuredKind, word,
 } from '../shared/dungeon.js';
 import { MONSTERS } from '../shared/monsters.js';
 import { ITEMS } from '../shared/items.js';
@@ -220,9 +220,9 @@ export class DungeonRun extends Channel {
         best = prev == null || seconds < prev;
         db.prepare('INSERT INTO dungeon_runs (kind, tier, mode, week, party, heroes, hero_ids, seconds, finished_at) VALUES (?,?,?,?,?,?,?,?,?)').run(this.kind, this.tier, this.mode, weekIndex(this.finishedAt), bracket, JSON.stringify(names), JSON.stringify(ids), seconds, this.finishedAt);
         for (const id of ids) {
-          const lastDay = db.prepare('SELECT day FROM dungeon_daily WHERE account_id = ? AND kind = ? AND tier = ?').get(id, this.kind, this.tier)?.day;
-          const firstToday = lastDay !== day;
-          const loot = rollChest(this.kind, 'boss', { party: ids.length, tier: this.tier, mod: this.mod, firstToday });
+          // The first clear of this kind today (any tier) pays the bonus.
+          const firstToday = this.game.firstClearToday(id, this.kind);
+          const loot = rollChest(this.kind, 'boss', { party: ids.length, tier: this.tier, mod: this.mod, firstToday, featured: featuredKind() === this.kind });
           this.#give(id, loot);
           this.#grant(id, 'boss', { ...loot, firstToday });
           if (firstToday) db.prepare('INSERT INTO dungeon_daily (account_id, kind, tier, day) VALUES (?,?,?,?) ON CONFLICT(account_id, kind, tier) DO UPDATE SET day = excluded.day').run(id, this.kind, this.tier, day);
@@ -347,7 +347,7 @@ export class DungeonRun extends Channel {
     return p && Math.hypot(c.ent.x - p.x, c.ent.z - p.z) <= USE_RANGE;
   }
   use(c, what) {
-    if (this.ended) fail('The crypt is closing.');
+    if (this.ended) fail(`The ${word(this.kind)} is closing.`);
     if (c.battle) fail("You're in a battle!");
     const prop = (u) => this.layout.props.find((p) => p.use === u);
     if (what === 'rest') {
@@ -373,7 +373,7 @@ export class DungeonRun extends Channel {
     }
     if (what === 'vault') {
       if (!this.#near(c, prop('vault'))) fail('Walk up to the chest first.');
-      if (!this.hasKey) fail('The Vault is locked. The Bone Key is somewhere in the crypt.');
+      if (!this.hasKey) fail(`The Vault is locked. The Bone Key is somewhere in the ${word(this.kind)}.`);
       if (!this.vaultOpened) {
         // The first to open it opens it for everyone seated.
         this.vaultOpened = true;
