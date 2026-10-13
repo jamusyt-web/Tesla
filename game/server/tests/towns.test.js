@@ -12,12 +12,11 @@ import { useMap, SHIPPED_MAP } from '../map.js';
 import { rebuildWorld } from '../static.js';
 import * as W from '../../shared/world.js';
 import { ITEMS } from '../../shared/items.js';
-import { RECIPE_BY_ID } from '../../shared/recipes.js';
 import { xpForLevel } from '../../shared/skills.js';
 import { spotsOf, stationPos } from '../../shared/stations.js';
 import { townBuilding, townAt } from '../../shared/places.js';
 import { travelToll, homeStone, passageAt, passageNeeds } from '../../shared/travel.js';
-import { twoTownMap, TV } from './twotown.js';
+import { twoTownMap, installTestvale, uninstallTestvale, TV } from './twotown.js';
 
 let db;
 let game;
@@ -27,13 +26,11 @@ before(() => {
   rebuildWorld();
   db = openDb(':memory:');
   game = new Game(db, { shopSim: false });
-  // Test-only items: a passage kit and a letter waystones won't carry.
-  ITEMS.test_lantern = { name: 'Test Lantern', icon: '🏮', cat: 'tool', tag: 'kit', kit: 'lantern', value: 1, rarity: 'common' };
-  ITEMS.test_letter = { name: 'Test Letter', icon: '✉️', cat: 'material', tag: 'letter', nowarp: true, value: 0, rarity: 'common' };
+  // Testvale's content: its passage kit, a letter waystones won't carry, its own recipe.
+  installTestvale();
 });
 after(() => {
-  delete ITEMS.test_lantern;
-  delete ITEMS.test_letter;
+  uninstallTestvale();
   useMap(JSON.parse(fs.readFileSync(SHIPPED_MAP, 'utf8')));
   rebuildWorld();
 });
@@ -58,7 +55,7 @@ const err = (fn) => {
 
 test('each town has its own stations: crafting claims the nearest one', () => {
   assert.equal(townAt(TV.x, TV.z)?.id, 'testvale');
-  assert.equal(stationPos('anvil', TV.x, TV.z).id, 'tv_anvil');
+  assert.equal(stationPos('anvil', TV.x, TV.z).id, 'testvale_anvil');
   assert.equal(stationPos('anvil', 0, 0).id, 'p11', "Hearthvale's anvil from Hearthvale");
   const a = hero('Anvi');
   const b = hero('Bel');
@@ -71,21 +68,20 @@ test('each town has its own stations: crafting claims the nearest one', () => {
   put(b, hb.x, hb.z);
   const sa = dispatch(game, a, 'craft.start', { recipe: 'oak_plank', batch: 1 });
   const sb = dispatch(game, b, 'craft.start', { recipe: 'oak_plank', batch: 1 });
-  assert.equal(sa.spot.prop, 'tv_workbench');
+  assert.equal(sa.spot.prop, 'testvale_workbench');
   assert.equal(sb.spot.prop, 'p12');
   assert.ok(Math.hypot(sa.spot.x - ta.x, sa.spot.z - ta.z) < 0.01 && Math.hypot(sb.spot.x - hb.x, sb.spot.z - hb.z) < 0.01, 'each got the near spot at their own bench');
-  assert.deepEqual(a.ch.spots.get('tv_workbench').slice(0, 1), [a.hero.id]);
+  assert.deepEqual(a.ch.spots.get('testvale_workbench').slice(0, 1), [a.hero.id]);
   // Finishing frees the spot at the bench it was claimed at.
   dispatch(game, a, 'craft.finish', { sid: sa.sid, toggles: [], end: 1, off: [0, 0] });
   dispatch(game, b, 'craft.finish', { sid: sb.sid, toggles: [], end: 1, off: [0, 0] });
-  assert.ok(!a.ch.spots.get('tv_workbench').includes(a.hero.id));
+  assert.ok(!a.ch.spots.get('testvale_workbench').includes(a.hero.id));
   assert.ok(game.heroes.count(a.hero.id, 'oak_plank') >= 1, 'made a plank in Testvale');
   game.disconnect(a);
   game.disconnect(b);
 });
 
 test("a town's own recipe is refused anywhere else", () => {
-  RECIPE_BY_ID.tv_plank = { ...RECIPE_BY_ID.oak_plank, id: 'tv_plank', town: 'testvale' };
   const c = hero('Loka');
   try {
     game.heroes.addItem(c.hero.id, 'oak_log', 4);
@@ -96,17 +92,16 @@ test("a town's own recipe is refused anywhere else", () => {
     const tv = spotsOf('workbench', TV.x, TV.z)[0];
     put(c, tv.x, tv.z);
     const st = dispatch(game, c, 'craft.start', { recipe: 'tv_plank', batch: 1 });
-    assert.equal(st.spot.prop, 'tv_workbench');
+    assert.equal(st.spot.prop, 'testvale_workbench');
     dispatch(game, c, 'craft.finish', { sid: st.sid, toggles: [], end: 1, off: [0, 0] });
   } finally {
-    delete RECIPE_BY_ID.tv_plank;
     game.disconnect(c);
   }
 });
 
 test('the dock opens the services of the town you are in; looks come from style and kit', () => {
-  assert.equal(townBuilding('craft', TV.x + 5, TV.z).id, 'tv_workshop');
-  assert.equal(townBuilding('market', TV.x - 30, TV.z).id, 'tv_market', 'in Testvale even when nearer the edge');
+  assert.equal(townBuilding('craft', TV.x + 5, TV.z).id, 'testvale_workshop');
+  assert.equal(townBuilding('market', TV.x - 30, TV.z).id, 'testvale_market', 'in Testvale even when nearer the edge');
   assert.equal(townBuilding('craft', 0, 0).id, 'workshop');
   assert.equal(townBuilding('townhall', 200, 0)?.action, 'townhall', 'between towns: the nearest');
   assert.equal(W.styleOf({ id: 'tv_market' }), 'tv_market');
@@ -118,21 +113,21 @@ test('the dock opens the services of the town you are in; looks come from style 
 
 test('a passage needs its skill level or its kit, and hops you to the other end', () => {
   const p = W.PASSAGES[0];
-  assert.equal(passageNeeds(p), 'Mining 10 or Test Lantern');
+  assert.equal(passageNeeds(p), 'Mining 10 or Testvale Lantern');
   const c = hero('Pip');
   try {
     put(c, p.x + 10, p.z);
     assert.match(err(() => dispatch(game, c, 'passage.use', { id: p.id })), /Walk up to/);
     put(c, p.x + 1, p.z);
     assert.equal(passageAt(c.ent.x, c.ent.z)?.p.id, p.id);
-    assert.match(err(() => dispatch(game, c, 'passage.use', { id: p.id })), /You need Mining 10 or Test Lantern/);
+    assert.match(err(() => dispatch(game, c, 'passage.use', { id: p.id })), /You need Mining 10 or Testvale Lantern/);
     // The kit opens it, and isn't used up.
-    game.heroes.addItem(c.hero.id, 'test_lantern', 1);
+    game.heroes.addItem(c.hero.id, 'tv_lantern', 1);
     const r = dispatch(game, c, 'passage.use', { id: p.id });
     assert.ok(Math.hypot(r.x - p.tx, r.z - p.tz) <= 3, 'on the islet');
-    assert.equal(game.heroes.count(c.hero.id, 'test_lantern'), 1);
+    assert.equal(game.heroes.count(c.hero.id, 'tv_lantern'), 1);
     // And back again with the skill instead of the kit.
-    game.heroes.takeItem(c.hero.id, 'test_lantern', 1);
+    game.heroes.takeItem(c.hero.id, 'tv_lantern', 1);
     c.hero.skills.mining = xpForLevel(10);
     const back = dispatch(game, c, 'passage.use', { id: p.id });
     assert.ok(Math.hypot(back.x - p.x, back.z - p.z) <= 3, 'back on Testvale');
@@ -160,8 +155,6 @@ test('waystones charge the toll on raw goods, refuse a nowarp item, and go to a 
   const sq = W.STONES.find((s) => s.id === 'stone_square');
   const a = hero('Tolly');
   const b = hero('Mate');
-  const tagged = ITEMS.iron_ore.tag;
-  ITEMS.iron_ore.tag = 'ore'; // (every item gets a tag in M4)
   try {
     for (const s of ['stone_square', 'stone_wildwatch', 'stone_testvale']) game.heroes.attune(a.hero, s);
     const [sx, sz] = W.stoneFront(sq);
@@ -176,9 +169,9 @@ test('waystones charge the toll on raw goods, refuse a nowarp item, and go to a 
 
     // A letter in the bag: the stone won't take you.
     a.lastTravel = 0;
-    game.heroes.addItem(a.hero.id, 'test_letter', 1);
-    assert.match(err(() => dispatch(game, a, 'travel', { to: 'stone_square' })), /won't carry your Test Letter/);
-    game.heroes.takeItem(a.hero.id, 'test_letter', 1);
+    game.heroes.addItem(a.hero.id, 'tv_letter', 1);
+    assert.match(err(() => dispatch(game, a, 'travel', { to: 'stone_square' })), /won't carry your Letter to Testvale/);
+    game.heroes.takeItem(a.hero.id, 'tv_letter', 1);
 
     // To a party member in Testvale: the attuned stone nearest them.
     put(b, TV.x, TV.z + 25);
@@ -191,8 +184,6 @@ test('waystones charge the toll on raw goods, refuse a nowarp item, and go to a 
     assert.equal(t.fee, W.travelFee(W.STONES.find((s) => s.id === 'stone_wildwatch'), W.STONES.find((s) => s.id === 'stone_testvale')));
     assert.equal(townAt(a.ent.x, a.ent.z)?.id, 'testvale');
   } finally {
-    ITEMS.iron_ore.tag = tagged;
-    if (tagged === undefined) delete ITEMS.iron_ore.tag;
     game.disconnect(a);
     game.disconnect(b);
   }
@@ -207,9 +198,9 @@ test('a Hearth Charm takes you to your home stone, once', () => {
     put(c, TV.x, TV.z + 20);
     assert.match(err(() => dispatch(game, c, 'travel.home')), /need a Hearth Charm/);
     game.heroes.addItem(c.hero.id, 'hearth_charm', 1);
-    game.heroes.addItem(c.hero.id, 'test_letter', 1);
+    game.heroes.addItem(c.hero.id, 'tv_letter', 1);
     assert.match(err(() => dispatch(game, c, 'travel.home')), /won't carry/);
-    game.heroes.takeItem(c.hero.id, 'test_letter', 1);
+    game.heroes.takeItem(c.hero.id, 'tv_letter', 1);
     const gold = game.heroes.gold(c.hero.id);
     const r = dispatch(game, c, 'travel.home');
     assert.equal(r.to, 'stone_square');

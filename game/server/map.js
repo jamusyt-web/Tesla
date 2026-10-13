@@ -4,18 +4,25 @@
 // the in-game editor) lives in <DATA_DIR>/maps/world.json, next to the saves,
 // so it survives updating the game. Whichever of the two has the higher `rev`
 // wins: an update that ships a newer map replaces an older local one.
+//
+// New content ships as patches (maps/patches/NNN_name.json, SPEC §11.2):
+// each adds entries by id, once, and never touches what the owner built or
+// deleted (shared/mapkit.js applyPatches). The report of what applied and
+// what was skipped is kept for the editor.
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { setWorld, mapProblems, formatMap, upgradeMap } from '../shared/world.js';
+import { applyPatches } from '../shared/mapkit.js';
 import { MONSTERS } from '../shared/monsters.js';
 import { DUNGEONS } from '../shared/dungeon.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const SHIPPED_MAP = path.join(ROOT, 'maps', 'world.json');
 export const LOCAL_MAP = path.join(process.env.DATA_DIR || path.resolve('data'), 'maps', 'world.json');
+export const PATCH_DIR = path.join(ROOT, 'maps', 'patches');
 
 function read(file) {
   try {
@@ -39,7 +46,18 @@ export function serverMapProblems(m) {
 }
 
 // The map currently in use, plus what /api/map serves to clients.
-export const current = { file: null, map: null, body: null, gzip: null, etag: null };
+export const current = { file: null, map: null, body: null, gzip: null, etag: null, patchReport: [] };
+
+// The patches in a folder, in number order: [{ id, add, remove? }].
+export function loadPatches(dir = PATCH_DIR) {
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => /^\d{3}_[\w-]+\.json$/.test(f)).sort();
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  return files.map((f) => ({ id: f.replace(/\.json$/, ''), ...read(path.join(dir, f)) }));
+}
 
 export function useMap(map, file = null) {
   map = upgradeMap(map);
@@ -61,8 +79,14 @@ export function saveMap(map, base) {
     e.conflict = true;
     throw e;
   }
+  return writeLocal(map, current.map?.rev ?? 0);
+}
+
+// Write a map as this server's own copy (rev bumped past `rev` and the
+// shipped map's, the old copy kept in backups/) and start using it.
+function writeLocal(map, rev) {
   const shippedRev = read(SHIPPED_MAP)?.rev ?? 0;
-  const next = { ...upgradeMap(map), rev: Math.max(current.map?.rev ?? 0, shippedRev) + 1 };
+  const next = { ...upgradeMap(map), rev: Math.max(rev, shippedRev) + 1 };
   const bad = serverMapProblems(next);
   if (bad.length) {
     const e = new Error(`The map has problems:\n- ${bad.join('\n- ')}`);
@@ -74,7 +98,7 @@ export function saveMap(map, base) {
   fs.mkdirSync(backups, { recursive: true });
   if (fs.existsSync(LOCAL_MAP)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    fs.copyFileSync(LOCAL_MAP, path.join(backups, `world-rev${current.map?.rev ?? 0}-${stamp}.json`));
+    fs.copyFileSync(LOCAL_MAP, path.join(backups, `world-rev${rev}-${stamp}.json`));
     const old = fs.readdirSync(backups).filter((f) => f.endsWith('.json')).sort();
     for (const f of old.slice(0, Math.max(0, old.length - 30))) fs.rmSync(path.join(backups, f));
   }
@@ -84,12 +108,18 @@ export function saveMap(map, base) {
   return useMap(next, LOCAL_MAP);
 }
 
-export function loadMap() {
+// patches: the patch list to apply (default: maps/patches).
+export function loadMap({ patches = loadPatches() } = {}) {
   const shipped = read(SHIPPED_MAP);
   const local = read(LOCAL_MAP);
   if (!shipped && !local) throw new Error(`No world map found (looked for ${SHIPPED_MAP}).`);
   const useLocal = local && (!shipped || (local.rev ?? 0) >= (shipped.rev ?? 0));
-  return useMap(useLocal ? local : shipped, useLocal ? LOCAL_MAP : SHIPPED_MAP);
+  const chosen = upgradeMap(useLocal ? local : shipped);
+  const r = applyPatches(chosen, patches);
+  current.patchReport = r.report;
+  for (const p of r.report) if (p.status !== 'already applied') console.log(`map patch ${p.patch}: ${p.status}${p.added ? `, ${p.added} added` : ''}${p.skipped.length ? `, ${p.skipped.length} skipped` : ''}`);
+  if (r.changed) return writeLocal(r.map, chosen.rev ?? 0);
+  return useMap(chosen, useLocal ? LOCAL_MAP : SHIPPED_MAP);
 }
 
 loadMap();

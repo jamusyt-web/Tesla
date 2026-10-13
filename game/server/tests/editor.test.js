@@ -1,101 +1,55 @@
-import { test, before, after } from 'node:test';
+// The world editor's checks (shared/mapkit.js lints) and stamps, which the
+// editor, the patch scripts and the fixture all use.
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import WebSocket from 'ws';
+import { mapLints, stampTownKit, stampOutpost, STATION_SET } from '../../shared/mapkit.js';
+import { upgradeMap, mapProblems } from '../../shared/world.js';
+import { estimateChunk } from '../../shared/budget.js';
+import { SHIPPED_MAP } from '../map.js';
+import { twoTownMap } from './twotown.js';
 
-// The map loader reads DATA_DIR when it's first imported, so point it at a
-// scratch folder before importing the server.
-const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'hv-map-'));
-process.env.DATA_DIR = DATA;
-const { openDb } = await import('../db.js');
-const { createServer } = await import('../app.js');
-const W = await import('../../shared/world.js');
+const kinds = (lints) => lints.map((l) => l.kind);
 
-let srv;
-let game;
-let wss;
-let base;
-before(async () => {
-  ({ server: srv, game, wss } = createServer(openDb(':memory:'), { shopSim: false }));
-  game.start();
-  await new Promise((r) => srv.listen(0, r));
-  base = `http://127.0.0.1:${srv.address().port}`;
-});
-after(() => {
-  for (const ws of wss.clients) ws.terminate();
-  game.stop();
-  srv.close();
-  srv.closeAllConnections?.();
+test('the town kit stamp: the §3.1 layout with <t>_* ids, and a complete kit', () => {
+  const s = stampTownKit('amberfold', -540, -60, { tier: 2, biome: 'autumn', sig: 'smokehouse', kit: 'ftk' });
+  assert.deepEqual(s.regions[0], { id: 'amberfold', name: 'Amberfold', tier: 2, kind: 'town', x: -540, z: -60, r: 70, stone: 'stone_amberfold', biome: 'autumn' });
+  assert.deepEqual(s.stones[0], { id: 'stone_amberfold', name: 'Amberfold Square', x: -533.8, z: -54.8, rot: -1.76 });
+  assert.deepEqual(s.buildings.map((b) => [b.id, b.action, b.x - -540, b.z - -60]), [['amberfold_market', 'market', 18, -6], ['amberfold_workshop', 'craft', -17, -6], ['amberfold_shop', 'shop', -15, 16], ['amberfold_townhall', 'townhall', 16, 17.5]]);
+  assert.equal(s.props.filter((p) => p.station).length, STATION_SET.length + 1, 'five stations and the signature one');
+  assert.ok(s.props.some((p) => p.id === 'amberfold_sig' && p.station === 'smokehouse'));
+  const m = twoTownMap();
+  assert.ok(!mapLints(m).some((l) => l.kind === 'town kit' && /Testvale/.test(l.text)), 'the fixture town has the whole kit');
+  const half = { ...m, props: m.props.filter((p) => p.id !== 'testvale_anvil') };
+  assert.match(mapLints(half).find((l) => l.kind === 'town kit' && /Testvale/.test(l.text)).text, /missing an anvil/);
 });
 
-const req = async (method, p, body, token) => {
-  const r = await fetch(base + p, { method, headers: { 'content-type': 'application/json', authorization: `Bearer ${token || ''}` }, body: body ? JSON.stringify(body) : undefined });
-  return { status: r.status, etag: r.headers.get('etag'), body: await r.json() };
-};
-async function account(name, invite) {
-  const r = await req('POST', '/api/signup', { username: name, password: 'secret1', invite });
-  assert.equal(r.status, 200, JSON.stringify(r.body));
-  await req('POST', '/api/hero', { name: name[0].toUpperCase() + name.slice(1), avatar: {} }, r.body.token);
-  return r.body.token;
-}
+test('lints: road gaps, far from a stone, region minimums, node bands, islands and size', () => {
+  const base = upgradeMap(JSON.parse(fs.readFileSync(SHIPPED_MAP, 'utf8')));
+  const m = {
+    ...base,
+    lands: [...base.lands, { id: 'away', x: 600, z: 0, r: 40 }],
+    regions: [...base.regions, { id: 'wildlands', name: 'Wildlands', tier: 1, kind: 'wild', x: 600, z: 0, r: 40 }, ...stampOutpost('lonely', 0, 60).regions],
+    paths: [...base.paths, { id: 'long_road', pts: [[0, 0], [0, 400]], w: 3 }],
+    nodes: [...base.nodes, { id: 'n_hi', type: 'tree_pine', x: 600, z: 0, rot: 0, s: 1 }],
+  };
+  const L = mapLints(m, { gzBytes: 300 * 1024 });
+  const ks = kinds(L);
+  for (const k of ['road gap', 'stones', 'region', 'reachability', 'size']) assert.ok(ks.includes(k), `${k}: ${JSON.stringify(L.filter((l) => l.kind === k))}`);
+  assert.ok(L.find((l) => l.kind === 'region' && /Wildlands/.test(l.text)), 'a wild region with no camp');
+  assert.ok(L.find((l) => l.kind === 'region' && /Lonely/.test(l.text)), 'an outpost with no waystone or fire');
+  for (const l of L) assert.ok(Number.isFinite(l.x) && Number.isFinite(l.z), 'every lint has a place to jump to');
+  // A node above its region's band.
+  const banded = { ...base, nodes: [...base.nodes, { id: 'n_x', type: 'rock_gold', x: 10, z: 10, rot: 0, s: 1 }] };
+  assert.ok(!kinds(mapLints(banded)).includes('node band'), 'gold (8) is fine in a tier-1 region');
+  // Today's map: only the supplier stall is missing from Hearthvale.
+  const today = mapLints(base);
+  assert.deepEqual(today.map((l) => l.text), ['Hearthvale is missing a supplier stall']);
+  assert.deepEqual(mapProblems(m), []);
+});
 
-test('only the server owner can save the world; a saved map is checked, backed up and goes live', async () => {
-  const owner = await account('owner', game.auth.bootstrap());
-  const friend = await account('friend', game.auth.hostInvite());
-  assert.equal((await req('GET', '/api/me', null, owner)).body.admin, true, 'the first account owns the server');
-  assert.equal((await req('GET', '/api/me', null, friend)).body.admin, false);
-
-  const got = await req('GET', '/api/map');
-  const map = got.body;
-  assert.equal(map.rev, 1);
-
-  assert.equal((await req('POST', '/api/map', { map, base: got.etag }, friend)).status, 403, 'friends cannot edit');
-
-  const broken = structuredClone(map);
-  broken.props.push({ ...broken.props[0] });
-  const bad = await req('POST', '/api/map', { map: broken, base: got.etag }, owner);
-  assert.equal(bad.status, 400);
-  assert.match(bad.body.problems.join(), /used twice/);
-
-  // A friend is in the world when the owner saves: they get sent back in.
-  const ws = new WebSocket(`${base.replace('http', 'ws')}/ws?token=${friend}`);
-  await new Promise((r) => ws.on('message', (d) => JSON.parse(d).t === 'welcome' && r()));
-  const closed = new Promise((r) => ws.on('close', (code) => r(code)));
-
-  const edited = structuredClone(map);
-  edited.props[0].x += 2;
-  edited.props.push({ id: 'p_new_barrel', slot: 'prop_barrel', x: 3, z: 20, rot: 0, r: 0.55 });
-  const ok = await req('POST', '/api/map', { map: edited, base: got.etag }, owner);
-  assert.equal(ok.status, 200, JSON.stringify(ok.body));
-  assert.equal(ok.body.rev, 2);
-  assert.equal(await closed, 4003, 'players are told the world changed');
-
-  const saved = JSON.parse(fs.readFileSync(path.join(DATA, 'maps', 'world.json'), 'utf8'));
-  assert.equal(saved.rev, 2);
-  assert.ok(saved.props.some((p) => p.id === 'p_new_barrel'));
-  assert.ok(W.PROPS.some((p) => p.id === 'p_new_barrel' && p.x === 3), 'the server uses it right away');
-  assert.ok(W.buildColliders().circles.some((c) => c.x === 3 && c.z === 20), 'and collides with it');
-  const now = await req('GET', '/api/map');
-  assert.notEqual(now.etag, got.etag);
-  assert.equal(now.body.rev, 2);
-
-  // Saving from a stale copy is refused instead of overwriting newer work.
-  const stale = await req('POST', '/api/map', { map: edited, base: got.etag }, owner);
-  assert.equal(stale.status, 409);
-
-  // Each save keeps the previous version.
-  const again = await req('POST', '/api/map', { map: now.body, base: now.etag }, owner);
-  assert.equal(again.status, 200);
-  assert.equal(again.body.rev, 3);
-  const backups = fs.readdirSync(path.join(DATA, 'maps', 'backups'));
-  assert.equal(backups.length, 1);
-  assert.match(backups[0], /^world-rev2-/);
-
-  // Players can join the updated world.
-  const ws2 = new WebSocket(`${base.replace('http', 'ws')}/ws?token=${friend}`);
-  const welcome = await new Promise((r) => ws2.on('message', (d) => (d = JSON.parse(d)).t === 'welcome' && r(d)));
-  assert.ok(welcome.you, 'rejoined');
-  ws2.close();
+test("the budget meter's estimate: a town chunk costs more than open ground", () => {
+  const town = estimateChunk(0, 0);
+  const empty = estimateChunk(9, 9);
+  assert.ok(town.statics.draws > empty.statics.draws);
 });

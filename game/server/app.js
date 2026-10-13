@@ -80,6 +80,11 @@ export function createServer(db, opts = {}) {
       if (req.method === 'GET' && url.pathname === '/api/me') {
         return json(res, 200, { hero: game.heroes.load(accountId), admin: game.auth.isAdmin(accountId) });
       }
+      // What the map patches did at start-up (the editor's patch report).
+      if (req.method === 'GET' && url.pathname === '/api/map/patches') {
+        if (!game.auth.isAdmin(accountId)) return json(res, 403, { error: 'Only the server owner can see this.' });
+        return json(res, 200, { applied: currentMap.map?.patches ?? [], report: currentMap.patchReport ?? [] });
+      }
       // The world editor saves here (server owners only).
       if (req.method === 'POST' && url.pathname === '/api/map') {
         if (!game.auth.isAdmin(accountId)) return json(res, 403, { error: 'Only the server owner can edit the world.' });

@@ -556,7 +556,7 @@ import { mobStats } from '../../shared/monsters.js';
 import { xpForLevel } from '../../shared/skills.js';
 import { DUNGEONS, TIERS, NIGHTMARE, DEEP, nightmareKind, featuredKind, KINDS, recFor, word, standardChests } from '../../shared/dungeon.js';
 import { harness } from './harness.js';
-import { twoTownMap, addTestvaleCave, removeTestvaleCave, TV } from './twotown.js';
+import { twoTownMap, installTestvale, uninstallTestvale } from './twotown.js';
 
 test("Nightmare restats every monster to level 46; Deep is the fourth tier", () => {
   const n = scaledDef(MONSTERS.thrall, 1, { tier: NIGHTMARE });
@@ -575,7 +575,7 @@ test("Nightmare restats every monster to level 46; Deep is the fourth tier", () 
 });
 
 test("Testvale's cave kind generates, runs to the boss, and pays its own reagent", () => {
-  addTestvaleCave();
+  installTestvale();
   useMap(twoTownMap({ cave: true }));
   rebuildWorld();
   const { game, hero, call, done } = harness();
@@ -619,7 +619,7 @@ test("Testvale's cave kind generates, runs to the boss, and pays its own reagent
     done();
     useMap(JSON.parse(fs.readFileSync(SHIPPED_MAP, 'utf8')));
     rebuildWorld();
-    removeTestvaleCave();
+    uninstallTestvale();
   }
 });
 

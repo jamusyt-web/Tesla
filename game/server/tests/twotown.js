@@ -1,56 +1,40 @@
-// A second town for tests: Testvale, 400 m east of Hearthvale on its own
-// island, laid out with the standard town kit (SPEC §3.1), plus an islet
-// off its north shore reached only by a passage. (M6 turns this into
-// maps/fixtures/twotown.json.)
+// Two towns for tests: the fixture map maps/fixtures/twotown.json (Hearthvale
+// plus Testvale at (400, 0); made by scripts/world/twotown.mjs) and the
+// Testvale content pack (shared/content/testvale.js), installed into the
+// live tables for a test and taken out again afterwards.
 import fs from 'node:fs';
-import { SHIPPED_MAP } from '../map.js';
-import { DUNGEONS, CHESTS, standardChests } from '../../shared/dungeon.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import TESTVALE from '../../shared/content/testvale.js';
+import { CONTENT } from '../../shared/content/index.js';
+import { ITEMS } from '../../shared/items.js';
+import { RECIPES, RECIPE_BY_ID } from '../../shared/recipes.js';
+import { DUNGEONS, CHESTS } from '../../shared/dungeon.js';
+import { FISH_TABLES } from '../../shared/fishing.js';
 
+const FIXTURE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'maps', 'fixtures', 'twotown.json');
 export const TV = { x: 400, z: 0 };
-const at = (dx, dz) => ({ x: TV.x + dx, z: TV.z + dz });
 
-// Testvale's own dungeon kind: a cave (its kit falls back to the crypt's
-// pieces until the cave models ship), with its own reagent and chests.
-export function addTestvaleCave() {
-  if (DUNGEONS.testvale_cave) return;
-  DUNGEONS.testvale_cave = {
-    name: 'Testvale Cave',
-    word: 'cave',
-    blurb: 'A damp cave under Testvale.',
-    town: 'testvale',
-    kit: 'cave',
-    skin: 'variation-a',
-    dust: 'slime_gel',
-    dressing: ['mushroom'],
-    fog: '#3a4a5a',
-    tiers: { 1: 13, 2: 16, 3: 19, 4: 25 },
-    pool: ['thrall', 'crypt_skeleton', 'crypt_wisp'],
-    elite: ['crypt_skeleton'],
-    boss: { monster: 'pale_count', adds: ['thrall', 'crypt_wisp'] },
-  };
-  CHESTS.testvale_cave = standardChests({ rec1: 13, bar: 'iron_bar', food: 'grilled_fish', gem: 'sapphire', sets: ['barrow_plate'], charm: 'charm_wayfarer' });
-}
-export const removeTestvaleCave = () => {
-  delete DUNGEONS.testvale_cave;
-  delete CHESTS.testvale_cave;
-};
-
-// cave: add the cave's door (register the kind first with addTestvaleCave).
+// The fixture map. Without `cave`, the cave's door is left out (it needs the pack).
 export function twoTownMap({ cave = false } = {}) {
-  const m = JSON.parse(fs.readFileSync(SHIPPED_MAP, 'utf8'));
-  m.lands.push({ id: 'testvale_land', ...TV, r: 90 }, { id: 'testvale_islet', ...at(0, -125), r: 14 });
-  m.regions.push({ id: 'testvale', name: 'Testvale', tier: 2, kind: 'town', ...TV, r: 70, stone: 'stone_testvale' });
-  m.plazas.push({ id: 'tv_plaza', ...TV, r: 11.2 });
-  m.stones.push({ id: 'stone_testvale', name: 'Testvale Square', ...at(6.2, 5.2), rot: -1.76 });
-  m.buildings.push(
-    { id: 'tv_workshop', label: 'Workshop', action: 'craft', ...at(-17, -6), w: 9, d: 7, face: 'e', style: 'workshop' },
-    { id: 'tv_market', label: 'Market', action: 'market', ...at(18, -6), w: 11, d: 8, face: 'w', style: 'market' },
-    { id: 'tv_townhall', label: 'Town Hall', action: 'townhall', ...at(16, 17.5), w: 11, d: 10, face: 'n', style: 'townhall' },
-  );
-  const st = [['forge', 'proc_forge', -22.3, -11.8], ['anvil', 'workshop_anvil', -19.5, -11.6], ['workbench', 'workshop_workbench', -16.2, -11.9], ['grindstone', 'workshop_grindstone', -13.4, -11.5], ['cookpot', 'proc_cookpot', -10.7, -12.3]];
-  for (const [kind, slot, dx, dz] of st) m.props.push({ id: `tv_${kind}`, slot, ...at(dx, dz), rot: 0, r: 0.7, station: kind });
-  // From the north shore of Testvale over to the islet.
-  m.passages = [{ id: 'pass_tv', name: 'Smugglers’ Squeeze', kind: 'squeeze', ...at(0, -80), tx: TV.x, tz: TV.z - 120, req: { skill: 'mining', lvl: 10 }, kit: 'test_lantern' }];
-  if (cave) m.entrances.push({ id: 'door_tv_cave', kind: 'testvale_cave', ...at(-30, 30), rot: 0 });
+  const m = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
+  if (!cave) m.entrances = m.entrances.filter((e) => e.kind !== 'testvale_cave');
   return m;
+}
+
+// Put Testvale's content into the game's tables (and take it out again).
+const TABLES = () => [[ITEMS, TESTVALE.items], [DUNGEONS, TESTVALE.dungeons], [CHESTS, TESTVALE.chests], [FISH_TABLES, TESTVALE.fishTables]];
+export function installTestvale() {
+  for (const [table, add] of TABLES()) Object.assign(table, add);
+  for (const r of TESTVALE.recipes) if (!RECIPE_BY_ID[r.id]) (RECIPES.push(r), (RECIPE_BY_ID[r.id] = r));
+  for (const k of ['trade', 'supplies', 'customers']) CONTENT[k].testvale = TESTVALE[k];
+}
+export function uninstallTestvale() {
+  for (const [table, add] of TABLES()) for (const id of Object.keys(add)) delete table[id];
+  for (const r of TESTVALE.recipes) {
+    delete RECIPE_BY_ID[r.id];
+    const i = RECIPES.indexOf(r);
+    if (i >= 0) RECIPES.splice(i, 1);
+  }
+  for (const k of ['trade', 'supplies', 'customers']) delete CONTENT[k].testvale;
 }
