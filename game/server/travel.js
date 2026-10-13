@@ -1,6 +1,7 @@
 // Getting around fast: waystones (attune by walking up, then travel between
 // any you know, for a fee and a toll), to a party member, home with a Hearth
 // Charm, through passages, and the server owner's free teleport.
+import { regionAt } from '../shared/places.js';
 import { stoneById, stoneNear, stoneFront, travelFee, STONE_RANGE, landDistance, isWalkable } from '../shared/world.js';
 import { travelToll, nowarpItem, homeStone, passageById, passageAt, passageOpen, passageNeeds, PASSAGE_RANGE } from '../shared/travel.js';
 import { ITEMS } from '../shared/items.js';
@@ -68,7 +69,8 @@ export function travel(g, c, to, now = Date.now()) {
   if (here.id === dest.id) fail("You're already here.");
   if (!c.hero.stones.includes(dest.id)) fail(`You haven't been to ${dest.name} yet. Walk there once to attune to it.`);
   if (now - (c.lastTravel || 0) < TRAVEL_COOLDOWN_MS) fail('The stone is still humming. Try again in a moment.');
-  const fee = travelFee(here, dest);
+  // A region you've fully discovered halves the fee to its stones (the journal).
+  const fee = Math.ceil(travelFee(here, dest) * (1 - (g.journal?.discount(c.hero.id, regionAt(dest.x, dest.z)?.id) ?? 0)));
   const toll = travelToll(bag);
   if (g.heroes.gold(c.hero.id) < fee + toll) fail(`Travelling to ${dest.name} costs ${fee + toll} gold${toll ? ` (${toll} of it the toll on your goods)` : ''}.`);
   const open = frontOf(dest);

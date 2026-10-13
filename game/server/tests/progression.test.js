@@ -48,7 +48,7 @@ test('the tool speed floor: no tool (Fine or Masterwork) swings faster than 421 
 });
 
 test('item fields: every item has a tag; quality versions follow the rule', () => {
-  const TAGS = new Set('wood plank ore bar herb fish food potion hide monster gem reagent tool gear kit charm trophy letter'.split(' '));
+  const TAGS = new Set('wood plank ore bar herb fish food potion hide monster gem reagent tool gear kit charm trophy letter curio'.split(' '));
   for (const [id, it] of Object.entries(ITEMS)) assert.ok(TAGS.has(it.tag), `${id}: tag ${it.tag}`);
   for (const [id, it] of Object.entries(ITEMS)) {
     if (it.q) continue;

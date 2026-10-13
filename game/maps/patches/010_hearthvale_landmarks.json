@@ -1,0 +1,17 @@
+{
+  "note": "Hearthvale's landmarks (SPEC §1.5, §5.5): a view, a ruin, a shrine, caches, a secret, curios and the tinker who starts Ysolde's Atlas.",
+  "add": {
+    "landmarks": [
+      { "id": "vista_wildwatch_cliff", "kind": "vista", "name": "Wildwatch Cliff", "x": -20, "z": -92, "r": 9, "look": 0.21 },
+      { "id": "secret_whisper_hollow", "kind": "secret", "name": "Whisper Hollow", "x": -71, "z": 11, "r": 6, "loot": "sapphire", "lore": "Under the roots of the oldest tree in Whisperwood is a hollow, and in it a little tin box. Inside, wrapped in a scrap of blue cloth, a sapphire, and a note: \"For whoever listens to the trees.\"" },
+      { "id": "cache_under_pier", "kind": "cache", "name": "Under the Pier", "x": 34, "z": 30, "r": 6 },
+      { "id": "cache_quarry_crate", "kind": "cache", "name": "Quarry Crate", "x": 72, "z": 10, "r": 6 },
+      { "id": "cache_wilds_stump", "kind": "cache", "name": "The Old Stump", "x": -43, "z": -74, "r": 6 },
+      { "id": "curio_lost_hat", "kind": "curio", "name": "A Straw Hat", "x": 30, "z": 60, "r": 6, "item": "lost_hat" },
+      { "id": "curio_old_spyglass", "kind": "curio", "name": "Something Glinting", "x": 15, "z": -84, "r": 6, "item": "old_spyglass" },
+      { "id": "shrine_old_oak", "kind": "shrine", "name": "Shrine of the Old Oak", "x": -63, "z": -29, "r": 7 },
+      { "id": "ruin_watchpost", "kind": "ruin", "name": "The Old Watchpost", "x": 52, "z": -58, "r": 8, "lore": "Scratched into the lintel: \"Wildwatch Post, the long winter. Three of us left. The stone giant walks at dusk and the dead below the hill grow restless. If you read this, keep the gate shut.\"" },
+      { "id": "npc_tinker", "kind": "npc", "name": "Tinker Wren", "x": 29, "z": -12, "r": 6, "lines": ["Pots mended, gears oiled, maps traded! Ah, a new face.", "They say old Ysolde mapped every corner of the Hearthlands. Finish getting to know Hearthvale and I may have something for you."] }
+    ]
+  }
+}

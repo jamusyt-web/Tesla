@@ -37,6 +37,10 @@ import { Quests } from './quests.js';
 import { Orders } from './orders.js';
 import { Almanac } from './almanac.js';
 import { Notices } from './notices.js';
+import { Journal } from './journal.js';
+import { Explore } from './explore.js';
+import { Landmarks, landmarksChanged } from './landmarks.js';
+import { resetJournalCache } from '../shared/journal.js';
 import * as rep from './rep.js';
 
 export { TUTORIAL };
@@ -180,6 +184,9 @@ export class Game {
     this.orders = new Orders(this);
     this.almanac = new Almanac(this);
     this.notices = new Notices(this);
+    this.journal = new Journal(this);
+    this.explore = new Explore(this);
+    this.landmarks = new Landmarks(this);
     // Festive and Hearth Rest add to every xp grant.
     this.heroes.xpBonus = (hero, skill, amount) => {
       const c = this.online.get(hero.id);
@@ -272,6 +279,7 @@ export class Game {
       const p = this.townPos(c);
       this.heroes.savePos(c.hero.id, p.x, p.z);
       this.heroes.saveActive(c.hero.id, c.lastInput);
+      this.explore.save(c);
     }
   }
 
@@ -371,6 +379,9 @@ export class Game {
   reloadWorld() {
     this.endAllRuns(); // runs never outlive the map they were built under
     rebuildWorld();
+    resetJournalCache();
+    landmarksChanged();
+    this.explore.worldChanged();
     for (const c of [...this.online.values()]) {
       c.send({ t: 'kicked', reason: 'The world was updated.' });
       this.disconnect(c);
@@ -414,6 +425,7 @@ export class Game {
     const away = this.shops.awaySummary(accountId, Date.now(), this.lastActive.get(accountId));
     if (away) c.send({ t: 'awaySales', ...away });
     pushStorage(this, c); // goods waiting in storage, per town
+    this.explore.load(c); // the cells walked and places found
     this.quests.ensure(c); // a new hero's first quest, and any chain that has opened up
     this.almanac.ensure(c); // today's dailies and this week's errand
     this.shops.prune(accountId);
@@ -429,6 +441,7 @@ export class Game {
     const p = this.townPos(c);
     this.heroes.savePos(c.hero.id, p.x, p.z);
     this.heroes.saveActive(c.hero.id, c.lastInput);
+    this.explore.save(c);
     this.lastActive.set(c.hero.id, c.lastInput);
     if (c.ch?.isRun) c.ch.depart(c, { keepSeat: true }); // you can reconnect into the run for a while
     else c.ch?.remove(c);

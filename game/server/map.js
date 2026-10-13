@@ -119,8 +119,9 @@ export function loadMap({ patches = loadPatches() } = {}) {
   const r = applyPatches(chosen, patches);
   current.patchReport = r.report;
   for (const p of r.report) if (p.status !== 'already applied') console.log(`map patch ${p.patch}: ${p.status}${p.added ? `, ${p.added} added` : ''}${p.skipped.length ? `, ${p.skipped.length} skipped` : ''}`);
-  if (r.changed) return writeLocal(r.map, chosen.rev ?? 0);
-  return useMap(chosen, useLocal ? LOCAL_MAP : SHIPPED_MAP);
+  // (Under the test runner a patched map is only used, never saved.)
+  if (r.changed && !process.env.NODE_TEST_CONTEXT) return writeLocal(r.map, chosen.rev ?? 0);
+  return useMap(r.changed ? r.map : chosen, useLocal ? LOCAL_MAP : SHIPPED_MAP);
 }
 
 loadMap();

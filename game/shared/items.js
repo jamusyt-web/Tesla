@@ -90,6 +90,9 @@ export const ITEMS = {
   letter_rimeholt: { name: 'Letter to Rimeholt', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
   letter_sandmere: { name: 'Letter to Sandmere', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
   letter_starfall: { name: 'Letter to Starfall', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
+  // Curios: odd finds out in the world. Bring one back to its town hall.
+  lost_hat: { name: "Farmer Bram's Hat", icon: '👒', cat: 'special', tag: 'curio', value: 0, rarity: 'uncommon', bound: true, town: 'hearthvale', text: 'Blown off by the lake wind. Bram would like it back: hand it in at the Town Hall.' },
+  old_spyglass: { name: 'Old Spyglass', icon: '🔭', cat: 'special', tag: 'curio', value: 0, rarity: 'uncommon', bound: true, town: 'hearthvale', text: 'Engraved "Wildwatch". The Town Hall keeps such things.' },
 
   // ── Tools (power = damage per swing, speed = rhythm period ms) ──
   axe_wood: { name: 'Wooden Axe', icon: '🪓', cat: 'tool', tag: 'tool', tool: 'axe', tier: 1, power: 1, speed: 700, value: 15, rarity: 'common', skin: toolSkin('#9a6b3f', '#c89a62', '#e0bd8a') },

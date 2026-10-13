@@ -139,7 +139,7 @@ export function grantGather(g, c, t, n, finisher) {
   c.send({ t: 'loot', node: n.id, loot, xp, rare: rares });
   for (const r of rares) g.announce(`${c.hero.name} found a ${ITEMS[r].name}!`);
   c.pushInventory();
-  emit(c, 'gather', { node: n.id, type: n.type, kind: t.kind, skill: t.skill, loot, rare: rares, finisher });
+  emit(c, 'gather', { node: n.id, type: n.type, kind: t.kind, skill: t.skill, loot, rare: rares, finisher, st: stateOf(n) });
 }
 
 export function cast(g, c, nodeId, now) {
@@ -223,7 +223,7 @@ export function land(g, c, toggles, endTick, now) {
   const rarity = ITEMS[fish.id].rarity;
   if (rarity === 'epic' || rarity === 'legendary') g.announce(`${c.hero.name} landed a ${fish.kg} kg ${ITEMS[fish.id].name}!`);
   c.pushInventory();
-  emit(c, 'fish', { item: fish.id, qty, kg: fish.kg, node: f.node });
+  emit(c, 'fish', { item: fish.id, qty, kg: fish.kg, node: f.node, legend: !!FISH[fish.id].legend });
   return { ok: true };
 }
 
