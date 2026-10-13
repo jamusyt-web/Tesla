@@ -6,6 +6,9 @@ import * as THREE from 'three';
 import { zonesOfKind } from '../../../shared/world.js';
 
 const MOOD = { fog: new THREE.Color('#b8c4c8'), fogWild: new THREE.Color('#9faea6'), sun: new THREE.Color('#ffe4bc'), sunWild: new THREE.Color('#ffd0a0') };
+// Phones see a little less far (and the camera draws nothing past the fog).
+const LOW_NEAR = 0.9;
+const LOW_FAR = 0.75;
 
 export class Mood {
   constructor(g) {
@@ -30,8 +33,8 @@ export class Mood {
     this.w = w;
     const f = g.scene.fog;
     f.color.lerpColors(MOOD.fog, MOOD.fogWild, w);
-    f.near = 20 - 6 * w;
-    f.far = 100 - 30 * w;
+    f.near = (20 - 6 * w) * (g.low ? LOW_NEAR : 1);
+    f.far = (100 - 30 * w) * (g.low ? LOW_FAR : 1);
     g.hemi.intensity = 1.3 - 0.25 * w;
     g.sun.color.lerpColors(MOOD.sun, MOOD.sunWild, w);
   }
@@ -40,7 +43,6 @@ export class Mood {
   setCrypt(crypt) {
     const g = this.g;
     const f = g.scene.fog;
-    const sc = g.sun.shadow.camera;
     if (crypt) {
       this.townLight ??= { fog: f.color.clone(), near: f.near, far: f.far, hemi: [g.hemi.color.clone(), g.hemi.groundColor.clone(), g.hemi.intensity], sun: [g.sun.color.clone(), g.sun.intensity], exp: g.renderer.toneMappingExposure, clear: g.renderer.getClearColor(new THREE.Color()) };
       f.color.set('#1b1e27');
@@ -52,8 +54,6 @@ export class Mood {
       g.sun.color.set('#c9d6ff');
       g.sun.intensity = 1.0;
       g.renderer.toneMappingExposure = 1.25;
-      sc.left = sc.bottom = -22;
-      sc.right = sc.top = 22;
     } else if (this.townLight) {
       const T = this.townLight;
       f.color.copy(T.fog);
@@ -66,11 +66,8 @@ export class Mood {
       g.sun.color.copy(T.sun[0]);
       g.sun.intensity = T.sun[1];
       g.renderer.toneMappingExposure = T.exp;
-      sc.left = sc.bottom = -34;
-      sc.right = sc.top = 34;
       this.w = undefined; // the Wilds' haze is worked out afresh
     }
-    sc.updateProjectionMatrix();
     g.el.classList.toggle('in-dungeon', crypt);
   }
 }

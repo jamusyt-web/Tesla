@@ -17,31 +17,81 @@ export function createRenderer(low) {
   const renderer = new THREE.WebGLRenderer({ antialias: !low || devicePixelRatio < 2, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(devicePixelRatio, low ? 1.5 : 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = low ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap; // soft is the costly path on phone GPUs
   useGrade(renderer);
   return renderer;
 }
 
-// After the scene is set up: frames clear by hand and shadows update on our say.
+// After the scene is set up. Heroes live in a small scene of their own, so the
+// two hero passes walk a handful of objects instead of the whole world; the
+// world's matrices are updated once per frame (here), not once per pass; and
+// the shadow map is only redrawn when it has to be (see updateShadows).
 export function setupPasses(g) {
-  // X-ray pass: heroes behind buildings/trees still show as a soft silhouette.
+  // X-ray pass: your hero and your party behind buildings/trees still show as a soft silhouette.
   g.silMat = new THREE.MeshBasicMaterial({ color: '#fff1b0', transparent: true, opacity: 0.55, depthFunc: THREE.GreaterDepth, depthWrite: false, fog: false });
+  g.heroScene = new THREE.Scene();
+  g.heroScene.fog = g.scene.fog;
+  g.scene.matrixWorldAutoUpdate = false;
+  g.heroScene.matrixWorldAutoUpdate = false;
   g.renderer.autoClear = false;
   g.renderer.shadowMap.autoUpdate = false;
+  g.shadow = { cx: NaN, cz: NaN, until: 0, rev: -1, half: g.low ? 20 : 30 };
+  const sc = g.sun.shadow.camera;
+  sc.left = sc.bottom = -g.shadow.half;
+  sc.right = sc.top = g.shadow.half;
+  sc.updateProjectionMatrix();
+}
+
+// Something that casts a shadow changed (a tree fell, a gate opened, the
+// world was rebuilt): redraw the shadow map on every frame for `seconds`.
+export function markShadows(g, seconds = 0) {
+  if (!g.shadow) return;
+  g.shadow.until = Math.max(g.shadow.until, performance.now() + seconds * 1000);
+  g.shadow.dirty = true;
+}
+
+// Heroes on screen in the silhouette pass: yours and your party's.
+function silhouetteHeroes(g) {
+  const party = new Set(g.hud?.party?.members?.map((m) => m.id) ?? []);
+  const out = [];
+  for (const pv of g.players.values()) if (pv.isMe || party.has(pv.id)) out.push(pv);
+  return out;
 }
 
 export function renderFrame(g) {
   const r = g.renderer;
-  r.shadowMap.needsUpdate = true;
+  const S = g.shadow;
+  if (g.town && !g.dungeon && g.town.rev !== S.rev) (S.rev = g.town.rev), (S.dirty = true); // squares built or dropped
+  if (S.dirty || performance.now() < S.until) {
+    r.shadowMap.needsUpdate = true;
+    S.dirty = false;
+  }
+  g.scene.updateMatrixWorld();
+  g.heroScene.updateMatrixWorld();
   r.clear();
-  // 1) world  2) heroes hidden behind the world, as silhouettes  3) heroes
+  // 1) the world
   r.render(g.scene, g.camera);
+  // The heroes' scene borrows the lights (an object has one parent).
+  g.heroScene.add(g.hemi, g.sun, g.sun.target);
+  // 2) your party hidden behind the world, as silhouettes (no ink lines)
+  const hidden = [];
+  for (const pv of g.players.values()) if (pv.av.root.visible) (pv.av.root.visible = false), hidden.push(pv.av.root);
+  for (const pv of silhouetteHeroes(g)) {
+    if (pv.hidden) continue;
+    pv.av.root.visible = true;
+    pv.av.root.traverse((o) => o.isMesh && o.material.side === THREE.BackSide && o.visible && ((o.visible = false), hidden.push(o)));
+  }
   g.camera.layers.set(1);
-  g.scene.overrideMaterial = g.silMat;
-  r.render(g.scene, g.camera);
-  g.scene.overrideMaterial = null;
-  r.render(g.scene, g.camera);
+  g.heroScene.overrideMaterial = g.silMat;
+  r.render(g.heroScene, g.camera);
+  g.heroScene.overrideMaterial = null;
+  for (const o of hidden) o.visible = true;
+  for (const pv of g.players.values()) if (pv.hidden) pv.av.root.visible = false;
+  // 3) the heroes (and their ground blobs, which are on layer 0)
+  g.camera.layers.enable(0);
+  r.render(g.heroScene, g.camera);
   g.camera.layers.set(0);
+  g.scene.add(g.hemi, g.sun, g.sun.target);
 }
 
 // Compile every shader the scene needs before anyone sees it.
@@ -97,14 +147,57 @@ export function updateCamera(g, dt) {
     cam.position.y += (Math.random() - 0.5) * g.shakeAmt;
   }
   cam.lookAt(c.target.x, 1.4, c.target.z);
-  if (g.dungeon) {
-    // Moonlight from almost straight above (short shadows).
-    g.sun.position.set(c.target.x + 6, 40, c.target.z + 12);
-    g.sun.target.position.set(c.target.x, 0, c.target.z);
-    return;
+  // Nothing past the fog is drawn.
+  const far = g.scene.fog.far + 10;
+  if (cam.far !== far) {
+    cam.far = far;
+    cam.updateProjectionMatrix();
   }
-  g.sun.position.set(c.target.x + 40, 34, c.target.z + 10);
-  g.sun.target.position.set(c.target.x, 0, c.target.z);
+  updateShadows(g);
+}
+
+// The sun's shadow box: centred a little ahead of the hero (the camera sees
+// more ground beyond them than behind), snapped to whole shadow-map texels and
+// moved only in steps of 3 m. The map is redrawn only when the box moves or a
+// caster changed (markShadows), not every frame.
+const SUN_TOWN = new THREE.Vector3(40, 34, 10);
+const SUN_CRYPT = new THREE.Vector3(6, 40, 12);
+const _l = new THREE.Vector3();
+const _r = new THREE.Vector3();
+const _u = new THREE.Vector3();
+function updateShadows(g) {
+  const S = g.shadow;
+  const c = g.cam;
+  const off = g.dungeon ? SUN_CRYPT : SUN_TOWN;
+  const push = g.dungeon || g.battle ? 0 : S.half * 0.35;
+  const yaw = c.curYaw ?? c.yaw;
+  let x = c.target.x - Math.sin(yaw) * push;
+  let z = c.target.z - Math.cos(yaw) * push;
+  if (Math.hypot(x - S.cx, z - S.cz) < 3 && S.off === off) return;
+  // Snap to the texel grid in the light's own frame so redraws line up exactly.
+  _l.copy(off).normalize();
+  _r.set(0, 1, 0).cross(_l).normalize();
+  _u.copy(_l).cross(_r);
+  const texel = (2 * S.half) / g.sun.shadow.mapSize.x;
+  const a = Math.round((x * _r.x + z * _r.z) / texel) * texel;
+  const b = Math.round((x * _u.x + z * _u.z) / texel) * texel;
+  const d = x * _l.x + z * _l.z;
+  // Back from (a, b, d) in the light's frame to a point on the ground.
+  const px = _r.x * a + _u.x * b + _l.x * d;
+  const py = _r.y * a + _u.y * b + _l.y * d;
+  const pz = _r.z * a + _u.z * b + _l.z * d;
+  // Slide along the light direction down to y = 0 (same shadow, same texels).
+  const k = py / _l.y;
+  x = px - _l.x * k;
+  z = pz - _l.z * k;
+  S.cx = x;
+  S.cz = z;
+  S.off = off;
+  g.sun.position.set(x + off.x, off.y, z + off.z);
+  g.sun.target.position.set(x, 0, z);
+  g.sun.updateMatrixWorld();
+  g.sun.target.updateMatrixWorld();
+  S.dirty = true;
 }
 
 // Fade buildings that sit between the camera and your hero.

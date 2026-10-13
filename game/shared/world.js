@@ -60,7 +60,7 @@ export function mulberry32(seed) {
 //   stones    [{ id, name, x, z, rot }]                fast-travel waystones (you arrive in front)
 //   entrances [{ id, kind, x, z, rot }]                dungeon doors (kind: shared/dungeon.js DUNGEONS)
 //   props     [{ id, slot, x, z, rot, r, s?, y?, v?, bob?, station? }]
-//             slot = model slot (client/src/scene/manifest.js) or a proc_* kind;
+//             slot = model slot (client/src/scene/manifest/) or a proc_* kind;
 //             r > 0 blocks movement; station marks a crafting station.
 // (Format 1 had `bounds: { r }`, one round island at the centre; it's
 // upgraded on load: see upgradeMap.)

@@ -31,7 +31,7 @@ export class Labels {
     });
   }
   showStatic(on) {
-    for (const l of this.static) l.el.style.display = on ? '' : 'none';
+    for (const l of this.static) (l.el.style.display = on ? '' : 'none'), (l.el._disp = undefined);
   }
 
   // The crypt's labels (doors, fires, chests…): tap one to go and use it.
@@ -72,42 +72,47 @@ export class Labels {
     setTimeout(() => el.remove(), 1700);
   }
 
-  // Every frame: move each label over what it names, hide what's off screen or far.
+  // Every frame: move each label over what it names, hide what's off screen
+  // or far. Distance is checked first (cheap) and a label's style is only
+  // written when it changes.
   update() {
     const g = this.g;
     const cam = g.camera.position;
-    const tmp = {};
-    const v = new THREE.Vector3();
+    const tmp = this.tmp ??= {};
+    const v = (this.v ??= new THREE.Vector3());
     for (const pv of g.players.values()) {
       v.copy(pv.av.root.position).setY(3.0);
-      this.project(v, tmp);
-      const far = v.distanceTo(cam) > 70;
-      pv.tag.style.display = tmp.vis && !far && !pv.hidden ? '' : 'none';
-      if (tmp.vis) pv.tag.style.transform = `translate3d(${tmp.x}px, ${tmp.y}px, 0) translate(-50%, -100%)`;
+      const near = !pv.hidden && v.distanceToSquared(cam) <= 70 * 70;
+      place(pv.tag, near && this.project(v, tmp).vis ? tmp : null, '-100%');
     }
+    const me = g.me?.local;
+    const mobR = g.dungeon ? 18 : 13;
     for (const mv of g.mobs.values()) {
-      v.copy(mv.mob.root.position).setY(mv.mob.height || 1.6);
-      this.project(v, tmp);
-      const show = tmp.vis && mv.mob.root.visible && (mv.state === 'battle' || Math.hypot(mv.x - g.me.local.x, mv.z - g.me.local.z) < (g.dungeon ? 18 : 13));
-      mv.tag.style.display = show ? '' : 'none';
-      if (show) mv.tag.style.transform = `translate3d(${tmp.x}px, ${tmp.y}px, 0) translate(-50%, -100%)`;
+      const near = mv.mob.root.visible && (mv.state === 'battle' || (me && Math.hypot(mv.x - me.x, mv.z - me.z) < mobR));
+      if (near) v.copy(mv.mob.root.position).setY(mv.mob.height || 1.6);
+      place(mv.tag, near && this.project(v, tmp).vis ? tmp : null, '-100%');
     }
     if (g.dungeon) {
       for (const l of g.dungeon.labels) {
         if (!l.el) continue;
-        this.project(l.pos, tmp);
-        const show = tmp.vis && !l.hidden && !g.battle && g.dungeon.isRevealed(l.room) && l.pos.distanceTo(cam) < 60;
-        l.el.style.display = show ? '' : 'none';
-        if (show) l.el.style.transform = `translate3d(${tmp.x}px, ${tmp.y}px, 0) translate(-50%, -100%)`;
+        const near = !l.hidden && !g.battle && g.dungeon.isRevealed(l.room) && l.pos.distanceToSquared(cam) < 60 * 60;
+        place(l.el, near && this.project(l.pos, tmp).vis ? tmp : null, '-100%');
       }
       return;
     }
     for (const l of this.static) {
-      this.project(l.pos, tmp);
-      const d = l.pos.distanceTo(cam);
-      const show = tmp.vis && d < (l.kind === 'zone' ? 75 : 95) && !g.battle;
-      l.el.style.display = show ? '' : 'none';
-      if (show) l.el.style.transform = `translate3d(${tmp.x}px, ${tmp.y}px, 0) translate(-50%, ${l.kind === 'zone' ? '-50%' : '-100%'})`;
+      const r = l.kind === 'zone' ? 75 : 95;
+      const near = !g.battle && l.pos.distanceToSquared(cam) < r * r;
+      place(l.el, near && this.project(l.pos, tmp).vis ? tmp : null, l.kind === 'zone' ? '-50%' : '-100%');
     }
   }
+}
+
+// Show el at screen point s (or hide it when s is null), touching the DOM only on change.
+function place(el, s, ay) {
+  const disp = s ? '' : 'none';
+  if (el._disp !== disp) el.style.display = el._disp = disp;
+  if (!s) return;
+  const tr = `translate3d(${Math.round(s.x)}px, ${Math.round(s.y)}px, 0) translate(-50%, ${ay})`;
+  if (el._tr !== tr) el.style.transform = el._tr = tr;
 }

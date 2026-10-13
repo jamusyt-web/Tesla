@@ -1,5 +1,13 @@
 import * as THREE from 'three';
 
+// Ambient emitters (chimney smoke, fountain spray, braziers…) only run within
+// this distance of where the camera looks, and each kind keeps to its own share
+// of the pool, so a busy fountain never steals the smoke's particles.
+const AMBIENT_RANGE = 60;
+const AMBIENT_CAP = { smoke: 40, spray: 40, embers: 40, steam: 20, wisps: 30 };
+const focus = new THREE.Vector3();
+export const setFocus = (x, z) => focus.set(x, 0, z);
+
 // Pooled cube/shard particles in one InstancedMesh — chips, leaves, sparks, dust.
 export class Particles {
   constructor(scene, max = 900, round = false) {
@@ -17,12 +25,34 @@ export class Particles {
     this.col = new THREE.Color();
   }
 
+  // Close enough to the view for an ambient emitter to bother?
+  near(pos) {
+    return (pos.x - focus.x) ** 2 + (pos.z - focus.z) ** 2 < AMBIENT_RANGE ** 2;
+  }
+
   // opts: { n, color(s), speed, up, size, life, gravity, spread, drag, spin }
+  // ambient: 'smoke' | 'spray' | …: an ambient emitter's puff (skipped when far,
+  // and capped per kind: the kind's oldest goes first).
   burst(pos, o = {}) {
     const n = o.n ?? 12;
     const colors = Array.isArray(o.color) ? o.color : [o.color ?? '#ffffff'];
+    const kind = o.ambient ?? null;
+    if (kind) {
+      if (!this.near(pos)) return;
+      this.kinds ??= {};
+      const cap = AMBIENT_CAP[kind] ?? 30;
+      if ((this.kinds[kind] ?? 0) + n > cap) {
+        const i = this.p.findIndex((q) => q.kind === kind);
+        if (i >= 0) this.p.splice(i, 1), this.kinds[kind]--;
+        else return;
+      }
+      this.kinds[kind] = (this.kinds[kind] ?? 0) + n;
+    }
     for (let i = 0; i < n; i++) {
-      if (this.p.length >= this.max) this.p.shift();
+      if (this.p.length >= this.max) {
+        const old = this.p.shift();
+        if (old.kind) this.kinds[old.kind]--;
+      }
       const a = Math.random() * Math.PI * 2;
       const sp = (o.speed ?? 4) * (0.4 + Math.random() * 0.8);
       const dir = o.dir;
@@ -48,6 +78,7 @@ export class Particles {
         g: o.gravity ?? 14,
         drag: o.drag ?? 0.5,
         flat: o.flat ?? false,
+        kind,
         color: this.col.set(colors[i % colors.length]).clone(),
       });
     }
@@ -56,7 +87,11 @@ export class Particles {
   update(dt) {
     const t = this.tmp;
     let k = 0;
-    this.p = this.p.filter((p) => (p.age += dt) < p.life);
+    this.p = this.p.filter((p) => {
+      if ((p.age += dt) < p.life) return true;
+      if (p.kind) this.kinds[p.kind]--;
+      return false;
+    });
     for (const p of this.p) {
       p.vy -= p.g * dt;
       const d = Math.exp(-p.drag * dt);

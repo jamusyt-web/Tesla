@@ -5,7 +5,7 @@ import { mergeVertices, mergeGeometries } from 'three/examples/jsm/utils/BufferG
 import { MODELS, PALETTES, MODULE_PACKS, TEXTURES } from './manifest/index.js';
 import { toon, outlineMat } from './toon.js';
 
-// Loads every model listed in manifest.js once, converts it to the game's
+// Loads every model listed in the manifest (manifest/) once, converts it to the game's
 // toon look, and hands out cheap clones. If a model is missing or fails to
 // load, `has()` is false and callers fall back to their procedural version,
 // so the game always runs — and you can swap any model by editing the

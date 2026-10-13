@@ -83,7 +83,7 @@ export const PROC_BUILDERS = {
     const v = new THREE.Vector3();
     animate((dt, t) => {
       coals.material.emissiveIntensity = 0.75 + Math.sin(t * 5) * 0.15 + Math.sin(t * 13) * 0.05;
-      if (Math.random() < dt * 1.5) fx.puff.burst(smoke.getWorldPosition(v), { n: 1, color: ['#e8e2d8', '#cfc8bc'], speed: 0.2, up: 0.8, gravity: -0.4, size: 0.5, life: 2.2, drag: 0.6, jitter: 0.12, spin: 0 });
+      if (Math.random() < dt * 1.5 && fx.near(smoke.getWorldPosition(v))) fx.puff.burst(v, { ambient: 'smoke', n: 1, color: ['#e8e2d8', '#cfc8bc'], speed: 0.2, up: 0.8, gravity: -0.4, size: 0.5, life: 2.2, drag: 0.6, jitter: 0.12, spin: 0 });
     });
     return g;
   },
@@ -108,7 +108,7 @@ export const PROC_BUILDERS = {
     const v = new THREE.Vector3();
     animate((dt, t) => {
       fire.scale.set(1 + Math.sin(t * 11) * 0.1, 1 + Math.sin(t * 7) * 0.2, 1);
-      if (Math.random() < dt * 1.2) fx.puff.burst(steam.getWorldPosition(v), { n: 1, color: ['#ffffff', '#eef6ff'], speed: 0.15, up: 0.6, gravity: -0.3, size: 0.35, life: 1.6, drag: 0.6, jitter: 0.1, spin: 0 });
+      if (Math.random() < dt * 1.2 && fx.near(steam.getWorldPosition(v))) fx.puff.burst(v, { ambient: 'steam', n: 1, color: ['#ffffff', '#eef6ff'], speed: 0.15, up: 0.6, gravity: -0.3, size: 0.35, life: 1.6, drag: 0.6, jitter: 0.1, spin: 0 });
     });
     return g;
   },
@@ -155,7 +155,7 @@ export function buildWaystone(st, { fx, animate }) {
     crystal.material.emissiveIntensity = pulse + (lit ? 0.2 : 0.05);
     if (Math.random() < dt * (lit ? 3 : 0.6)) {
       g.localToWorld(v.set((Math.random() - 0.5) * 1.4, 0.7, (Math.random() - 0.5) * 1.4));
-      fx.puff.burst(v, { n: 1, color: lit ? ['#bff4ff', '#7fe0ff'] : ['#c8d0d8'], speed: 0.15, up: 1.4, gravity: -0.6, size: 0.12, life: 1.6, drag: 0.4, jitter: 0.05, spin: 0 });
+      if (fx.near(v)) fx.puff.burst(v, { ambient: 'wisps', n: 1, color: lit ? ['#bff4ff', '#7fe0ff'] : ['#c8d0d8'], speed: 0.15, up: 1.4, gravity: -0.6, size: 0.12, life: 1.6, drag: 0.4, jitter: 0.05, spin: 0 });
     }
   });
   return {

@@ -38,9 +38,9 @@ export class Mob {
     if (assets.has(`mob_${type}`)) this.#fromModel(`mob_${type}`);
     else if (this[type]) this[type]();
     else this.slime(); // unknown type without a model: a tinted blob
-    this.root.traverse((o) => {
-      if (o.isMesh && o.material.side !== THREE.BackSide && o !== blob) o.castShadow = true;
-    });
+    // Monsters move, and the shadow map is only redrawn now and then, so they
+    // never cast into it: the blob under them is their shadow.
+    this.root.traverse((o) => o.isMesh && (o.castShadow = false));
   }
 
   #fromModel(slot) {

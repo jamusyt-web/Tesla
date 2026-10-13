@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { Avatar } from './scene/avatar.js';
-import { createRenderer, setupPasses, renderFrame, warm, updateCamera, fadeOccluders } from './scene/render.js';
+import { createRenderer, setupPasses, renderFrame, warm, updateCamera, fadeOccluders, markShadows } from './scene/render.js';
 import { Mood } from './scene/mood.js';
 import { Mob } from './scene/mobs.js';
 import { buildTown } from './scene/town.js';
-import { Particles, Rings } from './scene/fx.js';
+import { Particles, Rings, setFocus } from './scene/fx.js';
 import { Townsfolk } from './scene/townsfolk.js';
 import { RoomView } from './room.js';
 import { Labels } from './ui/labels.js';
@@ -380,7 +380,7 @@ export class GameClient {
     av.root.rotation.y = p.rot || 0;
     av.root.userData = { kind: 'player', id: p.id };
     av.root.traverse((o) => (o.userData.player = p.id));
-    this.scene.add(av.root);
+    this.heroScene.add(av.root);
     const tag = h('div.tag' + (isMe ? '.me' : ''), h('div.bubbles'), h('div', h('span.lvl', p.level), h('span.nm', p.name)));
     this.labelLayer.append(tag);
     const pv = { id: p.id, info: p, av, tag, body: new RemoteBody(), act: p.act, x: p.x, z: p.z, rot: p.rot || 0, isMe };
@@ -400,7 +400,7 @@ export class GameClient {
   removePlayer(id) {
     const pv = this.players.get(id);
     if (!pv) return;
-    this.scene.remove(pv.av.root);
+    this.heroScene.remove(pv.av.root);
     pv.av.dispose();
     pv.tag.remove();
     this.players.delete(id);
@@ -1038,6 +1038,7 @@ export class GameClient {
   onNode(m) {
     const view = this.town.nodes.get(m.id);
     if (!view) return;
+    markShadows(this, m.alive ? 1 : 3); // it grows back, or falls
     if (m.alive) {
       view.respawn();
       this.hud.nodeBar(view);
@@ -1467,8 +1468,8 @@ export class GameClient {
     this.dungeon = view;
     this.run = { id: d.run, layout: d.layout, state: d.state, done: null };
     this.battles.clear();
-    this.town.root.visible = false;
-    this.folk.root.visible = false;
+    // The island leaves the scene while you're underground (nothing walks it).
+    this.scene.remove(this.town.root, this.folk.root);
     this.setGuide(null);
     this.guide.dots.count = 0;
     this.labels.showStatic(false);
@@ -1482,8 +1483,7 @@ export class GameClient {
     this.hud.panels.close(); // the crypt's map, a chest's loot… belong to the run
     this.#disposeRun();
     this.battles.clear();
-    this.town.root.visible = true;
-    this.folk.root.visible = true;
+    this.scene.add(this.town.root, this.folk.root);
     this.labels.showStatic(true);
     this.mood.setCrypt(false);
     Object.assign(this.cam, { pitch: 0.8, dist: isTouch ? 16 : 18 });
@@ -1518,6 +1518,7 @@ export class GameClient {
   onGates(m) {
     this.run?.state.open.push(...m.open);
     if (!this.dungeon?.openGates(m.open)) return;
+    markShadows(this, 1.5);
     sfx.crumble();
     this.shakeAmt = Math.max(this.shakeAmt, 0.18);
     for (const id of m.open) {
@@ -1800,6 +1801,7 @@ export class GameClient {
     this.rings.update(dt);
     this.#updateGuide(dt);
     updateCamera(this, dt);
+    setFocus(this.cam.target.x, this.cam.target.z);
     this.mood.update();
     this.labels.update();
     this.hud.frame(dt);

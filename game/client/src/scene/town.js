@@ -27,6 +27,16 @@ function distSeg(px, pz, [ax, az, bx, bz]) {
   return Math.hypot(px - (ax + vx * t), pz - (az + vz * t));
 }
 
+// Things that never move: their matrices are worked out once, so the per-frame
+// matrix pass skips them.
+function freeze(obj) {
+  obj.traverse((o) => {
+    o.updateMatrix();
+    o.matrixAutoUpdate = false;
+  });
+  return obj;
+}
+
 const hash = (str) => [...str].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) | 0, 7);
 
 // ── Gatherable node views ────────────────────────────────────────────────
@@ -381,13 +391,20 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
-      uniforms: { top: { value: new THREE.Color('#5fb8f0') }, mid: { value: new THREE.Color('#a9dcf7') }, bot: { value: new THREE.Color('#fde7c4') } },
+      uniforms: { top: { value: new THREE.Color('#5fb8f0') }, mid: { value: new THREE.Color('#a9dcf7') }, bot: { value: new THREE.Color('#fde7c4') }, fogc: { value: new THREE.Color() } },
       vertexShader: 'varying vec3 vp; void main(){ vp = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-      fragmentShader: 'uniform vec3 top; uniform vec3 mid; uniform vec3 bot; varying vec3 vp; void main(){ float h = vp.y; vec3 c = h > 0.15 ? mix(mid, top, smoothstep(0.15, 0.7, h)) : mix(bot, mid, smoothstep(-0.05, 0.15, h)); gl_FragColor = vec4(c, 1.0); }',
+      // Below the horizon the sky is the fog colour: the camera draws nothing
+      // past the fog, so this is what used to be fogged-out land and sea.
+      fragmentShader: 'uniform vec3 top; uniform vec3 mid; uniform vec3 bot; uniform vec3 fogc; varying vec3 vp; void main(){ float h = vp.y; vec3 c = h > 0.15 ? mix(mid, top, smoothstep(0.15, 0.7, h)) : mix(bot, mid, smoothstep(-0.05, 0.15, h)); c = mix(fogc, c, smoothstep(-0.03, 0.0, h)); gl_FragColor = vec4(c, 1.0); }',
     }),
   );
+  sky.frustumCulled = false;
   root.add(sky);
-  animated.push((dt, t, cam) => sky.position.copy(cam.position));
+  animated.push((dt, t, cam) => {
+    sky.position.copy(cam.position);
+    sky.scale.setScalar(Math.min(1, (cam.far - 2) / 400)); // inside the far plane
+    if (scene.fog) sky.material.uniforms.fogc.value.copy(scene.fog.color);
+  });
 
   // Sea: one big plane under everything; the shader knows the coastline.
   {
@@ -471,7 +488,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       m.rotation.x = -Math.PI / 2;
       m.position.set(p.x, 0.02 + i * 0.004, p.z);
       m.receiveShadow = true;
-      root.add(m);
+      root.add(freeze(m));
     });
     for (let i = 0; i < 16; i++) {
       const a = (i / 16) * Math.PI * 2;
@@ -480,7 +497,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       spoke.rotation.z = -a;
       spoke.position.set(p.x + Math.cos(a) * 8.6 * k, 0.035, p.z + Math.sin(a) * 8.6 * k);
       spoke.receiveShadow = true;
-      root.add(spoke);
+      root.add(freeze(spoke));
     }
   }
 
@@ -533,7 +550,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   };
   for (const [i, b] of BUILDINGS.entries()) {
     const grp = buildModular(b, i) || buildHouse(b, rng);
-    root.add(grp);
+    root.add(freeze(grp));
     fadeable(grp);
     grp.traverse((o) => {
       if (o.isMesh) o.userData.building = b.id;
@@ -543,7 +560,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       labels.push({ kind: 'place', id: b.id, text: b.label, icon: b.icon, glyph: b.glyph, pos: new THREE.Vector3(b.x, grp.userData.top + 0.9, b.z) });
     }
     if (grp.userData.smoke) animated.push((dt, t) => {
-      if (Math.random() < dt * 2.5) fx.puff.burst(grp.userData.smoke, { n: 1, color: ['#f4f4f4', '#e2e2e2'], speed: 0.25, up: 0.9, gravity: -0.5, size: 0.55, life: 2.6, drag: 0.6, jitter: 0.15, spin: 0 });
+      if (Math.random() < dt * 2.5 && fx.near(grp.userData.smoke)) fx.puff.burst(grp.userData.smoke, { ambient: 'smoke', n: 1, color: ['#f4f4f4', '#e2e2e2'], speed: 0.25, up: 0.9, gravity: -0.5, size: 0.55, life: 2.6, drag: 0.6, jitter: 0.15, spin: 0 });
     });
   }
 
@@ -611,7 +628,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     root.add(grp);
     const spout = new THREE.Vector3(f.x, 3.1, f.z);
     animated.push((dt) => {
-      if (Math.random() < dt * 30) fx.puff.burst(spout, { n: 1, color: ['#bfeaff', '#ffffff', '#8fd8ff'], speed: 1.6, up: 3, gravity: 9, size: 0.16, life: 0.75, jitter: 0.1 });
+      if (Math.random() < dt * 30 && fx.near(spout)) fx.puff.burst(spout, { ambient: 'spray', n: 1, color: ['#bfeaff', '#ffffff', '#8fd8ff'], speed: 1.6, up: 3, gravity: 9, size: 0.16, life: 0.75, jitter: 0.1 });
     });
   }
 
@@ -674,8 +691,9 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       animated.push((dt) => {
         if (Math.random() > dt * 14) return;
         fb.object.getWorldPosition(spot);
+        if (!fx.near(spot)) return;
         spot.y += 0.6;
-        fx.puff.burst(spot, { n: 1, color: ['#ffb347', '#ff7a2a', '#ffe08a'], speed: 0.6, up: 2.2, gravity: -1, size: 0.22, life: 0.6, jitter: 0.15 });
+        fx.puff.burst(spot, { ambient: 'embers', n: 1, color: ['#ffb347', '#ff7a2a', '#ffe08a'], speed: 0.6, up: 2.2, gravity: -1, size: 0.22, life: 0.6, jitter: 0.15 });
       });
     }
     [[-4.6, -1.5, 0.4], [4.4, 1.2, 2.6], [-4.2, 3.4, 5.2], [3.9, -3, 1.1]].forEach(([x, z, r], i) => {
@@ -726,7 +744,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       reed.position.set(x, 0.5, z);
       const cat = mesh(new THREE.CapsuleGeometry(0.07, 0.25, 3, 6), '#7c4a2c');
       cat.position.set(x, 1.25, z);
-      root.add(reed, cat);
+      root.add(freeze(reed), freeze(cat));
     }
     const pads = ring(Math.round(14 * (l.r / 14)), 3, l.r - 2).map((p) => ({ ...p, y: -0.06, rot: rng() * 6.28, s: 0.8 + rng() * 0.6 }));
     scatterModels(root, 'deco_lily_pad', pads, { outline: false, castShadow: false });
@@ -746,7 +764,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
         post.position.set(d.x + (d.w / 2 + 0.15) * sx, 0.2, d.z - d.d / 2 + 1 + i * (d.d / 3.3));
         dock.add(post);
       }
-    root.add(dock);
+    root.add(freeze(dock));
   }
 
   // Bulletin boards get a name tag like the buildings.
@@ -835,7 +853,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       const ground = new THREE.Mesh(g, groundMatFor());
       ground.receiveShadow = true;
       ground.userData.ground = true;
-      group.add(ground);
+      group.add(freeze(ground));
       pick.push(ground);
 
       // Grass tufts everywhere that isn't paved, built on or wet.
@@ -864,7 +882,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
             im.setColorAt(k++, c.set(wild ? ['#4e6e38', '#43602f', '#5b7a42'][j] : ['#6b9a48', '#5a8a3d', '#7caa55'][j]));
           }
         }
-        group.add(im);
+        group.add(freeze(im));
       }
     }
 
@@ -883,7 +901,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
         im.setColorAt(i, col.set(['#b8ac96', '#a89c86', '#c4b8a2'][i % 3]));
       });
       im.receiveShadow = true;
-      group.add(im);
+      group.add(freeze(im));
     }
 
     // Props: models instanced per slot and variant; proc_* kinds built in
@@ -926,13 +944,14 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     }
     for (const gp of groups.values()) {
       const inst = assets.instanced(gp.slot, gp.list, { variant: gp.v, outline: !NO_OUTLINE.has(gp.slot), castShadow: !NO_SHADOW.has(gp.slot) });
-      if (inst) group.add(inst);
+      if (inst) group.add(freeze(inst));
     }
     root.add(group);
     pickables.push(...pick);
     return { group, anim, pick };
   }
   function dropChunk(k) {
+    town.rev++;
     const ch = chunks.get(k);
     chunks.delete(k);
     root.remove(ch.group);
@@ -941,7 +960,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   }
   // Distance from a point to a chunk's square.
   const gap = (ci, cj, x, z) => Math.hypot(Math.max(0, ci * CHUNK - x, x - (ci + 1) * CHUNK), Math.max(0, cj * CHUNK - z, z - (cj + 1) * CHUNK));
-  const town = { viewRadius: low ? 120 : 150 };
+  const town = { viewRadius: low ? 120 : 150, rev: 0 }; // rev: bumped when what casts shadows changes
   // Build what's within view of (x, z), nearest first, for up to `budget` ms
   // (always at least one square); drop what's well out of view.
   function stream(x, z, budget) {
@@ -963,6 +982,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     let built = 0;
     for (const [, ci, cj] of want) {
       chunks.set(`${ci},${cj}`, buildChunk(ci, cj));
+      town.rev++;
       built++;
       if (performance.now() - t0 > budget) break;
     }

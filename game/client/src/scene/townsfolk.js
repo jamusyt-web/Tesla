@@ -16,9 +16,20 @@ const VILLAGERS = [
 ];
 const PET_LINES = ['*happy noises*', '*wiggles*', '*looks at you expectantly*', '*sniff sniff*'];
 
+// A soft dark disc under someone who walks about.
+const BLOB_GEO = new THREE.CircleGeometry(0.5, 16).rotateX(-Math.PI / 2);
+const BLOB_MAT = new THREE.MeshBasicMaterial({ color: 0, transparent: true, opacity: 0.26, depthWrite: false });
+function blob(size) {
+  const m = new THREE.Mesh(BLOB_GEO, BLOB_MAT);
+  m.position.y = 0.02;
+  m.scale.setScalar(Math.max(0.6, Math.max(size?.x ?? 1, size?.z ?? 1) * 0.9));
+  m.renderOrder = -1;
+  return m;
+}
+
 class Walker {
   constructor(slot, variant, route, speed, seed, info) {
-    const made = assets.make(slot, { variant, unique: false });
+    const made = assets.make(slot, { variant, unique: false, castShadow: false });
     this.obj = made.object;
     this.mixer = made.mixer;
     this.walk = assets.findClip(made.actions, 'walk');
@@ -40,6 +51,7 @@ class Walker {
     this.total = t;
     this.offset = r() * t;
     this.obj.traverse((o) => (o.userData.npc = this));
+    this.obj.add(blob(made.size)); // they move, so a blob rather than a shadow-map shadow
   }
 
   setAnim(a) {

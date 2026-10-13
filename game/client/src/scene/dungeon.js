@@ -544,7 +544,7 @@ export class DungeonView {
       const fires = this.fires.userData.items;
       for (const f of [...(this.brazier ? [{ x: this.brazier.obj.position.x, z: this.brazier.obj.position.z, y: 1.1, room: 0, big: true }] : []), ...fires]) {
         if (!this.revealed.has(f.room) || Math.random() > dt * (f.big ? 16 : 7)) continue;
-        this.fx.puff.burst(new THREE.Vector3(f.x, f.y + 0.2, f.z), { n: 1, color: ['#ffb347', '#ff7a2a', '#ffe08a'], speed: 0.5, up: 2.4, gravity: -1, size: f.big ? 0.26 : 0.18, life: 0.7, jitter: f.big ? 0.4 : 0.2 });
+        this.fx.puff.burst(new THREE.Vector3(f.x, f.y + 0.2, f.z), { ambient: 'embers', n: 1, color: ['#ffb347', '#ff7a2a', '#ffe08a'], speed: 0.5, up: 2.4, gravity: -1, size: f.big ? 0.26 : 0.18, life: 0.7, jitter: f.big ? 0.4 : 0.2 });
       }
     }
     for (const a of this.anims) a(dt, t, serverMs);

@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 const GAME = '/home/user/Tesla/game';
-const { MODELS } = await import(path.join(GAME, 'client/src/scene/manifest.js'));
+const { MODELS } = await import(path.join(GAME, 'client/src/scene/manifest/index.js'));
 const map = JSON.parse(fs.readFileSync(path.join(GAME, 'maps/world.json'), 'utf8'));
 // count mesh primitives in a glb (three.js makes one Mesh per primitive)
 const prims = new Map();
