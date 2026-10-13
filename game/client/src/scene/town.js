@@ -4,17 +4,16 @@ import * as assets from './assets.js';
 import { waterMaterial, seaMaterial, groundTexture } from './water.js';
 import { buildModular, buildGate } from './buildings.js';
 import { PROC_BUILDERS, buildWaystone } from './procprops.js';
+import { ChunkMerge, casters, disposeMerged } from './chunkmerge.js';
+import { CHUNK, COVER, scatterPoints, landDist } from './scatter.js';
 import { DUNGEONS } from '../../../shared/dungeon.js';
-
-const DUNGEON_NAMES = Object.fromEntries(Object.entries(DUNGEONS).map(([k, d]) => [k, d.name]));
+import { biomeAt } from '../../../shared/places.js';
 import {
   BUILDINGS, ZONES, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, ENTRANCES, CRYPT, LANDS, EXTENT, SPAWN, NODE_TYPES,
-  pathSegments, zonesOfKind, landDistance, mulberry32,
+  pathSegments, zonesOfKind, mulberry32,
 } from '../../../shared/world.js';
 
-// Small ground cover: no ink line and no shadow (they'd just add noise).
-const NO_OUTLINE = new Set(['deco_flower', 'deco_grass', 'deco_lily_pad', 'deco_mushroom']);
-const NO_SHADOW = new Set(['deco_flower', 'deco_grass', 'deco_lily_pad']);
+const DUNGEON_NAMES = Object.fromEntries(Object.entries(DUNGEONS).map(([k, d]) => [k, d.name]));
 const OL = 0.03;
 const sph = (r, a = 14, b = 10) => new THREE.SphereGeometry(r, a, b);
 const cyl = (a, b, h, s = 10) => new THREE.CylinderGeometry(a, b, h, s);
@@ -40,6 +39,9 @@ function freeze(obj) {
 const hash = (str) => [...str].reduce((h, ch) => (Math.imul(h, 31) + ch.charCodeAt(0)) | 0, 7);
 
 // ── Gatherable node views ────────────────────────────────────────────────
+// A node drawn on its own, with its animations (shake, fall, regrow). Most of
+// the time a node is drawn as part of its chunk's merged meshes instead; a
+// NodeView stands in while it moves (see NodeHandle).
 export class NodeView {
   constructor(node, fxp) {
     this.node = node;
@@ -296,15 +298,55 @@ export class NodeView {
     }
   }
 
-  respawn() {
+  respawn(instant = false) {
     this.alive = true;
     this.fall = null;
     this.full.visible = true;
     this.full.rotation.set(0, this.node.rot, 0);
     this.full.position.set(0, 0, 0);
+    this.full.scale.setScalar(this.node.s);
     this.stump.visible = false;
-    this.grow = 0.001;
+    this.grow = instant ? 0 : 0.001;
     this.hp = this.maxHp;
+  }
+
+  // Depleted at once, without the fall (it was already down when we came).
+  setDead() {
+    this.alive = false;
+    this.fall = null;
+    this.shake = 0;
+    this.full.visible = false;
+    this.stump.visible = true;
+  }
+
+  // Still moving: shaking from a hit, falling, or growing back.
+  get busy() {
+    return !!this.fall || this.grow > 0 || this.shake > 0;
+  }
+
+  // Rich (1: gold) or ancient (2: violet): a glow on the standing node; 0 clears it.
+  tint(st) {
+    const col = { 1: '#ffc83a', 2: '#a46bff' }[st];
+    this.full.traverse((o) => {
+      if (!o.isMesh || o.material.side === THREE.BackSide || !o.material.emissive) return;
+      const base = o.userData.baseMat;
+      if (col) {
+        if (!base) {
+          // Its own copy, drawn with the same shader as the original.
+          const m = o.material.clone();
+          m.onBeforeCompile = o.material.onBeforeCompile;
+          m.customProgramCacheKey = o.material.customProgramCacheKey;
+          o.userData.baseMat = o.material;
+          o.material = m;
+        }
+        o.material.emissive.set(col);
+        o.material.emissiveIntensity = 0.35;
+      } else if (base) {
+        o.material.dispose();
+        o.material = base;
+        delete o.userData.baseMat;
+      }
+    });
   }
 
   update(dt) {
@@ -363,27 +405,125 @@ export class NodeView {
   }
 }
 
+// What the game knows about a gatherable node whether or not its square is
+// built: alive, hp, where it is. While its square is built the node is drawn
+// as part of the square's merged meshes; while it's hit, falls or grows back,
+// a NodeView stands in for it (the merged copy is hidden meanwhile).
+class NodeHandle {
+  constructor(node, ctl) {
+    this.node = node;
+    this.type = NODE_TYPES[node.type];
+    this.maxHp = this.type.hp;
+    this.hp = this.maxHp;
+    this.alive = true;
+    this.st = 0; // 1 rich, 2 ancient
+    this.root = { position: new THREE.Vector3(node.x, 0, node.z) };
+    this.view = null; // the NodeView standing in, if any
+    this.chunk = null; // its square, while built
+    this.onLand = null; // (a felled tree hits the ground)
+    this.ctl = ctl;
+  }
+  get height() {
+    const k = this.node.type;
+    const size = assets.has(k) && assets.sizeOf(k, Math.abs(hash(this.node.id)));
+    if (size) return size.y * this.node.s;
+    return { tree: k === 'tree_pine' ? 6 : 4.6, rock: 2, herb: 1, fish: 0.5 }[this.type.kind] * this.node.s;
+  }
+  setHp(hp) {
+    this.hp = hp;
+  }
+  hit(from, perfect, dmg) {
+    this.ctl.live(this)?.hit(from, perfect, dmg);
+  }
+  break(from) {
+    const v = this.ctl.live(this);
+    this.alive = false;
+    v?.break(from);
+    this.ctl.sync(this);
+  }
+  respawn() {
+    const v = this.ctl.live(this);
+    this.alive = true;
+    this.hp = this.maxHp;
+    v?.respawn();
+    this.ctl.sync(this);
+  }
+  // Set the state without animating (on joining a channel).
+  reset(alive, hp = this.maxHp) {
+    this.alive = alive;
+    this.hp = hp;
+    if (this.view) alive ? this.view.respawn(true) : this.view.setDead();
+    this.ctl.sync(this);
+  }
+  setSt(st = 0) {
+    if ((st | 0) === this.st) return;
+    this.st = st | 0;
+    this.ctl.restyle(this);
+  }
+}
+
+// ── Statics that stream with the chunks ──────────────────────────────────
+// registerChunkStatic(list, builder, opts): `list()` gives the current entries
+// (each with x, z). An entry is built with the chunk its (x, z) falls in, and
+// thrown away with it. builder(entry, ctx) returns an Object3D (or null) and
+// may use ctx: { fx, low, scene, town, animate(fn), pick(obj), label(l),
+// fade(grp), place(placement), onDrop(fn) }.
+//   reach(entry): how far (m) it reaches past its point, so its chunk is
+//                 built before any of it could show;
+//   merge: true:  its meshes join the chunk's merged meshes (things that don't
+//                 move, fade or get tapped; meshes marked userData.live stay
+//                 apart). It's built again whenever the chunk's detail changes.
+const STATICS = [];
+export function registerChunkStatic(list, builder, { reach = () => 0, merge = false } = {}) {
+  STATICS.push({ list, builder, reach, merge });
+}
+
+const NEAR_IN = 48; // a chunk this close (m) is drawn in full detail…
+const NEAR_OUT = 60; // …until it's this far
+const STEP_MS = 4; // chunk building per frame, at most (ms)
+const DROP_PAD = 24; // a chunk is thrown away this far (m) past the view
+// Each quarter of a near chunk draws its ink within INK m of where the camera
+// looks and its small ground detail within DETAIL m (with 4 m of slack).
+const INK = 40;
+const DETAIL = 48;
+
+const PICK_GEO = new THREE.CylinderGeometry(1, 1, 1, 8).translate(0, 0.5, 0);
+PICK_GEO.userData.shared = true;
+const PICK_BOX = new THREE.BoxGeometry(1, 1, 1);
+PICK_BOX.userData.shared = true;
+const PICK_MAT = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
+// An invisible tap target (never drawn; the tap raycaster checks every layer).
+function pickVolume(geo, data) {
+  const m = new THREE.Mesh(geo, PICK_MAT);
+  m.layers.set(2);
+  Object.assign(m.userData, data);
+  return m;
+}
+
+const isHull = (o) => o.isMesh && o.material?.side === THREE.BackSide;
+
 // ── Town builder ─────────────────────────────────────────────────────────
 // Everything goes into one group (`root`), so the world editor can throw a
 // whole town away and build it again after an edit (see disposeTown).
 //
-// The world can be far bigger than the screen, so the ground, grass, stepping
-// stones and props are built in CHUNK-sized squares as the camera comes near
-// them and thrown away when it's far off. Buildings, water, nodes and labels
-// are few enough to build once (three.js skips drawing what's off screen).
-const CHUNK = 96;
-
+// The world is built in CHUNK-sized squares around where the camera looks,
+// out to the fog (`viewRadius`), and thrown away again when it's well out of
+// view. A square holds its ground, grass and stepping stones, its props and
+// gatherable nodes merged by material (chunkmerge.js), and the statics whose
+// point lies in it (buildings, gates, waystones, lakes… see the registrations
+// below). Squares within NEAR_IN are drawn in full; further ones in a cheap
+// far version (one vertex-coloured mesh, coarser ground, no grass). Building
+// is spread over frames in steps of a few ms.
 export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   const root = new THREE.Group();
   scene.add(root);
   const pickables = [];
   const animated = [];
   const labels = [];
-  const rng = mulberry32(99);
-  const segs = pathSegments();
   const fades = [];
-  const inPlaza = (x, z, pad = 0) => PLAZAS.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + pad);
-  const inDock = (x, z, pad = 0) => DOCKS.some((d) => Math.abs(x - d.x) < d.w / 2 + pad && Math.abs(z - d.z) < d.d / 2 + pad);
+  const segs = pathSegments();
+  // rev: bumped when what casts shadows changes; stones: the built waystones by id.
+  const town = { viewRadius: null, rev: 0, onLabel: null, attuned: new Set(), stones: new Map() };
 
   // Sky dome
   const sky = new THREE.Mesh(
@@ -424,7 +564,8 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   }
 
   // Ground shape and colour at any point: gentle undulation, flat plazas,
-  // lake beds, and beach then cliff falling away past the coast.
+  // lake beds, and beach then cliff falling away past the coast. `near` holds
+  // what's close enough to the chunk to matter (keeps the loops short).
   const grass = new THREE.Color('#74a04c');
   const grass2 = new THREE.Color('#628c42');
   const pathCol = new THREE.Color('#b89b6e');
@@ -433,7 +574,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   const cliff = new THREE.Color('#7a5b40');
   const zoneCols = new Map(ZONES.map((z) => [z, new THREE.Color(z.ground || '#74a04c')]));
   const heightAt = (x, z, near) => {
-    const s = landDistance(x, z);
+    const s = landDist(x, z, near.lands);
     let y = 0;
     if (s > 1) {
       const k = smooth(1, 9, s);
@@ -463,155 +604,713 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       const rp = Math.hypot(x - p.x, z - p.z);
       if (rp < p.r + 0.8) c.lerp(plazaCol, 1 - smooth(p.r - 0.7, p.r + 0.8, rp));
     }
-    const s = landDistance(x, z);
+    const s = landDist(x, z, near.lands);
     if (s > 1) c.lerp(s < 5 ? sand : cliff, Math.min(1, smooth(1, 9, s) * 2));
     return c;
   };
-  // What's close enough to a square to affect its ground (keeps the loops short).
   const nearRect = (x0, z0, x1, z1, pad) => {
     const hit = (x, z, r) => x + r > x0 - pad && x - r < x1 + pad && z + r > z0 - pad && z - r < z1 + pad;
+    const rectGap = (x, z) => Math.hypot(Math.max(0, x0 - x, x - x1), Math.max(0, z0 - z, z - z1));
     return {
+      // Lands further than this only ever give fully-sloped seabed here.
+      lands: LANDS.filter((l) => rectGap(l.x, l.z) - l.r < 14),
       zones: ZONES.filter((zn) => hit(zn.x, zn.z, zn.r + 3)),
       lakes: LAKES.filter((l) => hit(l.x, l.z, l.r + 3.5)),
       plazas: PLAZAS.filter((p) => hit(p.x, p.z, p.r + 3)),
       segs: segs.filter((s) => Math.max(s[0], s[2]) + s[4] + 1 > x0 - pad && Math.min(s[0], s[2]) - s[4] - 1 < x1 + pad && Math.max(s[1], s[3]) + s[4] + 1 > z0 - pad && Math.min(s[1], s[3]) - s[4] - 1 < z1 + pad),
       buildings: BUILDINGS.filter((b) => hit(b.x, b.z, Math.max(b.w, b.d) / 2 + 1)),
+      nodes: NODES.filter((n) => hit(n.x, n.z, 2)).map((n) => ({ x: n.x, z: n.z, r: (NODE_TYPES[n.type]?.r ?? 0.5) * n.s })),
+      biomeAt,
     };
   };
 
-  // Plazas: concentric paving rings and spokes (sized to the plaza).
-  for (const p of PLAZAS) {
-    const k = p.r / 11.2;
-    const rings = [[0, 11.2, '#b3a58c'], [10.4, 11.2, '#8a7c66'], [6.2, 6.9, '#988a72'], [3.6, 4.2, '#988a72']];
-    rings.forEach(([a, b, col], i) => {
-      const m = new THREE.Mesh(a ? new THREE.RingGeometry(a * k, b * k, 64) : new THREE.CircleGeometry(b * k, 64), toon(col));
-      m.rotation.x = -Math.PI / 2;
-      m.position.set(p.x, 0.02 + i * 0.004, p.z);
-      m.receiveShadow = true;
-      root.add(freeze(m));
-    });
-    for (let i = 0; i < 16; i++) {
-      const a = (i / 16) * Math.PI * 2;
-      const spoke = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 3.4 * k), toon('#988a72'));
-      spoke.rotation.x = -Math.PI / 2;
-      spoke.rotation.z = -a;
-      spoke.position.set(p.x + Math.cos(a) * 8.6 * k, 0.035, p.z + Math.sin(a) * 8.6 * k);
-      spoke.receiveShadow = true;
-      root.add(freeze(spoke));
+  // Butterflies around gardens and plazas: every wing is one instance of one mesh.
+  {
+    const homes = [...zonesOfKind('garden'), ...PLAZAS];
+    const n = homes.length ? 10 : 0;
+    if (n) {
+      const rng = mulberry32(99);
+      const wings = new THREE.InstancedMesh(new THREE.CircleGeometry(0.14, 8).translate(0.12, 0, 0), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), n * 2);
+      wings.frustumCulled = false;
+      const flies = [];
+      const c = new THREE.Color();
+      for (let i = 0; i < n; i++) {
+        c.set(['#ff9fc4', '#ffd84a', '#9fd8ff', '#ffffff'][i % 4]);
+        wings.setColorAt(i * 2, c);
+        wings.setColorAt(i * 2 + 1, c);
+        flies.push({ home: homes[i < 6 ? 0 : i % homes.length], ph: rng() * 10, r: 4 + rng() * 5 });
+      }
+      root.add(wings);
+      const o = new THREE.Object3D();
+      const w = new THREE.Object3D();
+      o.add(w);
+      animated.push((dt, t) => {
+        flies.forEach((f, i) => {
+          const a = t * 0.3 + f.ph;
+          o.position.set(f.home.x + Math.cos(a) * f.r, 1.2 + Math.sin(t * 2 + f.ph) * 0.4, f.home.z + Math.sin(a * 1.3) * f.r);
+          o.rotation.y = -a;
+          for (const s of [1, -1]) {
+            w.rotation.set(0, s > 0 ? Math.sin(t * 25) * 1.1 : Math.PI - Math.sin(t * 25) * 1.1, 0);
+            o.updateMatrixWorld(true);
+            wings.setMatrixAt(i * 2 + (s > 0 ? 0 : 1), w.matrixWorld);
+          }
+        });
+        wings.instanceMatrix.needsUpdate = true;
+      });
     }
   }
 
-  // Sort the chunked things into their squares once.
+  // ── Gatherable nodes: a handle for each, drawn by their chunks
+  const nodes = new Map();
+  const live = new Set(); // handles with a NodeView standing in
+  const ctl = {
+    // The NodeView for h, made if its chunk is built.
+    live(h) {
+      if (h.view) return h.view;
+      const ch = h.chunk;
+      if (!ch?.lod) return null;
+      const v = new NodeView(h.node, fx);
+      if (!h.alive) v.setDead();
+      v.hp = h.hp;
+      if (h.st) v.tint(h.st);
+      v.onLand = () => h.onLand?.();
+      ch.fixed.add(casters(v.root, low));
+      h.view = v;
+      h.idle = 0;
+      live.add(h);
+      ctl.sync(h);
+      town.rev++;
+      return v;
+    },
+    // Show the merged copy (standing or felled) unless a NodeView stands in.
+    sync(h) {
+      const m = h.chunk?.lod?.merge;
+      const id = h.node.id;
+      let changed = false;
+      if (m) {
+        changed = m.show(id + '|f', !h.view && h.alive) || changed;
+        changed = m.show(id + '|s', !h.view && !h.alive) || changed;
+      }
+      if (h.pick) {
+        const tall = h.alive ? Math.max(1, h.height) : 0.7;
+        h.pick.scale.y = tall;
+        h.pick.updateMatrix();
+      }
+      if (changed) town.rev++;
+    },
+    restyle(h) {
+      if (h.st) ctl.live(h)?.tint(h.st);
+      else h.view?.tint(0);
+    },
+  };
+  function dropView(h) {
+    if (!h.view) return;
+    h.view.root.parent?.remove(h.view.root);
+    disposeTree(h.view.root);
+    h.view = null;
+    live.delete(h);
+  }
+  for (const n of NODES) nodes.set(n.id, new NodeHandle(n, ctl));
+
+  // ── Sorting things into their chunks
   const chunkOf = (x, z) => `${Math.floor(x / CHUNK)},${Math.floor(z / CHUNK)}`;
   const bucket = (map, k, v) => (map.get(k) ?? map.set(k, []).get(k)).push(v);
-  const propsIn = new Map();
-  for (const pr of PROPS) bucket(propsIn, chunkOf(pr.x, pr.z), pr);
-  // Sparse stepping stones along the paths.
-  const stonesIn = new Map();
-  for (const s of segs) {
-    const len = Math.hypot(s[2] - s[0], s[3] - s[1]);
-    if (len < 4) continue;
-    for (let i = 0; i < len * (low ? 0.5 : 0.9); i++) {
-      const t = rng();
-      const off = (rng() - 0.5) * s[4] * 1.4;
-      const nx = -(s[3] - s[1]) / len;
-      const nz = (s[2] - s[0]) / len;
-      const x = s[0] + (s[2] - s[0]) * t + nx * off;
-      const z = s[1] + (s[3] - s[1]) * t + nz * off;
-      if (!inPlaza(x, z, 0.3)) bucket(stonesIn, chunkOf(x, z), [x, z, rng() * 3, 0.6 + rng() * 0.6, 0.7 + rng() * 0.4]);
+  let B; // { props, stones, nodes, statics: [Map], pad: Map, maxPad }
+  function rebucket() {
+    B = { props: new Map(), stones: new Map(), nodes: new Map(), statics: STATICS.map(() => new Map()), pad: new Map(), maxPad: 0 };
+    for (const pr of PROPS) bucket(B.props, chunkOf(pr.x, pr.z), pr);
+    for (const h of nodes.values()) bucket(B.nodes, chunkOf(h.node.x, h.node.z), h);
+    // Sparse stepping stones along the paths.
+    const rng = mulberry32(99);
+    for (const s of segs) {
+      const len = Math.hypot(s[2] - s[0], s[3] - s[1]);
+      if (len < 4) continue;
+      for (let i = 0; i < len * (low ? 0.5 : 0.9); i++) {
+        const t = rng();
+        const off = (rng() - 0.5) * s[4] * 1.4;
+        const nx = -(s[3] - s[1]) / len;
+        const nz = (s[2] - s[0]) / len;
+        const x = s[0] + (s[2] - s[0]) * t + nx * off;
+        const z = s[1] + (s[3] - s[1]) * t + nz * off;
+        if (!PLAZAS.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + 0.3)) bucket(B.stones, chunkOf(x, z), [x, z, rng() * 3, 0.6 + rng() * 0.6, 0.7 + rng() * 0.4]);
+      }
     }
-  }
-
-  // Crafting stations: an invisible tap target on each (the visuals are props).
-  for (const pr of PROPS.filter((x) => x.station)) {
-    const pickVol = new THREE.Mesh(cyl(pr.r + 0.35, pr.r + 0.35, 1.8, 10), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
-    pickVol.position.set(pr.x, 0.9, pr.z);
-    pickVol.layers.set(2); // never drawn; the tap raycaster checks every layer
-    pickVol.userData.station = pr.station;
-    root.add(pickVol);
-    pickables.push(pickVol);
-  }
-
-  // ── Buildings
-  // Anything that can hide the hero fades out while it's between them and the camera.
-  const fadeable = (grp) => {
-    const mats = [];
-    const outlines = [];
-    grp.traverse((o) => {
-      if (!o.isMesh) return;
-      if (o.material.side === THREE.BackSide) outlines.push(o);
-      else {
-        o.material = o.material.clone();
-        mats.push(o.material);
+    STATICS.forEach((st, i) => {
+      for (const e of st.list() ?? []) {
+        const k = chunkOf(e.x, e.z);
+        bucket(B.statics[i], k, e);
+        const r = st.reach(e) || 0;
+        if (r > (B.pad.get(k) ?? 0)) B.pad.set(k, r);
+        B.maxPad = Math.max(B.maxPad, r);
       }
     });
-    grp.updateMatrixWorld(true);
-    fades.push({ box: new THREE.Box3().setFromObject(grp), mats, outlines, op: 1 });
-  };
-  for (const [i, b] of BUILDINGS.entries()) {
-    const grp = buildModular(b, i) || buildHouse(b, rng);
-    root.add(freeze(grp));
-    fadeable(grp);
-    grp.traverse((o) => {
-      if (o.isMesh) o.userData.building = b.id;
-    });
-    if (!b.deco) {
-      pickables.push(grp);
-      labels.push({ kind: 'place', id: b.id, text: b.label, icon: b.icon, glyph: b.glyph, pos: new THREE.Vector3(b.x, grp.userData.top + 0.9, b.z) });
-    }
-    if (grp.userData.smoke) animated.push((dt, t) => {
-      if (Math.random() < dt * 2.5 && fx.near(grp.userData.smoke)) fx.puff.burst(grp.userData.smoke, { ambient: 'smoke', n: 1, color: ['#f4f4f4', '#e2e2e2'], speed: 0.25, up: 0.9, gravity: -0.5, size: 0.55, life: 2.6, drag: 0.6, jitter: 0.15, spin: 0 });
-    });
+  }
+  rebucket();
+
+  // ── Chunks
+  const chunks = new Map(); // "i,j" → chunk
+  const gap = (ci, cj, x, z) => Math.hypot(Math.max(0, ci * CHUNK - x, x - (ci + 1) * CHUNK), Math.max(0, cj * CHUNK - z, z - (cj + 1) * CHUNK));
+  const levelFor = (d, cur) => (cur === 'near' ? (d > NEAR_OUT ? 'far' : 'near') : d <= NEAR_IN ? 'near' : 'far');
+
+  // What a builder may use. `into` collects what it registers (anims, picks,
+  // labels, fades) so they go away with the chunk or its detail level.
+  function makeCtx(into, merge = null) {
+    return {
+      fx,
+      low,
+      scene,
+      town,
+      animate: (fn) => into.anim.push(fn),
+      pick: (obj) => (into.pick.push(obj), pickables.push(obj)),
+      label: (l) => (into.labels.push(l), labels.push(l), town.onLabel?.add(l)),
+      fade: (grp) => {
+        const f = fadeable(grp);
+        into.fades.push(f);
+        fades.push(f);
+      },
+      place: (pl) => merge?.place(pl),
+      onDrop: (fn) => into.drop.push(fn),
+    };
+  }
+  const blank = () => ({ anim: [], pick: [], labels: [], fades: [], drop: [] });
+  function release(set) {
+    for (const fn of set.drop) fn();
+    for (const p of set.pick) pickables.splice(pickables.indexOf(p), 1);
+    for (const l of set.labels) labels.splice(labels.indexOf(l), 1), town.onLabel?.remove(l);
+    for (const f of set.fades) fades.splice(fades.indexOf(f), 1);
   }
 
-  // Gatehouses: the castle-kit wall and arch, or a simple timber arch without it.
-  for (const gt of GATES) {
+  // Built once per stay: the statics that aren't merged, node tap targets,
+  // fishing spots (always animated, so always their own NodeView).
+  function* buildFixed(ch) {
+    const ctx = makeCtx(ch);
+    // Their shadows are cast by one shadow-only mesh, except for moving parts.
+    const shadows = new ChunkMerge({ low, shadowOnly: true, x0: ch.ci * CHUNK, z0: ch.cj * CHUNK, size: CHUNK });
+    for (const [i, st] of STATICS.entries()) {
+      if (st.merge) continue;
+      for (const e of B.statics[i].get(ch.key) ?? []) {
+        ch.phase = 'static';
+        const obj = st.builder(e, ctx);
+        if (obj) {
+          obj.updateMatrixWorld(true);
+          shadows.object(obj);
+          obj.traverse((o) => o.isMesh && o.castShadow && !liveUnder(o) && (o.castShadow = false));
+          ch.fixed.add(casters(obj, low));
+        }
+        yield;
+      }
+    }
+    ch.phase = 'static-shadow';
+    yield* shadows.finishSteps();
+    ch.fixed.add(shadows.group);
+    for (const h of ch.nodes) {
+      h.chunk = ch;
+      if (h.type.kind === 'fish') {
+        const v = new NodeView(h.node, fx);
+        h.view = v;
+        h.permanent = true;
+        live.add(h);
+        ch.fixed.add(v.root);
+        ctx.pick(v.root);
+        continue;
+      }
+      const t = h.type;
+      const r = t.kind === 'tree' ? 1.2 * h.node.s : Math.max(0.6, t.r * h.node.s + 0.3);
+      const pv = pickVolume(PICK_GEO, { node: h.node.id });
+      pv.position.set(h.node.x, 0, h.node.z);
+      pv.scale.set(r, 1, r);
+      pv.matrixAutoUpdate = false;
+      h.pick = pv;
+      ch.fixed.add(pv);
+      ctx.pick(pv);
+    }
+  }
+
+  // The detail level's part: ground, grass, stepping stones, and everything
+  // merged (props, cover, merged statics, nodes). Built aside, then swapped in.
+  function* buildLod(ch, level) {
+    const far = level === 'far';
+    const set = { ...blank(), level, group: new THREE.Group(), merge: new ChunkMerge({ far, low, x0: ch.ci * CHUNK, z0: ch.cj * CHUNK, size: CHUNK }) };
+    ch.pending = set;
+    const { group, merge } = set;
+    const ctx = makeCtx(set, merge);
+    const { ci, cj } = ch;
+    const x0 = ci * CHUNK;
+    const z0 = cj * CHUNK;
+    const near = ch.near ?? (ch.near = nearRect(x0, z0, x0 + CHUNK, z0 + CHUNK, 6));
+    const crng = mulberry32(((ci * 73856093) ^ (cj * 19349663)) >>> 0);
+    const c = new THREE.Color();
+    ch.phase = 'ground';
+    if (near.lands.length) {
+      // Ground tile. Normals come from the height function, so neighbouring
+      // tiles shade identically along their shared edge.
+      const SEG = Math.round(CHUNK / (low ? 1.57 : 1.12) / (far ? 2 : 1));
+      const g = new THREE.PlaneGeometry(CHUNK, CHUNK, SEG, SEG);
+      g.rotateX(-Math.PI / 2);
+      g.translate(x0 + CHUNK / 2, 0, z0 + CHUNK / 2);
+      const pos = g.attributes.position;
+      const nor = g.attributes.normal;
+      const colors = new Float32Array(pos.count * 3);
+      const e = 0.5;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        pos.setY(i, heightAt(x, z, near));
+        const nx = heightAt(x - e, z, near) - heightAt(x + e, z, near);
+        const nz = heightAt(x, z - e, near) - heightAt(x, z + e, near);
+        const l = Math.hypot(nx, 2 * e, nz);
+        nor.setXYZ(i, nx / l, (2 * e) / l, nz / l);
+        colourAt(x, z, near, c);
+        colors[i * 3] = c.r;
+        colors[i * 3 + 1] = c.g;
+        colors[i * 3 + 2] = c.b;
+        if (i % 256 === 255) yield;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      const ground = new THREE.Mesh(g, groundMatFor());
+      ground.receiveShadow = true;
+      ground.userData.ground = true;
+      group.add(freeze(ground));
+      ctx.pick(ground);
+      yield;
+
+      // Grass tufts everywhere that isn't paved, built on or wet (near only).
+      if (!far) {
+        const tufts = [];
+        const tries = Math.round(CHUNK * CHUNK * (low ? 0.042 : 0.106));
+        for (let i = 0; i < tries; i++) {
+          const x = x0 + crng() * CHUNK;
+          const z = z0 + crng() * CHUNK;
+          if (landDist(x, z, near.lands) > -1 || near.plazas.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + 0.8)) continue;
+          if (near.buildings.some((b) => Math.abs(x - b.x) < b.w / 2 + 1 && Math.abs(z - b.z) < b.d / 2 + 1)) continue;
+          if (near.lakes.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + 2) || near.segs.some((s) => distSeg(x, z, s) < s[4] + 0.4)) continue;
+          tufts.push([x, z]);
+        }
+        // One mesh per quarter of the square, each drawn within DETAIL m.
+        const wilds = zonesOfKind('wilds');
+        const H = CHUNK / 2;
+        const quarters = [[], [], [], []];
+        for (const p of tufts) quarters[(p[0] - x0 >= H ? 1 : 0) + (p[1] - z0 >= H ? 2 : 0)].push(p);
+        quarters.forEach((list, q) => {
+          if (!list.length) return;
+          const im = new THREE.InstancedMesh(tuftGeo, toon('#ffffff'), list.length * 3);
+          const o = new THREE.Object3D();
+          let k = 0;
+          for (const [x, z] of list) {
+            const wild = wilds.some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 6);
+            for (let j = 0; j < 3; j++) {
+              o.position.set(x + (crng() - 0.5) * 0.4, 0, z + (crng() - 0.5) * 0.4);
+              o.rotation.set((crng() - 0.5) * 0.5, crng() * 3, (crng() - 0.5) * 0.5);
+              o.scale.setScalar(0.6 + crng() * 0.9);
+              o.updateMatrix();
+              im.setMatrixAt(k, o.matrix);
+              im.setColorAt(k++, c.set(wild ? ['#4e6e38', '#43602f', '#5b7a42'][j] : ['#6b9a48', '#5a8a3d', '#7caa55'][j]));
+            }
+          }
+          im.userData.grass = true;
+          group.add(freeze(im));
+          merge.tiles.push({ mesh: im, q, kind: 'detail' });
+        });
+        yield;
+        // Cover from the biome's rules (none in meadow), halved on low.
+        for (const pl of scatterPoints(ci, cj, coverRules(x0, z0, low), near, 0)) merge.place(pl);
+        yield;
+      }
+    }
+
+    // Stepping stones (near only)
+    const stones = !far && B.stones.get(ch.key);
+    if (stones?.length) {
+      const im = new THREE.InstancedMesh(stoneGeo, toon('#ffffff'), stones.length);
+      const o = new THREE.Object3D();
+      stones.forEach(([x, z, rot, sc, sq], i) => {
+        o.position.set(x, 0.03, z);
+        o.rotation.set(0, rot, 0);
+        o.scale.set(sc, 1, sc * sq);
+        o.updateMatrix();
+        im.setMatrixAt(i, o.matrix);
+        im.setColorAt(i, c.set(['#b8ac96', '#a89c86', '#c4b8a2'][i % 3]));
+      });
+      im.receiveShadow = true;
+      group.add(freeze(im));
+    }
+
+    ch.phase = 'props';
+    // Props: models merged; proc_* kinds built in code (procprops.js) and
+    // merged too, except their animated parts; bobbing ones stay apart.
+    for (const pr of B.props.get(ch.key) ?? []) {
+      if (pr.slot.startsWith('proc_')) {
+        const make = PROC_BUILDERS[pr.slot];
+        if (!make) continue;
+        const obj = make(pr, ctx);
+        obj.position.set(pr.x, pr.y || 0, pr.z);
+        obj.rotation.y = pr.rot;
+        obj.updateMatrixWorld(true);
+        if (obj.userData.tap) {
+          // Something you can tap (the bulletin board): a box to tap on.
+          const box = new THREE.Box3().setFromObject(obj);
+          const pv = pickVolume(PICK_BOX, { tap: obj.userData.tap });
+          box.getCenter(pv.position);
+          box.getSize(pv.scale);
+          group.add(pv);
+          ctx.pick(pv);
+        }
+        merge.object(obj);
+        if (keepLive(obj)) group.add(casters(obj, low));
+        yield;
+        continue;
+      }
+      if (!assets.has(pr.slot)) continue;
+      if (pr.bob) {
+        const m = assets.make(pr.slot, { variant: pr.v || 0 });
+        m.object.position.set(pr.x, pr.y || 0, pr.z);
+        m.object.rotation.y = pr.rot;
+        if (pr.s) m.object.scale.multiplyScalar(pr.s);
+        group.add(casters(m.object, low));
+        const ph = pr.x * 0.7;
+        set.anim.push((dt, t) => {
+          m.object.position.y = (pr.y || 0) + Math.sin(t * 1.6 + ph) * 0.08;
+          m.object.rotation.z = Math.sin(t * 1.1 + ph) * 0.06;
+        });
+        continue;
+      }
+      merge.place({ slot: pr.slot, v: (pr.v || 0) % assets.variantCount(pr.slot), x: pr.x, z: pr.z, y: pr.y || 0, rot: pr.rot, s: pr.s ?? 1 });
+      yield;
+    }
+
+    // Merged statics (plazas, fountains, docks, lake shores…)
+    ch.phase = 'merged-statics';
+    for (const [i, st] of STATICS.entries()) {
+      if (!st.merge) continue;
+      for (const e of B.statics[i].get(ch.key) ?? []) {
+        const obj = st.builder(e, ctx);
+        if (obj) {
+          obj.updateMatrixWorld(true);
+          merge.object(obj, null, { cast: obj.userData.cast !== false });
+          if (keepLive(obj)) group.add(casters(obj, low));
+        }
+        yield;
+      }
+    }
+
+    // Gatherable nodes: each one's standing and felled looks, under its id.
+    ch.phase = 'nodes';
+    for (const h of ch.nodes) {
+      if (h.type.kind === 'fish') continue;
+      const v = new NodeView(h.node, fx);
+      v.root.updateMatrixWorld(true);
+      merge.object(v.full, h.node.id + '|f');
+      v.stump.visible = true;
+      merge.object(v.stump, h.node.id + '|s');
+      merge.show(h.node.id + '|f', false);
+      merge.show(h.node.id + '|s', false);
+      disposeTree(v.root);
+      yield;
+    }
+
+    ch.phase = 'finish';
+    yield* merge.finishSteps();
+    group.add(merge.group);
+
+    // Swap it in.
+    if (ch.lod) {
+      ch.group.remove(ch.lod.group);
+      disposeLod(ch.lod);
+      release(ch.lod);
+    }
+    ch.lod = set;
+    ch.pending = null;
+    ch.group.add(group);
+    for (const h of ch.nodes) ctl.sync(h);
+    // Far chunks: no ink on the statics either.
+    ch.fixed.traverse((o) => isHull(o) && (o.visible = !far));
+    town.rev++;
+  }
+
+  function* buildChunk(ch, level) {
+    yield* buildFixed(ch);
+    yield* buildLod(ch, level);
+  }
+
+  function dropChunk(k) {
+    const ch = chunks.get(k);
+    chunks.delete(k);
+    root.remove(ch.group);
+    for (const h of ch.nodes) {
+      if (h.chunk !== ch) continue;
+      dropView(h);
+      h.chunk = null;
+      h.pick = null;
+      h.permanent = false;
+    }
+    for (const set of [ch, ch.lod, ch.pending]) {
+      if (!set) continue;
+      release(set);
+      if (set !== ch) disposeLod(set);
+    }
+    disposeTree(ch.fixed);
+    ch.job = null;
+    town.rev++;
+  }
+
+  // Keep the squares around (x, z) built, at the right detail, and drop the
+  // ones well out of view. Jobs run in pump().
+  function stream(x, z) {
+    const R = town.viewRadius ?? (scene.fog ? scene.fog.far + 10 : 120);
+    for (const [k, ch] of chunks) {
+      ch.gap = gap(ch.ci, ch.cj, x, z);
+      if (ch.gap > R + ch.pad + DROP_PAD) dropChunk(k);
+    }
+    const reach = R + B.maxPad;
+    for (let ci = Math.floor((x - reach) / CHUNK); ci <= Math.floor((x + reach) / CHUNK); ci++)
+      for (let cj = Math.floor((z - reach) / CHUNK); cj <= Math.floor((z + reach) / CHUNK); cj++) {
+        const key = `${ci},${cj}`;
+        if (chunks.has(key)) continue;
+        const pad = B.pad.get(key) ?? 0;
+        const d = gap(ci, cj, x, z);
+        if (d > R + pad) continue;
+        const group = new THREE.Group();
+        const fixed = new THREE.Group();
+        group.add(fixed);
+        root.add(group);
+        const ch = { key, ci, cj, gap: d, pad, group, fixed, lod: null, pending: null, nodes: B.nodes.get(key) ?? [], ...blank() };
+        ch.level = levelFor(d, null);
+        ch.job = buildChunk(ch, ch.level);
+        chunks.set(key, ch);
+      }
+    for (const ch of chunks.values()) {
+      if (ch.job) continue;
+      const want = levelFor(ch.gap, ch.level);
+      if (want !== ch.level) {
+        ch.level = want;
+        ch.job = buildLod(ch, want);
+      }
+    }
+  }
+
+  // Run chunk jobs, nearest first, for about `budget` ms (always one step).
+  function pump(budget) {
+    const t0 = performance.now();
+    const jobs = [...chunks.values()].filter((c) => c.job).sort((a, b) => a.gap - b.gap);
+    for (const ch of jobs) {
+      while (ch.job) {
+        const s0 = performance.now();
+        if (ch.job.next().done) ch.job = null;
+        const s1 = performance.now();
+        town.stepLog?.push([ch.key, ch.phase, Math.round((s1 - s0) * 10) / 10]); // (set stepLog = [] to measure)
+        if (s1 - t0 > budget) return true;
+      }
+    }
+    return false;
+  }
+
+  const start = focus ?? SPAWN;
+  stream(start.x, start.z);
+  pump(Infinity);
+
+  const dir = new THREE.Vector3();
+  let nextStream = 0;
+  let busy = false;
+  const stones = town.stones;
+  return Object.assign(town, {
+    root,
+    pickables,
+    nodes,
+    labels,
+    fades,
+    chunks,
+    // Build/drop squares around a point (the game and editor call this with
+    // where the camera looks; update() does it on its own otherwise).
+    focus(x, z, budget = STEP_MS) {
+      stream(x, z);
+      busy = pump(budget);
+    },
+    update(dt, t, cam) {
+      for (const a of animated) a(dt, t, cam);
+      for (const ch of chunks.values()) {
+        for (const a of ch.anim) a(dt, t, cam);
+        if (ch.lod) for (const a of ch.lod.anim) a(dt, t, cam);
+      }
+      for (const h of live) {
+        const v = h.view;
+        v.update(dt);
+        if (h.permanent || h.st || v.busy) h.idle = 0;
+        else if ((h.idle += dt) > 1.2) {
+          // Settled: back into the merged meshes.
+          dropView(h);
+          ctl.sync(h);
+          town.rev++;
+        }
+      }
+      if (!cam) return;
+      // Where the middle of the screen meets the ground. Every quarter second,
+      // stream around it; build what's missing a few ms per frame.
+      cam.getWorldDirection(dir);
+      const k = dir.y < -0.05 ? -cam.position.y / dir.y : 30;
+      const fx0 = cam.position.x + dir.x * k;
+      const fz0 = cam.position.z + dir.z * k;
+      if (t >= nextStream) {
+        nextStream = t + 0.25;
+        stream(fx0, fz0);
+        busy = true;
+      }
+      if (busy) busy = pump(STEP_MS);
+      // Ink and small detail by quarter, by distance.
+      const H = CHUNK / 2;
+      for (const ch of chunks.values()) {
+        for (const tl of ch.lod?.merge.tiles ?? []) {
+          const x0 = ch.ci * CHUNK + (tl.q & 1) * H;
+          const z0 = ch.cj * CHUNK + (tl.q >> 1) * H;
+          const d = Math.hypot(Math.max(0, x0 - fx0, fx0 - x0 - H), Math.max(0, z0 - fz0, fz0 - z0 - H));
+          const r = tl.kind === 'ink' ? INK : DETAIL;
+          tl.mesh.visible = d <= (tl.mesh.visible ? r + 4 : r);
+        }
+      }
+    },
+    // Waystones you've attuned to glow.
+    setAttuned(ids) {
+      town.attuned = new Set(ids);
+      for (const [id, ws] of stones) ws.setAttuned(town.attuned.has(id));
+    },
+    attune(id) {
+      town.attuned.add(id);
+      stones.get(id)?.setAttuned(true);
+    },
+    // The map changed around (x, z) (the world editor): rebuild those squares.
+    rebuildChunksAround(x, z, r = 0) {
+      for (const [k, ch] of [...chunks]) if (gap(ch.ci, ch.cj, x, z) <= r + 1) dropChunk(k);
+      const old = new Map(nodes);
+      nodes.clear();
+      for (const n of NODES) {
+        const h = old.get(n.id);
+        if (h && !h.chunk) (h.node = n), (h.root.position.set(n.x, 0, n.z), nodes.set(n.id, h));
+        else if (h) nodes.set(n.id, h);
+        else nodes.set(n.id, new NodeHandle(n, ctl));
+      }
+      rebucket();
+      for (const ch of chunks.values()) ch.nodes = B.nodes.get(ch.key) ?? [];
+      busy = true;
+    },
+  });
+}
+
+// Cover rules for a chunk: its biome's (by the chunk's middle), halved on low.
+function coverRules(x0, z0, low) {
+  const rules = COVER[biomeAt(x0 + CHUNK / 2, z0 + CHUNK / 2)] ?? [];
+  return low ? rules.map((r) => ({ ...r, per100m2: r.per100m2 / 2 })) : rules;
+}
+
+const liveUnder = (o) => {
+  for (let p = o; p; p = p.parent) if (p.userData.live) return true;
+  return false;
+};
+
+// After merging obj: take out what was merged, keeping only its animated
+// (userData.live) meshes. Returns whether anything is left to draw.
+function keepLive(obj) {
+  const drop = [];
+  let left = false;
+  obj.traverse((o) => {
+    if (!o.isMesh || isHull(o)) return;
+    if (liveUnder(o)) left = true;
+    else drop.push(o);
+  });
+  for (const o of drop) o.parent?.remove(o);
+  return left;
+}
+
+// Anything that can hide the hero fades out while it's between them and the camera.
+function fadeable(grp) {
+  const mats = [];
+  const outlines = [];
+  grp.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.material.side === THREE.BackSide) outlines.push(o);
+    else {
+      o.material = o.material.clone();
+      mats.push(o.material);
+    }
+  });
+  grp.updateMatrixWorld(true);
+  return { box: new THREE.Box3().setFromObject(grp), mats, outlines, op: 1 };
+}
+
+// ── The built-in statics ─────────────────────────────────────────────────
+// Buildings (a few merged meshes each, fading when they hide you).
+registerChunkStatic(
+  () => BUILDINGS,
+  (b, ctx) => {
+    const grp = buildModular(b, BUILDINGS.indexOf(b)) || buildHouse(b, mulberry32(hash(b.id)));
+    freeze(grp);
+    ctx.fade(grp);
+    grp.traverse((o) => o.isMesh && (o.userData.building = b.id));
+    if (!b.deco) {
+      ctx.pick(grp);
+      ctx.label({ kind: 'place', id: b.id, text: b.label, icon: b.icon, glyph: b.glyph, pos: new THREE.Vector3(b.x, grp.userData.top + 0.9, b.z) });
+    }
+    const smoke = grp.userData.smoke;
+    if (smoke) ctx.animate((dt) => {
+      if (Math.random() < dt * 2.5 && ctx.fx.near(smoke)) ctx.fx.puff.burst(smoke, { ambient: 'smoke', n: 1, color: ['#f4f4f4', '#e2e2e2'], speed: 0.25, up: 0.9, gravity: -0.5, size: 0.55, life: 2.6, drag: 0.6, jitter: 0.15, spin: 0 });
+    });
+    return grp;
+  },
+  { reach: (b) => Math.hypot(b.w, b.d) / 2 + 2 },
+);
+
+// Gatehouses: the castle-kit wall and arch, or a simple timber arch without it.
+registerChunkStatic(
+  () => GATES,
+  (gt, ctx) => {
     const castle = buildGate(gt);
     const k = gt.scale / 4.5;
+    const flame = (x, y, z, s) => {
+      const f = new THREE.Mesh(sph(s, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffb340' }));
+      f.position.set(x, y, z);
+      ctx.animate((dt, t) => f.scale.setScalar(1 + Math.sin(t * 13 + x) * 0.18));
+      return f;
+    };
     if (castle) {
-      root.add(castle);
-      fadeable(castle);
+      const grp = new THREE.Group().add(freeze(castle));
+      ctx.fade(castle);
       for (const sx of [-1, 1]) {
-        const flame = new THREE.Mesh(sph(0.16, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffb340' }));
-        flame.position.set(gt.x + sx * 1.75 * k, 3.15 * k, gt.z + 2.45 * k);
         const torch = mesh(cyl(0.07, 0.09, 0.55, 6), '#6b4226');
         torch.position.set(gt.x + sx * 1.75 * k, 2.75 * k, gt.z + 2.35 * k);
         torch.rotation.x = 0.35;
-        animated.push((dt, t) => flame.scale.setScalar(1 + Math.sin(t * 13 + sx) * 0.18));
-        root.add(torch, flame);
+        grp.add(torch, flame(gt.x + sx * 1.75 * k, 3.15 * k, gt.z + 2.45 * k, 0.16));
       }
-      labels.push({ kind: 'place', id: gt.id, text: gt.label, icon: gt.icon, glyph: gt.glyph, pos: new THREE.Vector3(gt.x, castle.userData.top + 1.2, gt.z) });
-    } else {
-      const grp = new THREE.Group();
-      grp.position.set(gt.x, 0, gt.z);
-      for (const s of [-1, 1]) {
-        const pillar = mesh(box(1.4, 5, 1.4), '#b3aa9c', { outline: OL });
-        pillar.position.set((gt.width / 2) * s, 2.5, 0);
-        const cap = mesh(box(1.8, 0.5, 1.8), '#9c9284', { outline: OL });
-        cap.position.set((gt.width / 2) * s, 5.2, 0);
-        const torch = mesh(cyl(0.08, 0.1, 0.6, 6), '#6b4226');
-        torch.position.set((gt.width / 2 - 0.9) * s, 3.2, 0.75);
-        const flame = new THREE.Mesh(sph(0.18, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffb340' }));
-        flame.position.set((gt.width / 2 - 0.9) * s, 3.65, 0.75);
-        animated.push((dt, t) => flame.scale.setScalar(1 + Math.sin(t * 13 + s) * 0.18));
-        grp.add(pillar, cap, torch, flame);
-      }
-      const beam = mesh(box(gt.width + 2.4, 0.9, 1.0), '#8b5a33', { outline: OL });
-      beam.position.y = 5.9;
-      const roof = mesh(new THREE.ConeGeometry(1, 1, 4), '#c4534a', { outline: OL });
-      roof.scale.set(gt.width * 0.75, 1.1, 1.4);
-      roof.rotation.y = Math.PI / 4;
-      roof.position.y = 6.9;
-      const banner = mesh(box(1.8, 1.4, 0.08), '#c4534a', { outline: 0.02 });
-      banner.position.set(0, 4.8, 0.55);
-      grp.add(beam, roof, banner);
-      root.add(grp);
-      labels.push({ kind: 'place', id: gt.id, text: gt.label, icon: gt.icon, glyph: gt.glyph, pos: new THREE.Vector3(gt.x, 8.3, gt.z) });
+      ctx.label({ kind: 'place', id: gt.id, text: gt.label, icon: gt.icon, glyph: gt.glyph, pos: new THREE.Vector3(gt.x, castle.userData.top + 1.2, gt.z) });
+      return grp;
     }
-  }
+    const grp = new THREE.Group();
+    grp.position.set(gt.x, 0, gt.z);
+    for (const s of [-1, 1]) {
+      const pillar = mesh(box(1.4, 5, 1.4), '#b3aa9c', { outline: OL });
+      pillar.position.set((gt.width / 2) * s, 2.5, 0);
+      const cap = mesh(box(1.8, 0.5, 1.8), '#9c9284', { outline: OL });
+      cap.position.set((gt.width / 2) * s, 5.2, 0);
+      const torch = mesh(cyl(0.08, 0.1, 0.6, 6), '#6b4226');
+      torch.position.set((gt.width / 2 - 0.9) * s, 3.2, 0.75);
+      grp.add(pillar, cap, torch, flame((gt.width / 2 - 0.9) * s, 3.65, 0.75, 0.18));
+    }
+    const beam = mesh(box(gt.width + 2.4, 0.9, 1.0), '#8b5a33', { outline: OL });
+    beam.position.y = 5.9;
+    const roof = mesh(new THREE.ConeGeometry(1, 1, 4), '#c4534a', { outline: OL });
+    roof.scale.set(gt.width * 0.75, 1.1, 1.4);
+    roof.rotation.y = Math.PI / 4;
+    roof.position.y = 6.9;
+    const banner = mesh(box(1.8, 1.4, 0.08), '#c4534a', { outline: 0.02 });
+    banner.position.set(0, 4.8, 0.55);
+    grp.add(beam, roof, banner);
+    ctx.label({ kind: 'place', id: gt.id, text: gt.label, icon: gt.icon, glyph: gt.glyph, pos: new THREE.Vector3(gt.x, 8.3, gt.z) });
+    return grp;
+  },
+  { reach: (gt) => gt.scale * 4 + 4 },
+);
 
-  // Fountains
-  for (const f of FOUNTAINS) {
+// Fountains (merged; the spray is a particle emitter).
+registerChunkStatic(
+  () => FOUNTAINS,
+  (f, ctx) => {
     const grp = new THREE.Group();
     grp.position.set(f.x, 0, f.z);
     const rim = mesh(cyl(f.r, f.r + 0.2, 0.7, 24), '#c9c1b2', { outline: OL });
@@ -625,17 +1324,59 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     const top = mesh(sph(0.35), '#ffd84a', { outline: OL });
     top.position.y = 3.0;
     grp.add(rim, water, pillar, bowl, top);
-    root.add(grp);
     const spout = new THREE.Vector3(f.x, 3.1, f.z);
-    animated.push((dt) => {
-      if (Math.random() < dt * 30 && fx.near(spout)) fx.puff.burst(spout, { ambient: 'spray', n: 1, color: ['#bfeaff', '#ffffff', '#8fd8ff'], speed: 1.6, up: 3, gravity: 9, size: 0.16, life: 0.75, jitter: 0.1 });
+    ctx.animate((dt) => {
+      if (Math.random() < dt * 30 && ctx.fx.near(spout)) ctx.fx.puff.burst(spout, { ambient: 'spray', n: 1, color: ['#bfeaff', '#ffffff', '#8fd8ff'], speed: 1.6, up: 3, gravity: 9, size: 0.16, life: 0.75, jitter: 0.1 });
     });
-  }
+    return grp;
+  },
+  { reach: (f) => f.r + 1, merge: true },
+);
 
-  // Waystones (fast travel): tap one to walk up and open the world map.
-  const stones = new Map();
-  for (const st of STONES) {
-    const ws = buildWaystone(st, { fx, animate: (fn) => animated.push(fn) });
+// Plazas: concentric paving rings and spokes (sized to the plaza), merged.
+registerChunkStatic(
+  () => PLAZAS,
+  (p) => {
+    const grp = new THREE.Group();
+    grp.userData.cast = false;
+    const k = p.r / 11.2;
+    const rings = [[0, 11.2, '#b3a58c'], [10.4, 11.2, '#8a7c66'], [6.2, 6.9, '#988a72'], [3.6, 4.2, '#988a72']];
+    rings.forEach(([a, b, col], i) => {
+      const m = new THREE.Mesh(a ? new THREE.RingGeometry(a * k, b * k, 64) : new THREE.CircleGeometry(b * k, 64), toon(col));
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(p.x, 0.02 + i * 0.004, p.z);
+      grp.add(m);
+    });
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const spoke = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 3.4 * k), toon('#988a72'));
+      spoke.rotation.x = -Math.PI / 2;
+      spoke.rotation.z = -a;
+      spoke.position.set(p.x + Math.cos(a) * 8.6 * k, 0.035, p.z + Math.sin(a) * 8.6 * k);
+      grp.add(spoke);
+    }
+    return grp;
+  },
+  { reach: (p) => p.r + 1, merge: true },
+);
+
+// Crafting stations: an invisible tap target on each (the visuals are props).
+registerChunkStatic(
+  () => PROPS.filter((x) => x.station),
+  (pr, ctx) => {
+    const pv = pickVolume(PICK_GEO, { station: pr.station });
+    pv.position.set(pr.x, 0, pr.z);
+    pv.scale.set(pr.r + 0.35, 1.8, pr.r + 0.35);
+    ctx.pick(pv);
+    return pv;
+  },
+);
+
+// Waystones (fast travel): tap one to walk up and open the world map.
+registerChunkStatic(
+  () => STONES,
+  (st, ctx) => {
+    const ws = buildWaystone(st, { fx: ctx.fx, animate: ctx.animate });
     ws.group.position.set(st.x, 0, st.z);
     ws.group.rotation.y = st.rot ?? 0;
     ws.group.traverse((o) => {
@@ -643,15 +1384,21 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       o.userData.stone = st.id;
       if (o.material.side !== THREE.BackSide) o.castShadow = true;
     });
-    root.add(ws.group);
-    pickables.push(ws.group);
-    stones.set(st.id, ws);
-    labels.push({ kind: 'stone', id: st.id, text: st.name, glyph: 'waystone', pos: new THREE.Vector3(st.x, 5, st.z) });
-  }
+    ctx.pick(ws.group);
+    ctx.town.stones.set(st.id, ws);
+    ws.setAttuned(ctx.town.attuned.has(st.id));
+    ctx.label({ kind: 'stone', id: st.id, text: st.name, glyph: 'waystone', pos: new THREE.Vector3(st.x, 5, st.z) });
+    ctx.onDrop(() => ctx.town.stones.delete(st.id));
+    return ws.group;
+  },
+  { reach: () => 3 },
+);
 
-  // Dungeon entrances: a crypt with its door ajar, a little graveyard
-  // around it, and two braziers. Tap it to see the dungeon (and go in).
-  for (const e of ENTRANCES) {
+// Dungeon entrances: a crypt with its door ajar, a little graveyard around
+// it, and two braziers. Tap it to see the dungeon (and go in).
+registerChunkStatic(
+  () => ENTRANCES,
+  (e, ctx) => {
     const grp = new THREE.Group();
     const base = assets.make('crypt_base');
     if (base) {
@@ -664,13 +1411,14 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       const door = assets.make('crypt_door');
       if (door) {
         door.object.position.set(0, 0, base.size.z / 2 + 0.02);
+        door.object.userData.live = true; // it swings open
         grp.add(door.object);
         const open = door.actions?.open;
         if (open) {
           open.setLoop(THREE.LoopOnce, 1);
           open.clampWhenFinished = true;
           open.play();
-          animated.push((dt) => door.mixer.update(dt));
+          ctx.animate((dt) => door.mixer.update(dt));
         }
       }
     } else {
@@ -688,12 +1436,12 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       fb.object.position.set(sx * (CRYPT.w / 2 + 0.6), 0, CRYPT.d / 2 + 0.9);
       grp.add(fb.object);
       const spot = new THREE.Vector3();
-      animated.push((dt) => {
+      ctx.animate((dt) => {
         if (Math.random() > dt * 14) return;
         fb.object.getWorldPosition(spot);
-        if (!fx.near(spot)) return;
+        if (!ctx.fx.near(spot)) return;
         spot.y += 0.6;
-        fx.puff.burst(spot, { ambient: 'embers', n: 1, color: ['#ffb347', '#ff7a2a', '#ffe08a'], speed: 0.6, up: 2.2, gravity: -1, size: 0.22, life: 0.6, jitter: 0.15 });
+        ctx.fx.puff.burst(spot, { ambient: 'embers', n: 1, color: ['#ffb347', '#ff7a2a', '#ffe08a'], speed: 0.6, up: 2.2, gravity: -1, size: 0.22, life: 0.6, jitter: 0.15 });
       });
     }
     [[-4.6, -1.5, 0.4], [4.4, 1.2, 2.6], [-4.2, 3.4, 5.2], [3.9, -3, 1.1]].forEach(([x, z, r], i) => {
@@ -710,24 +1458,37 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       o.userData.crypt = e.id;
       if (o.material.side !== THREE.BackSide) o.castShadow = true;
     });
-    root.add(grp);
-    pickables.push(grp);
-    labels.push({ kind: 'crypt', id: e.id, text: DUNGEON_NAMES[e.kind] ?? 'Crypt', glyph: 'crypt', pos: new THREE.Vector3(e.x, 6.2, e.z) });
-  }
+    ctx.pick(grp);
+    ctx.label({ kind: 'crypt', id: e.id, text: DUNGEON_NAMES[e.kind] ?? 'Crypt', glyph: 'crypt', pos: new THREE.Vector3(e.x, 6.2, e.z) });
+    return grp;
+  },
+  { reach: () => 8 },
+);
 
-  // Lakes: water, reeds round the shore, lily pads (skipping any dock).
-  for (const l of LAKES) {
-    const water = new THREE.Mesh(new THREE.CircleGeometry(l.r + 0.6, 64), waterMaterial({ radius: l.r + 0.6, foamAt: l.r + 0.1, shallow: '#5fb3c4', deep: '#1f5f86', fog: scene.fog, opacity: 0.93 }));
+// Lakes: the water (tap it to fish)…
+registerChunkStatic(
+  () => LAKES,
+  (l, ctx) => {
+    const water = new THREE.Mesh(new THREE.CircleGeometry(l.r + 0.6, 64), waterMaterial({ radius: l.r + 0.6, foamAt: l.r + 0.1, shallow: '#5fb3c4', deep: '#1f5f86', fog: ctx.scene.fog, opacity: 0.93 }));
     water.rotation.x = -Math.PI / 2;
     water.position.set(l.x, -0.12, l.z);
     water.userData.water = true;
-    root.add(water);
-    pickables.push(water);
-    animated.push((dt, t) => {
+    ctx.pick(water);
+    ctx.animate((dt, t) => {
       const u = water.material.uniforms;
       u.time.value = t;
-      if (scene.fog) (u.fogNear.value = scene.fog.near), (u.fogFar.value = scene.fog.far);
+      if (ctx.scene.fog) (u.fogNear.value = ctx.scene.fog.near), (u.fogFar.value = ctx.scene.fog.far);
     });
+    return freeze(water);
+  },
+  { reach: (l) => l.r + 4 },
+);
+// …and its shore: reeds round the edge and lily pads (skipping any dock), merged.
+registerChunkStatic(
+  () => LAKES,
+  (l, ctx) => {
+    const rng = mulberry32(hash(`${l.x},${l.z}`));
+    const inDock = (x, z, pad = 0) => DOCKS.some((d) => Math.abs(x - d.x) < d.w / 2 + pad && Math.abs(z - d.z) < d.d / 2 + pad);
     const ring = (n, d0, d1) => {
       const out = [];
       for (let i = 0; i < n; i++) {
@@ -739,18 +1500,24 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       }
       return out;
     };
+    const grp = new THREE.Group();
     for (const { x, z } of ring(Math.round(26 * (l.r / 14)), l.r - 0.4, l.r + 0.8)) {
       const reed = mesh(cyl(0.03, 0.04, 1.4, 4), '#5f9e4f');
       reed.position.set(x, 0.5, z);
       const cat = mesh(new THREE.CapsuleGeometry(0.07, 0.25, 3, 6), '#7c4a2c');
       cat.position.set(x, 1.25, z);
-      root.add(freeze(reed), freeze(cat));
+      grp.add(reed, cat);
     }
-    const pads = ring(Math.round(14 * (l.r / 14)), 3, l.r - 2).map((p) => ({ ...p, y: -0.06, rot: rng() * 6.28, s: 0.8 + rng() * 0.6 }));
-    scatterModels(root, 'deco_lily_pad', pads, { outline: false, castShadow: false });
-  }
-  // Docks: planks on posts.
-  for (const d of DOCKS) {
+    ring(Math.round(14 * (l.r / 14)), 3, l.r - 2).forEach((p, i) => ctx.place({ slot: 'deco_lily_pad', v: i, x: p.x, z: p.z, y: -0.06, rot: rng() * 6.28, s: 0.8 + rng() * 0.6 }));
+    return grp;
+  },
+  { reach: (l) => l.r + 4, merge: true },
+);
+
+// Docks: planks on posts, merged.
+registerChunkStatic(
+  () => DOCKS,
+  (d) => {
     const dock = new THREE.Group();
     const planks = Math.round(d.d / 0.6);
     for (let i = 0; i < planks; i++) {
@@ -764,266 +1531,32 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
         post.position.set(d.x + (d.w / 2 + 0.15) * sx, 0.2, d.z - d.d / 2 + 1 + i * (d.d / 3.3));
         dock.add(post);
       }
-    root.add(freeze(dock));
-  }
+    return dock;
+  },
+  { reach: (d) => Math.hypot(d.w, d.d) / 2 + 1, merge: true },
+);
 
-  // Bulletin boards get a name tag like the buildings.
-  for (const pr of PROPS) if (pr.slot === 'proc_job_board') labels.push({ kind: 'board', id: pr.id, text: 'Bulletin Board', glyph: 'scroll', pos: new THREE.Vector3(pr.x, 3.4, pr.z) });
+// Name tags: bulletin boards, and each zone's name over its middle.
+registerChunkStatic(
+  () => PROPS.filter((p) => p.slot === 'proc_job_board'),
+  (pr, ctx) => (ctx.label({ kind: 'board', id: pr.id, text: 'Bulletin Board', glyph: 'scroll', pos: new THREE.Vector3(pr.x, 3.4, pr.z) }), null),
+);
+registerChunkStatic(
+  () => ZONES,
+  (zn, ctx) => (ctx.label({ kind: 'zone', id: zn.id, text: zn.label, glyph: zn.glyph, pos: new THREE.Vector3(zn.x, 0.5, zn.z) }), null),
+  { reach: () => 30 },
+);
 
-  // Zone names floating over each zone.
-  for (const zn of ZONES) labels.push({ kind: 'zone', id: zn.id, text: zn.label, glyph: zn.glyph, pos: new THREE.Vector3(zn.x, 0.5, zn.z) });
-
-  // Butterflies around gardens and plazas.
-  const homes = [...zonesOfKind('garden'), ...PLAZAS];
-  for (let i = 0; homes.length && i < 10; i++) {
-    const bf = new THREE.Group();
-    const col = ['#ff9fc4', '#ffd84a', '#9fd8ff', '#ffffff'][i % 4];
-    const wm = new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide });
-    const wings = [-1, 1].map((s) => {
-      const w = new THREE.Mesh(new THREE.CircleGeometry(0.14, 8), wm);
-      w.position.x = 0.12 * s;
-      const p = new THREE.Group();
-      p.add(w);
-      bf.add(p);
-      return p;
-    });
-    const home = homes[i < 6 ? 0 : i % homes.length];
-    const ph = rng() * 10;
-    const r = 4 + rng() * 5;
-    root.add(bf);
-    animated.push((dt, t) => {
-      const a = t * 0.3 + ph;
-      bf.position.set(home.x + Math.cos(a) * r, 1.2 + Math.sin(t * 2 + ph) * 0.4, home.z + Math.sin(a * 1.3) * r);
-      bf.rotation.y = -a;
-      wings[0].rotation.y = Math.sin(t * 25) * 1.1;
-      wings[1].rotation.y = -Math.sin(t * 25) * 1.1;
-    });
-  }
-
-  // ── Gatherable nodes
-  const nodes = new Map();
-  for (const n of NODES) {
-    const v = new NodeView(n, fx);
-    nodes.set(n.id, v);
-    root.add(v.root);
-    pickables.push(v.root);
-  }
-
-
-  // ── Chunks: ground, grass, stepping stones and props near the camera ──
-  const chunks = new Map(); // "i,j" → { group, anim, pick }
-  const ctx = (anim) => ({ fx, animate: (fn) => anim.push(fn) });
-  const wilds = zonesOfKind('wilds');
-  function buildChunk(ci, cj) {
-    const x0 = ci * CHUNK;
-    const z0 = cj * CHUNK;
-    const group = new THREE.Group();
-    const anim = [];
-    const pick = [];
-    const crng = mulberry32(((ci * 73856093) ^ (cj * 19349663)) >>> 0);
-    const near = nearRect(x0, z0, x0 + CHUNK, z0 + CHUNK, 6);
-    // Squares far out at sea have nothing in them.
-    const onLand = landDistance(x0 + CHUNK / 2, z0 + CHUNK / 2) < CHUNK * 0.71 + 14;
-    if (onLand) {
-      // Ground tile. Normals come from the height function, so neighbouring
-      // tiles shade identically along their shared edge.
-      const SEG = Math.round(CHUNK / (low ? 1.57 : 1.12));
-      const g = new THREE.PlaneGeometry(CHUNK, CHUNK, SEG, SEG);
-      g.rotateX(-Math.PI / 2);
-      g.translate(x0 + CHUNK / 2, 0, z0 + CHUNK / 2);
-      const pos = g.attributes.position;
-      const nor = g.attributes.normal;
-      const colors = new Float32Array(pos.count * 3);
-      const c = new THREE.Color();
-      const e = 0.5;
-      for (let i = 0; i < pos.count; i++) {
-        const x = pos.getX(i);
-        const z = pos.getZ(i);
-        pos.setY(i, heightAt(x, z, near));
-        const nx = heightAt(x - e, z, near) - heightAt(x + e, z, near);
-        const nz = heightAt(x, z - e, near) - heightAt(x, z + e, near);
-        const l = Math.hypot(nx, 2 * e, nz);
-        nor.setXYZ(i, nx / l, (2 * e) / l, nz / l);
-        colourAt(x, z, near, c);
-        colors[i * 3] = c.r;
-        colors[i * 3 + 1] = c.g;
-        colors[i * 3 + 2] = c.b;
-      }
-      g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      const ground = new THREE.Mesh(g, groundMatFor());
-      ground.receiveShadow = true;
-      ground.userData.ground = true;
-      group.add(freeze(ground));
-      pick.push(ground);
-
-      // Grass tufts everywhere that isn't paved, built on or wet.
-      const tufts = [];
-      const tries = Math.round(CHUNK * CHUNK * (low ? 0.042 : 0.106));
-      for (let i = 0; i < tries; i++) {
-        const x = x0 + crng() * CHUNK;
-        const z = z0 + crng() * CHUNK;
-        if (landDistance(x, z) > -1 || near.plazas.some((p) => Math.hypot(x - p.x, z - p.z) < p.r + 0.8)) continue;
-        if (near.buildings.some((b) => Math.abs(x - b.x) < b.w / 2 + 1 && Math.abs(z - b.z) < b.d / 2 + 1)) continue;
-        if (near.lakes.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + 2) || near.segs.some((s) => distSeg(x, z, s) < s[4] + 0.4)) continue;
-        tufts.push([x, z]);
-      }
-      if (tufts.length) {
-        const im = new THREE.InstancedMesh(tuftGeo, toon('#ffffff'), tufts.length * 3);
-        const o = new THREE.Object3D();
-        let k = 0;
-        for (const [x, z] of tufts) {
-          const wild = wilds.some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 6);
-          for (let j = 0; j < 3; j++) {
-            o.position.set(x + (crng() - 0.5) * 0.4, 0, z + (crng() - 0.5) * 0.4);
-            o.rotation.set((crng() - 0.5) * 0.5, crng() * 3, (crng() - 0.5) * 0.5);
-            o.scale.setScalar(0.6 + crng() * 0.9);
-            o.updateMatrix();
-            im.setMatrixAt(k, o.matrix);
-            im.setColorAt(k++, c.set(wild ? ['#4e6e38', '#43602f', '#5b7a42'][j] : ['#6b9a48', '#5a8a3d', '#7caa55'][j]));
-          }
-        }
-        group.add(freeze(im));
-      }
-    }
-
-    // Stepping stones
-    const stones = stonesIn.get(`${ci},${cj}`);
-    if (stones?.length) {
-      const im = new THREE.InstancedMesh(stoneGeo, toon('#ffffff'), stones.length);
-      const o = new THREE.Object3D();
-      const col = new THREE.Color();
-      stones.forEach(([x, z, rot, sc, sq], i) => {
-        o.position.set(x, 0.03, z);
-        o.rotation.set(0, rot, 0);
-        o.scale.set(sc, 1, sc * sq);
-        o.updateMatrix();
-        im.setMatrixAt(i, o.matrix);
-        im.setColorAt(i, col.set(['#b8ac96', '#a89c86', '#c4b8a2'][i % 3]));
-      });
-      im.receiveShadow = true;
-      group.add(freeze(im));
-    }
-
-    // Props: models instanced per slot and variant; proc_* kinds built in
-    // code (procprops.js); bobbing ones animate.
-    const groups = new Map();
-    for (const pr of propsIn.get(`${ci},${cj}`) ?? []) {
-      if (pr.slot.startsWith('proc_')) {
-        const make = PROC_BUILDERS[pr.slot];
-        if (!make) continue;
-        const obj = make(pr, ctx(anim));
-        obj.position.set(pr.x, pr.y || 0, pr.z);
-        obj.rotation.y = pr.rot;
-        obj.traverse((o) => o.isMesh && o.material.side !== THREE.BackSide && (o.castShadow = true));
-        if (obj.userData.tap) {
-          // Something you can tap (the bulletin board): tag its meshes for picking.
-          obj.traverse((o) => o.isMesh && (o.userData.tap = obj.userData.tap));
-          pick.push(obj);
-        }
-        group.add(obj);
-        continue;
-      }
-      if (!assets.has(pr.slot)) continue;
-      if (pr.bob) {
-        const m = assets.make(pr.slot, { variant: pr.v || 0 });
-        m.object.position.set(pr.x, pr.y || 0, pr.z);
-        m.object.rotation.y = pr.rot;
-        if (pr.s) m.object.scale.multiplyScalar(pr.s);
-        group.add(m.object);
-        const ph = pr.x * 0.7;
-        anim.push((dt, t) => {
-          m.object.position.y = (pr.y || 0) + Math.sin(t * 1.6 + ph) * 0.08;
-          m.object.rotation.z = Math.sin(t * 1.1 + ph) * 0.06;
-        });
-        continue;
-      }
-      const v = (pr.v || 0) % assets.variantCount(pr.slot);
-      const key = pr.slot + '|' + v;
-      if (!groups.has(key)) groups.set(key, { slot: pr.slot, v, list: [] });
-      groups.get(key).list.push({ x: pr.x, z: pr.z, y: pr.y || 0, rot: pr.rot, s: pr.s ?? 1 });
-    }
-    for (const gp of groups.values()) {
-      const inst = assets.instanced(gp.slot, gp.list, { variant: gp.v, outline: !NO_OUTLINE.has(gp.slot), castShadow: !NO_SHADOW.has(gp.slot) });
-      if (inst) group.add(freeze(inst));
-    }
-    root.add(group);
-    pickables.push(...pick);
-    return { group, anim, pick };
-  }
-  function dropChunk(k) {
-    town.rev++;
-    const ch = chunks.get(k);
-    chunks.delete(k);
-    root.remove(ch.group);
-    disposeTree(ch.group);
-    for (const p of ch.pick) pickables.splice(pickables.indexOf(p), 1);
-  }
-  // Distance from a point to a chunk's square.
-  const gap = (ci, cj, x, z) => Math.hypot(Math.max(0, ci * CHUNK - x, x - (ci + 1) * CHUNK), Math.max(0, cj * CHUNK - z, z - (cj + 1) * CHUNK));
-  const town = { viewRadius: low ? 120 : 150, rev: 0 }; // rev: bumped when what casts shadows changes
-  // Build what's within view of (x, z), nearest first, for up to `budget` ms
-  // (always at least one square); drop what's well out of view.
-  function stream(x, z, budget) {
-    const R = town.viewRadius;
-    for (const k of [...chunks.keys()]) {
-      const [ci, cj] = k.split(',').map(Number);
-      if (gap(ci, cj, x, z) > R + 70) dropChunk(k);
-    }
-    const want = [];
-    const i0 = Math.floor((x - R) / CHUNK);
-    const j0 = Math.floor((z - R) / CHUNK);
-    for (let ci = i0; ci <= Math.floor((x + R) / CHUNK); ci++)
-      for (let cj = j0; cj <= Math.floor((z + R) / CHUNK); cj++) {
-        const d = gap(ci, cj, x, z);
-        if (d <= R && !chunks.has(`${ci},${cj}`)) want.push([d, ci, cj]);
-      }
-    want.sort((a, b) => a[0] - b[0]);
-    const t0 = performance.now();
-    let built = 0;
-    for (const [, ci, cj] of want) {
-      chunks.set(`${ci},${cj}`, buildChunk(ci, cj));
-      town.rev++;
-      built++;
-      if (performance.now() - t0 > budget) break;
-    }
-    return want.length - built; // still to build
-  }
-  const start = focus ?? SPAWN;
-  stream(start.x, start.z, Infinity);
-
-  const dir = new THREE.Vector3();
-  let nextStream = 0;
-  let pending = 0;
-  return Object.assign(town, {
-    root,
-    pickables,
-    nodes,
-    stones,
-    labels,
-    fades,
-    chunks,
-    // Build/drop squares around a point (the game and editor call this with
-    // where the camera looks; update() does it on its own otherwise).
-    focus(x, z, budget = 6) {
-      pending = stream(x, z, budget);
-    },
-    update(dt, t, cam) {
-      for (const a of animated) a(dt, t, cam);
-      for (const ch of chunks.values()) for (const a of ch.anim) a(dt, t, cam);
-      for (const n of nodes.values()) n.update(dt);
-      // Every quarter second (every frame while squares are still missing),
-      // stream around where the middle of the screen meets the ground.
-      if (cam && (pending || t >= nextStream)) {
-        nextStream = t + 0.25;
-        cam.getWorldDirection(dir);
-        const k = dir.y < -0.05 ? -cam.position.y / dir.y : 30;
-        pending = stream(cam.position.x + dir.x * k, cam.position.z + dir.z * k, 6);
-      }
-    },
-  });
-}
-
-const tuftGeo = new THREE.ConeGeometry(0.12, 0.5, 4).translate(0, 0.25, 0);
+// A grass tuft: a four-sided spike, sides only (nobody sees under it).
+const tuftGeo = (() => {
+  const g = new THREE.BufferGeometry();
+  const r = 0.12;
+  const v = [0, 0.5, 0, r, 0, 0, 0, 0, r, -r, 0, 0, 0, 0, -r];
+  g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+  g.setIndex([0, 2, 1, 0, 3, 2, 0, 4, 3, 0, 1, 4]);
+  g.computeVertexNormals();
+  return g;
+})();
 tuftGeo.userData.shared = true;
 const stoneGeo = new THREE.CylinderGeometry(0.36, 0.4, 0.06, 7);
 stoneGeo.userData.shared = true;
@@ -1043,24 +1576,16 @@ function disposeTree(obj) {
     }
   });
 }
+function disposeLod(set) {
+  disposeTree(set.group);
+  disposeMerged(set.merge?.building);
+}
 
 // Remove a town built by buildTown and free what it alone owns.
 export function disposeTown(town) {
+  for (const l of town.labels) town.onLabel?.remove(l);
   town.root.parent?.remove(town.root);
   disposeTree(town.root);
-}
-
-// Place many copies of a model slot (instanced), spreading them across the
-// slot's variants. Returns false if the slot has no model (use a fallback).
-function scatterModels(scene, slot, placements, opts = {}) {
-  if (!assets.has(slot) || !placements.length) return false;
-  const n = assets.variantCount(slot);
-  for (let v = 0; v < n; v++) {
-    const mine = placements.filter((p, i) => (p.v ?? i) % n === v);
-    const g = assets.instanced(slot, mine, { ...opts, variant: v });
-    if (g) scene.add(g);
-  }
-  return true;
 }
 
 function smooth(a, b, x) {

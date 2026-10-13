@@ -12,25 +12,37 @@ export class Labels {
     this.static = []; // the town's place and zone labels
   }
 
-  // The town's labels: places you can tap to walk to, and zone names.
+  // The town's labels: places you can tap to walk to, and zone names. They
+  // come and go with the town's chunks (the town calls onLabel).
   makeStatic() {
+    for (const l of this.static) l.el?.remove();
+    this.static = [];
+    this.g.town.onLabel = { add: (l) => this.#addStatic(l), remove: (l) => this.#removeStatic(l) };
+    for (const l of this.g.town.labels) this.#addStatic(l);
+  }
+  #addStatic(l) {
     const g = this.g;
-    this.static = g.town.labels.map((l) => {
-      const el =
-        l.kind === 'place'
-          ? h('div.place', { on: { click: (e) => (e.stopPropagation(), g.goBuilding(l.id)) } }, h('span.ic', l.glyph ? glyph(l.glyph) : l.icon), l.text)
-          : l.kind === 'board'
-            ? h('div.place', { on: { click: (e) => (e.stopPropagation(), g.goBoard(l.id)) } }, h('span.ic', glyph(l.glyph)), l.text)
-          : l.kind === 'stone'
-            ? h('div.place.stone', { on: { click: (e) => (e.stopPropagation(), g.goStone(l.id, { openMap: true })) } }, h('span.ic', glyph(l.glyph)), l.text)
-          : l.kind === 'crypt'
-            ? h('div.place.crypt', { on: { click: (e) => (e.stopPropagation(), g.goCrypt(l.id)) } }, h('span.ic', glyph(l.glyph)), l.text)
-            : h('div.zone-tag', l.text);
-      this.layer.append(el);
-      return { ...l, el };
-    });
+    l.el =
+      l.kind === 'place'
+        ? h('div.place', { on: { click: (e) => (e.stopPropagation(), g.goBuilding(l.id)) } }, h('span.ic', l.glyph ? glyph(l.glyph) : l.icon), l.text)
+        : l.kind === 'board'
+          ? h('div.place', { on: { click: (e) => (e.stopPropagation(), g.goBoard(l.id)) } }, h('span.ic', glyph(l.glyph)), l.text)
+        : l.kind === 'stone'
+          ? h('div.place.stone', { on: { click: (e) => (e.stopPropagation(), g.goStone(l.id, { openMap: true })) } }, h('span.ic', glyph(l.glyph)), l.text)
+        : l.kind === 'crypt'
+          ? h('div.place.crypt', { on: { click: (e) => (e.stopPropagation(), g.goCrypt(l.id)) } }, h('span.ic', glyph(l.glyph)), l.text)
+          : h('div.zone-tag', l.text);
+    if (this.staticHidden) l.el.style.display = l.el._disp = 'none';
+    this.layer.append(l.el);
+    this.static.push(l);
+  }
+  #removeStatic(l) {
+    l.el?.remove();
+    const i = this.static.indexOf(l);
+    if (i >= 0) this.static.splice(i, 1);
   }
   showStatic(on) {
+    this.staticHidden = !on;
     for (const l of this.static) (l.el.style.display = on ? '' : 'none'), (l.el._disp = undefined);
   }
 

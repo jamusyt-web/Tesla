@@ -62,13 +62,13 @@ async function enterGame() {
   const [map, { setWorld }] = await Promise.all([fetch('/api/map').then((r) => (r.ok ? r.json() : Promise.reject(new Error(`map: HTTP ${r.status}`)))), import('../../shared/world.js')]);
   setWorld(map);
   // three.js, the world and its 3D models are big; load them only once we're in.
-  const [{ GameClient }, { Hud }, { loadAssets }, { itemIcon }] = await Promise.all([import('./game.js'), import('./ui/hud.js'), import('./scene/assets.js'), import('./ui/portrait.js')]);
-  await loadAssets((p) => (bar.style.width = `${Math.round(p * 100)}%`));
+  const [{ GameClient }, { Hud }, assets, { itemIcon }] = await Promise.all([import('./game.js'), import('./ui/hud.js'), import('./scene/assets.js'), import('./ui/portrait.js')]);
+  await assets.loadAssets((p) => (bar.style.width = `${Math.round(p * 100)}%`));
   const sock = new Socket();
   const hud = new Hud(app, sock);
   const game = new GameClient(app, sock, hud);
   hud.attach(game);
-  window.__hv = { game, hud, sock, itemIcon }; // handy for debugging & automated play-tests
+  window.__hv = { game, hud, sock, itemIcon, assets }; // handy for debugging & automated play-tests
   app.insertBefore(game.el, hud.el);
   let banner = null;
   sock.on('welcome', () => {

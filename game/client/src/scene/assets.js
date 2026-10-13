@@ -79,13 +79,13 @@ const hexRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
 function remapTexture(tex, remap) {
   const key = tex.uuid + JSON.stringify(remap);
   if (remapCache.has(key)) return remapCache.get(key);
-  const img = tex.image;
+  // From the pixels read while loading (a fresh read here would wait on the GPU).
+  const src = pixelsOf(tex);
   const cv = document.createElement('canvas');
-  cv.width = img.width;
-  cv.height = img.height;
-  const ctx = cv.getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0);
-  const data = ctx.getImageData(0, 0, cv.width, cv.height);
+  cv.width = src.w;
+  cv.height = src.h;
+  const ctx = cv.getContext('2d');
+  const data = new ImageData(new Uint8ClampedArray(src.data), src.w, src.h);
   const px = data.data;
   const rules = remap.map((r) => ({ test: BANDS[r.band] || null, to: hexRgb(r.to), ref: r.ref ?? BAND_REF[r.band] ?? 0.55 }));
   for (let i = 0; i < px.length; i += 4) {
@@ -105,6 +105,7 @@ function remapTexture(tex, remap) {
   }
   ctx.putImageData(data, 0, 0);
   const t = new THREE.CanvasTexture(cv);
+  pixelCache.set(t, { w: src.w, h: src.h, data: px });
   t.flipY = false; // same layout as the glTF texture it replaces
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = tex.wrapS;
@@ -195,6 +196,9 @@ export const onGroup = (fn) => groupListeners.push(fn);
 // Load the 'core' group (and any others named) before the first frame.
 export async function loadAssets(onProgress = () => {}, ids = ['core']) {
   await Promise.all(ids.map((id, i) => ensureGroup(id, i === 0 ? onProgress : () => {})));
+  // Read the scenery textures' pixels now, while nothing is being drawn: far
+  // chunks bake them into vertex colours, and a read in mid-game waits on the GPU.
+  for (const t of [...imageKeys.values(), ...textures.values()]) pixelsOf(t);
 }
 
 // Load a group of models once; later calls get the same promise.
@@ -344,6 +348,75 @@ const hasSkin = (o) => {
   o.traverse((c) => (s ||= c.isSkinnedMesh));
   return s;
 };
+
+// A model's meshes as make()/instanced() place them: each sub-mesh's shared
+// geometry, its toon material and its matrix within the model (sized, feet on
+// y = 0). For merging scenery (scene/chunkmerge.js). Cached per slot·variant.
+const partsCache = new Map();
+export function parts(slot, variant = 0) {
+  const list = ready.get(slot);
+  if (!list) return null;
+  const key = slot + '|' + (variant % list.length);
+  if (partsCache.has(key)) return partsCache.get(key);
+  const p = list[variant % list.length];
+  const root = p.gltf.scene;
+  root.updateMatrixWorld(true);
+  const base = new THREE.Matrix4().compose(new THREE.Vector3(), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, p.def.rotY || 0, 0)), new THREE.Vector3(p.scale * p.stretch[0], p.scale * p.stretch[1], p.scale * p.stretch[2]));
+  const off = new THREE.Matrix4().makeTranslation(p.offset.x, p.offset.y, p.offset.z);
+  const out = [];
+  root.traverse((m) => {
+    if (!m.isMesh || m.isSkinnedMesh) return;
+    const matrix = new THREE.Matrix4().multiplyMatrices(base, new THREE.Matrix4().multiplyMatrices(off, m.matrixWorld));
+    const material = toToon(Array.isArray(m.material) ? m.material[0] : m.material, p.def.tint ?? null, p.def);
+    out.push({ geometry: m.geometry, material, matrix, outline: p.def.outline !== false, graded: p.def.grade !== false });
+  });
+  const r = { parts: out, size: p.size, def: p.def };
+  partsCache.set(key, r);
+  return r;
+}
+
+// The colour of a texture at (u, v), as linear RGB (for baking a far chunk's
+// colours into its vertices). Pixels are read once per texture.
+const pixelCache = new WeakMap();
+function pixelsOf(tex) {
+  let px = pixelCache.get(tex);
+  if (px || !tex?.image?.width) return px;
+  const img = tex.image;
+  const cv = document.createElement('canvas');
+  cv.width = img.width;
+  cv.height = img.height;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  px = { w: cv.width, h: cv.height, data: ctx.getImageData(0, 0, cv.width, cv.height).data };
+  pixelCache.set(tex, px);
+  return px;
+}
+export function texel(tex, u, v, out) {
+  const px = pixelsOf(tex);
+  const x = Math.min(px.w - 1, Math.max(0, Math.floor((u - Math.floor(u)) * px.w)));
+  const yy = tex.flipY ? 1 - (v - Math.floor(v)) : v - Math.floor(v);
+  const y = Math.min(px.h - 1, Math.max(0, Math.floor(yy * px.h)));
+  const i = (y * px.w + x) * 4;
+  return out.setRGB(px.data[i] / 255, px.data[i + 1] / 255, px.data[i + 2] / 255, THREE.SRGBColorSpace);
+}
+
+// The colour grade (GRADE above) on one linear colour, for colours baked into
+// vertices where the shader's version doesn't run.
+export function gradeColor(c) {
+  let { r, g, b } = c;
+  const w = THREE.MathUtils.smoothstep(g - b, 0.08, 0.2) * (r <= b ? 1 : 0);
+  const d = (b - r) * w * 0.6;
+  r += d;
+  b -= d;
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  const k = (b >= Math.max(r, g) ? 1 : 0) * (1 - THREE.MathUtils.smoothstep((mx - mn) / Math.max(mx, 1e-3), 0.35, 0.6)) * 0.55;
+  const l = 0.299 * r + 0.587 * g + 0.114 * b;
+  r = r + (l * 1.05 - r) * k;
+  g = g + (l * 1.0 - g) * k;
+  b = b + (l * 0.92 - b) * k;
+  return c.setRGB(r * 1.02, g, b * 0.97);
+}
 
 export const has = (slot) => ready.has(slot);
 export const variantCount = (slot) => ready.get(slot)?.length || 0;

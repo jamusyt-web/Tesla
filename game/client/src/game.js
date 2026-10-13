@@ -7,6 +7,8 @@ import { PROC_BUILDERS } from './scene/procprops.js';
 import { Mood } from './scene/mood.js';
 import { Mob } from './scene/mobs.js';
 import { buildTown } from './scene/town.js';
+import { Weather } from './scene/weather.js';
+import { buildSkyline } from './scene/skyline.js';
 import { Particles, Rings, setFocus } from './scene/fx.js';
 import { Townsfolk } from './scene/townsfolk.js';
 import { RoomView } from './room.js';
@@ -21,7 +23,7 @@ import { ITEMS } from '../../shared/items.js';
 import { MONSTERS } from '../../shared/monsters.js';
 import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
-  NODES, buildColliders, NavGrid, stepPath, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById,
+  NODES, buildColliders, NavGrid, stepPath, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById, MAP,
 } from '../../shared/world.js';
 import { USE_RANGE } from '../../shared/dungeon.js';
 
@@ -146,6 +148,8 @@ export class GameClient {
     this.mood = new Mood(this);
     this.rings = new Rings(scene);
     this.town = buildTown(scene, this.fx, { low });
+    this.weather = new Weather(this); // (none until a biome brings some)
+    this.skyline = buildSkyline(this.renderer, scene, MAP?.skyline);
     this.folk = new Townsfolk(scene, STATIC.nav, { low });
     this.nodeLabels = new Map();
     this.labels.makeStatic();
@@ -665,22 +669,15 @@ export class GameClient {
       resumeCraft(this, m.you);
       return;
     }
-    for (const n of this.town.nodes.values()) {
-      if (!n.alive) n.respawn();
-      else n.setHp(n.maxHp); // a different channel's damage must not linger
-    }
-    for (const ns of m.nodes) {
-      const v = this.town.nodes.get(ns.id);
-      if (!v) continue;
-      v.setHp(ns.hp);
-      if (!ns.alive) {
-        v.alive = false;
-        v.full.visible = false;
-        v.stump.visible = true;
-      }
+    // This channel's nodes, as they are (a different channel's damage must not linger).
+    const states = new Map(m.nodes.map((ns) => [ns.id, ns]));
+    for (const [id, n] of this.town.nodes) {
+      const ns = states.get(id);
+      n.reset(ns ? ns.alive !== false : true, ns?.hp ?? n.maxHp);
+      n.setSt(ns?.st ?? 0);
     }
     this.channel = m.channel;
-    for (const [id, ws] of this.town.stones) ws.setAttuned((m.you.stones ?? []).includes(id));
+    this.town.setAttuned(m.you.stones ?? []);
     this.hud.onWelcome(m);
     resumeCraft(this, m.you);
     if (this.lastRoom != null) {
@@ -1269,7 +1266,7 @@ export class GameClient {
   onAttuned(m) {
     const me = this.hud.me;
     me.stones = [...new Set([...(me.stones ?? []), m.id])];
-    this.town.stones.get(m.id)?.setAttuned(true);
+    this.town.attune(m.id);
     const st = stoneById(m.id);
     if (st) {
       this.floatText(new THREE.Vector3(st.x, 4.6, st.z), `Waystone attuned: ${m.name}`, 'loot rare');
@@ -1830,6 +1827,8 @@ export class GameClient {
     } else {
       this.town.update(dt, this.t, this.camera);
       this.folk.update(dt, this.cam.target);
+      this.weather.update(dt);
+      this.skyline?.update(this.camera, this.scene.fog.far);
     }
     fadeOccluders(this, dt);
     this.fx.update(dt);

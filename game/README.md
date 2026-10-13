@@ -132,9 +132,11 @@ server/   game.js   the hub: connections, the 20 Hz tick, channels, shops, dunge
           map.js    loads the world map, serves it at /api/map, saves edits
           app.js    HTTP API + WebSocket upgrade        index.js entry point
 client/   src/game.js       the game client: entities, input, prediction, interpolation
-          src/scene/        render.js (frame passes, camera), mood.js (fog and light),
-                            town, dungeon, avatar, tools, monsters, particles (three.js, toon-shaded),
-                            manifest/ (the model slots, in groups)
+          src/scene/        render.js (frame passes, camera, shadow pass), mood.js (fog and light),
+                            town.js (the world, streamed in 96 m chunks), chunkmerge.js (a chunk's
+                            scenery merged by material), scatter.js (ground cover), skyline.js,
+                            weather.js, dungeon, avatar, tools, monsters, particles (three.js,
+                            toon-shaded), manifest/ (the model slots, in groups)
           src/world/        services.js: walking to buildings, stations, waystones, the crypt
           src/editor/       the world editor (owners only): editor.js, kinds.js
           src/ui/           HUD (hud.js + goalcard, dock, banners, context, labels), panels

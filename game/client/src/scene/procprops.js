@@ -5,6 +5,8 @@ import { mesh, toon } from './toon.js';
 // with `proc_`. Each builder gets the prop ({ x, z, rot, s, ... }) and a context
 // ({ fx, animate(fn) }) and returns an Object3D placed at the origin; the town
 // positions and turns it. Add a kind here, then place it in the map.
+// The town merges a prop's meshes into its chunk (scene/chunkmerge.js), except
+// meshes marked userData.live: anything an animation moves or recolours.
 const OL = 0.03;
 const cyl = (a, b, h, s = 10) => new THREE.CylinderGeometry(a, b, h, s);
 const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
@@ -74,6 +76,7 @@ export const PROC_BUILDERS = {
     g.add(at(mesh(box(1.5, 0.75, 1.2), '#8f8a82', { outline: OL }), 0, 0.375, 0));
     const coals = new THREE.Mesh(box(1.1, 0.08, 0.8), toon('#ff7a2a', { emissive: '#ff5a1a', emissiveIntensity: 0.9, unique: true }));
     coals.position.y = 0.78;
+    coals.userData.live = true;
     g.add(coals);
     g.add(at(mesh(box(0.7, 2.2, 0.6), '#7d776e', { outline: OL }), 0, 1.6, -0.35));
     g.add(at(mesh(box(0.85, 0.2, 0.75), '#5f5a54', { outline: OL }), 0, 2.75, -0.35));
@@ -101,6 +104,7 @@ export const PROC_BUILDERS = {
     g.add(at(mesh(new THREE.SphereGeometry(0.45, 14, 10, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.7), '#3a3a42', { outline: OL }), 0, 0.62, 0));
     g.add(at(new THREE.Mesh(cyl(0.36, 0.36, 0.04, 16), toon('#d88a3a', { emissive: '#a0501a', emissiveIntensity: 0.3 })), 0, 0.88, 0));
     const fire = at(new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.35, 6), toon('#ffb347', { emissive: '#ff7a1a', emissiveIntensity: 1 })), 0, 0.18, 0);
+    fire.userData.live = true;
     g.add(fire);
     const steam = new THREE.Object3D();
     steam.position.y = 1.0;
@@ -143,6 +147,7 @@ export function buildWaystone(st, { fx, animate }) {
   }
   const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), toon('#9ff0ff', { emissive: '#5fd8ff', emissiveIntensity: 0.25, flatShading: true, unique: true }));
   crystal.scale.y = 1.5;
+  crystal.userData.live = true; // it floats
   g.add(crystal);
   let lit = false;
   const v = new THREE.Vector3();

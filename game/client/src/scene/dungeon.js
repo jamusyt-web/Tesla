@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as assets from './assets.js';
 import { mesh } from './toon.js';
+import { SHADOW_LAYER } from './chunkmerge.js';
 import { NavGrid } from '../../../shared/world.js';
 import { dungeonCol, dungeonWalkable, dungeonBounds, setGate, roomAt, linkAt, trapUp, trapWarn, CELL } from '../../../shared/dungeon.js';
 
@@ -328,7 +329,7 @@ export class DungeonView {
     this.root.add(this.lantern);
 
     this.root.traverse((o) => {
-      if (o.isMesh && !o.isInstancedMesh && o.material?.blending !== THREE.AdditiveBlending && o.material?.side !== THREE.BackSide) o.castShadow = true;
+      if (o.isMesh && !o.isInstancedMesh && o.material?.blending !== THREE.AdditiveBlending && o.material?.side !== THREE.BackSide) (o.castShadow = true), o.layers.enable(SHADOW_LAYER);
     });
   }
 

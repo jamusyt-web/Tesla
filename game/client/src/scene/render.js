@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { useGrade } from './grade.js';
 import * as assets from './assets.js';
+import { SHADOW_LAYER, SUN_TOWN } from './chunkmerge.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 
 const lerpAngle = (a, b, t) => {
@@ -37,10 +38,25 @@ export function setupPasses(g) {
   g.renderer.autoClear = false;
   g.renderer.shadowMap.autoUpdate = false;
   g.shadow = { cx: NaN, cz: NaN, until: 0, rev: -1, half: g.low ? 20 : 30 };
+  for (const l of [g.sun, g.hemi]) l.layers.enable(SHADOW_LAYER);
   const sc = g.sun.shadow.camera;
   sc.left = sc.bottom = -g.shadow.half;
   sc.right = sc.top = g.shadow.half;
   sc.updateProjectionMatrix();
+}
+
+// The shadow map is redrawn by a pass of its own: a camera that sees only the
+// shadow layer and looks at nothing, so it draws no colour, but the shadow map
+// takes everything on that layer (what casts, plus the merged shadow-only
+// meshes of the scenery; see chunkmerge.js). The scene's lights must be on
+// that layer too.
+const shadowCam = new THREE.OrthographicCamera(-1e-3, 1e-3, 1e-3, -1e-3, 1, 1.001);
+shadowCam.position.set(0, -1e6, 0);
+shadowCam.layers.set(SHADOW_LAYER);
+shadowCam.updateMatrixWorld();
+export function redrawShadows(renderer, scene) {
+  renderer.shadowMap.needsUpdate = true;
+  renderer.render(scene, shadowCam);
 }
 
 // Something that casts a shadow changed (a tree fell, a gate opened, the
@@ -63,12 +79,12 @@ export function renderFrame(g) {
   const r = g.renderer;
   const S = g.shadow;
   if (g.town && !g.dungeon && g.town.rev !== S.rev) (S.rev = g.town.rev), (S.dirty = true); // squares built or dropped
-  if (S.dirty || performance.now() < S.until) {
-    r.shadowMap.needsUpdate = true;
-    S.dirty = false;
-  }
   g.scene.updateMatrixWorld();
   g.heroScene.updateMatrixWorld();
+  if (S.dirty || performance.now() < S.until) {
+    S.dirty = false;
+    redrawShadows(r, g.scene);
+  }
   r.clear();
   // 1) the world
   r.render(g.scene, g.camera);
@@ -194,7 +210,6 @@ export function updateCamera(g, dt) {
 // more ground beyond them than behind), snapped to whole shadow-map texels and
 // moved only in steps of 3 m. The map is redrawn only when the box moves or a
 // caster changed (markShadows), not every frame.
-const SUN_TOWN = new THREE.Vector3(40, 34, 10);
 const SUN_CRYPT = new THREE.Vector3(6, 40, 12);
 const _l = new THREE.Vector3();
 const _r = new THREE.Vector3();

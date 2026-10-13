@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { h, clear } from '../util/dom.js';
 import { getToken } from '../net/api.js';
 import { useGrade } from '../scene/grade.js';
+import { redrawShadows } from '../scene/render.js';
+import { SHADOW_LAYER, SUN_TOWN } from '../scene/chunkmerge.js';
 import * as assets from '../scene/assets.js';
 import { buildTown, disposeTown } from '../scene/town.js';
 import { Particles } from '../scene/fx.js';
@@ -58,6 +60,7 @@ class Editor {
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.autoUpdate = false; // (redrawn each frame by its own pass)
     useGrade(renderer);
     this.renderer = renderer;
     const scene = new THREE.Scene();
@@ -71,6 +74,7 @@ class Editor {
     Object.assign(sun.shadow.camera, { left: -60, right: 60, top: 60, bottom: -60, near: 1, far: 220 });
     sun.shadow.bias = -0.0008;
     sun.shadow.normalBias = 0.04;
+    for (const l of [hemi, sun]) l.layers.enable(SHADOW_LAYER);
     scene.add(hemi, sun, sun.target);
     this.sun = sun;
     this.fx = new Particles(scene);
@@ -735,7 +739,7 @@ class Editor {
     const hor = Math.cos(c.pitch) * c.dist;
     this.camera.position.set(c.x + Math.sin(c.yaw) * hor, Math.sin(c.pitch) * c.dist, c.z + Math.cos(c.yaw) * hor);
     this.camera.lookAt(c.x, 0, c.z);
-    this.sun.position.set(c.x + 40, 60, c.z + 10);
+    this.sun.position.set(c.x + SUN_TOWN.x, SUN_TOWN.y, c.z + SUN_TOWN.z); // the game's sun
     this.sun.target.position.set(c.x, 0, c.z);
     if (this.town) {
       this.town.viewRadius = this.#viewRadius();
@@ -743,6 +747,7 @@ class Editor {
     }
     this.fx.update(dt);
     this.fx.puff.update(dt);
+    redrawShadows(this.renderer, this.scene);
     this.renderer.render(this.scene, this.camera);
     // Labels follow their spot on screen.
     const v = new THREE.Vector3();
