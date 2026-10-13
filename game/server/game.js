@@ -26,6 +26,7 @@ import { GATHER_HANDLERS } from './gather.js';
 import { attuneNearby } from './travel.js';
 import { expireJobs } from './trade.js';
 import './gear.js'; // these register their RPCs
+import './perf.js';
 import { TUTORIAL } from './tutorial.js';
 
 export { TUTORIAL };

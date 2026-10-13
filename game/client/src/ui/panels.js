@@ -200,7 +200,8 @@ export class Panels {
     this.title(c, 'Town Hall', 'castle');
     let tab = args.tab || 'online';
     let info = null;
-    const tabs = [['online', 'Online'], ['jobs', 'Jobs'], ['shops', 'Shops'], ['leaders', 'Leaders'], ['channels', 'Channels'], ['invites', 'Invites']];
+    let perf = null;
+    const tabs = [['online', 'Online'], ['jobs', 'Jobs'], ['shops', 'Shops'], ['leaders', 'Leaders'], ['channels', 'Channels'], ['invites', 'Invites'], ...(this.hud.me.admin ? [['perf', 'Performance']] : [])];
     const render = () => {
       clear(c.body);
       if (this.hud.me.admin)
@@ -230,6 +231,18 @@ export class Panels {
         c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, 'Each channel is a live copy of town. New players join the busiest channel with room, so friends end up together.'));
         for (const ch of info.channels)
           c.body.append(h('div.rowcard', h('div.ic', '🌐'), h('div.grow', h('div.t', `Channel ${ch.id}`, ch.id === this.hud.channel ? ' (you are here)' : ''), h('div.s', `${ch.players}/${ch.cap} heroes`)), ch.id !== this.hud.channel ? h('button.btn.small', { on: { click: () => this.rpc('channel.switch', { id: ch.id }).then(() => this.close()) } }, 'Join') : null));
+      } else if (tab === 'perf') {
+        // Owner only: how the game runs on players' devices, from their reports.
+        c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, 'How smoothly the game runs on players\' devices over the last 7 days, by device and place. Aim for 30+ frames a second normally and 20+ in the worst moments.'));
+        if (!perf) {
+          c.body.append(h('div.empty', 'Loading…'));
+          this.sock.rpc('owner.perf', { days: 7 }).then((r) => ((perf = r.rows), render())).catch((e) => this.hud.toast(e.message, 'err'));
+        } else if (!perf.length) c.body.append(h('div.empty', 'No reports yet: each player sends one a minute while playing.'));
+        else
+          for (const r of perf)
+            c.body.append(
+              h('div.rowcard', h('div.ic', r.device.endsWith('-low') ? '📱' : '💻'), h('div.grow', h('div.t', `${r.region} · ${r.device.endsWith('-low') ? 'phone' : 'computer'} ${r.device.split('-')[0]}`), h('div.s', `${r.fps50} fps typical, ${r.fps5} in the worst moments (lowest ${r.fps5min}) · ${fmt(r.draws95)} draws · ${fmt(r.tris95)} triangles · loads in ${(r.loadMs / 1000).toFixed(1)} s · ${r.n} reports`))),
+            );
       } else if (tab === 'invites') {
         c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, 'Hearthvale is invite-only. Each hero can invite up to 5 friends.'));
         for (const inv of info.invites)

@@ -8,6 +8,7 @@ import { Mood } from './scene/mood.js';
 import { Mob } from './scene/mobs.js';
 import { buildTown } from './scene/town.js';
 import { Weather } from './scene/weather.js';
+import { PerfBeacon } from './util/perfbeacon.js';
 import { buildSkyline } from './scene/skyline.js';
 import { Particles, Rings, setFocus } from './scene/fx.js';
 import { Townsfolk } from './scene/townsfolk.js';
@@ -150,6 +151,7 @@ export class GameClient {
     this.rings = new Rings(scene);
     this.town = buildTown(scene, this.fx, { low });
     this.weather = new Weather(this); // (none until a biome brings some)
+    this.beacon = new PerfBeacon(this);
     this.skyline = buildSkyline(this.renderer, scene, MAP?.skyline);
     this.folk = new Townsfolk(scene, STATIC.nav, { low });
     this.nodeLabels = new Map();
@@ -1707,6 +1709,7 @@ export class GameClient {
     }
     this.update(dt);
     renderFrame(this);
+    this.beacon.frame();
   };
 
   update(dt) {

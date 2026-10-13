@@ -141,7 +141,7 @@ export class Battle {
       for (const d of def.drops) if (Math.random() < d.p) loot[d.id] = (loot[d.id] || 0) + rint(d.min, d.max);
       try {
         g.heroes.addGold(id, gold, 'loot');
-        for (const [it, n] of Object.entries(loot)) g.heroes.addItem(id, it, n);
+        for (const [it, n] of Object.entries(loot)) g.heroes.addItem(id, it, n, 'loot');
       } catch (e) {
         console.error('battle reward failed', e);
       }

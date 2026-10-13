@@ -16,7 +16,7 @@ export function npcSell(g, c, item, qty) {
   const gold = Math.max(1, Math.floor(ITEMS[item].value * NPC_SELL_RATE)) * qty;
   g.db.exec('BEGIN IMMEDIATE');
   try {
-    g.heroes.takeItem(c.hero.id, item, qty);
+    g.heroes.takeItem(c.hero.id, item, qty, { kind: 'npcSell' });
     g.heroes.addGold(c.hero.id, gold, 'npcSell');
     g.db.exec('COMMIT');
   } catch (e) {

@@ -200,7 +200,7 @@ export class Crafting {
     const result = { sid: cr.sid, recipe: r.id, grade: out.grade, score, flawless, steps: s.res, out, via };
     const granted = tx(this.db, () => {
       if (this.q.del.run(c.hero.id, cr.sid).changes !== 1) return false;
-      H.addItem(c.hero.id, out.item, out.qty);
+      H.addItem(c.hero.id, out.item, out.qty, 'craft');
       this.q.log.run(c.hero.id, cr.sid, r.id, cr.batch, score, out.grade, out.item, out.qty, via, JSON.stringify(result), Date.now());
       return true;
     });
@@ -247,7 +247,7 @@ export class Crafting {
     tx(this.db, () => {
       for (const [id, n] of Object.entries(r.in)) H.takeItem(c.hero.id, id, n * times);
       H.addGold(c.hero.id, -fee, 'craftFee');
-      H.addItem(c.hero.id, r.out, r.qty * times);
+      H.addItem(c.hero.id, r.out, r.qty * times, 'craft');
     });
     const xp = H.addXp(c.hero, 'crafting', Math.round(r.xp * times * 0.5));
     c.pushInventory();

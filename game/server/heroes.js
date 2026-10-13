@@ -3,7 +3,7 @@ import { SKILL_IDS, levelFromXp, heroLevel } from '../shared/skills.js';
 import { sanitizeAvatar, NAME_RE } from '../shared/avatar.js';
 import { SPAWN } from '../shared/world.js';
 import { tx, fail } from './db.js';
-import { goldFlow } from './telemetry.js';
+import { goldFlow, itemFlow } from './telemetry.js';
 import { emit } from './events.js';
 
 // Hero columns other modules may read and write without owning this file.
@@ -47,6 +47,7 @@ export class Heroes {
     const skills = Object.fromEntries(SKILL_IDS.map((s) => [s, 0]));
     tx(this.db, () => {
       this.q.insert.run(accountId, name, JSON.stringify(sanitizeAvatar(avatar)), STARTER_GOLD, JSON.stringify(skills), JSON.stringify(STARTER_EQUIP), SPAWN.x, SPAWN.z, Date.now());
+      goldFlow(this.db, 'start', STARTER_GOLD); // a new hero's purse
       for (const [id, n] of Object.entries(STARTER_INVENTORY)) this.q.invAdd.run(accountId, id, n);
     });
     return this.load(accountId);
@@ -101,18 +102,23 @@ export class Heroes {
   count(id, item) {
     return this.q.invOne.get(id, item)?.qty ?? 0;
   }
-  addItem(id, item, n) {
+  // kind: where it came from, when it's new to the game ('gather', 'loot',
+  // 'craft'…; telemetry). Leave it out for items moving between heroes.
+  addItem(id, item, n, kind = null) {
     if (!isItem(item) || !Number.isInteger(n) || n <= 0) fail('Bad item');
     this.q.invAdd.run(id, item, n);
+    if (kind) itemFlow(this.db, item, kind, n);
   }
   // keepEquipped: refuse to take the last copy of something equipped (selling
   // or shelving your only axe would leave you unable to chop).
-  takeItem(id, item, n, { keepEquipped = false } = {}) {
+  // kind: where it went, when it leaves the game ('npcSell'…; telemetry).
+  takeItem(id, item, n, { keepEquipped = false, kind = null } = {}) {
     if (!isItem(item) || !Number.isInteger(n) || n <= 0) fail('Bad item');
     const have = this.count(id, item);
     if (have < n) fail(`Not enough ${ITEMS[item].name}.`);
     if (keepEquipped && have - n < 1 && Object.values(JSON.parse(this.q.equipOf.get(id)?.equip || '{}')).includes(item)) fail("Keep one — it's equipped.");
     this.q.invSet.run(have - n, id, item);
+    if (kind) itemFlow(this.db, item, kind, n);
   }
 
   // A seller's fee on `gross` gold at ratePm per mille. The fractional part

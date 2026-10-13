@@ -37,6 +37,7 @@ export function setupPasses(g) {
   g.heroScene.matrixWorldAutoUpdate = false;
   g.renderer.autoClear = false;
   g.renderer.shadowMap.autoUpdate = false;
+  g.renderer.info.autoReset = false;
   g.shadow = { cx: NaN, cz: NaN, until: 0, rev: -1, half: g.low ? 20 : 30 };
   for (const l of [g.sun, g.hemi]) l.layers.enable(SHADOW_LAYER);
   const sc = g.sun.shadow.camera;
@@ -78,6 +79,7 @@ function silhouetteHeroes(g) {
 export function renderFrame(g) {
   const r = g.renderer;
   const S = g.shadow;
+  r.info.reset(); // (counts are kept for the whole frame: setupPasses turns off the per-call reset)
   if (g.town && !g.dungeon && g.town.rev !== S.rev) (S.rev = g.town.rev), (S.dirty = true); // squares built or dropped
   g.scene.updateMatrixWorld();
   g.heroScene.updateMatrixWorld();

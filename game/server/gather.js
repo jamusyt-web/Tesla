@@ -85,7 +85,7 @@ export function grantGather(g, c, t, n, finisher) {
       loot[r.id] = (loot[r.id] || 0) + 1;
       rares.push(r.id);
     }
-  for (const [id, q] of Object.entries(loot)) g.heroes.addItem(c.hero.id, id, q);
+  for (const [id, q] of Object.entries(loot)) g.heroes.addItem(c.hero.id, id, q, 'gather');
   const xp = g.heroes.addXp(c.hero, t.skill, t.xp);
   c.send({ t: 'loot', node: n.id, loot, xp, rare: rares });
   for (const r of rares) g.announce(`${c.hero.name} found a ${ITEMS[r].name}!`);
@@ -161,7 +161,7 @@ export function land(g, c, toggles, endTick, now) {
   const fish = f.fish;
   const lvl = levelFromXp(c.hero.skills.fishing || 0);
   const qty = Math.random() < doubleChance(lvl) && fish.id !== 'old_boot' && fish.id !== 'lake_king' ? 2 : 1;
-  g.heroes.addItem(c.hero.id, fish.id, qty);
+  g.heroes.addItem(c.hero.id, fish.id, qty, 'fish');
   const xp = g.heroes.addXp(c.hero, 'fishing', Math.round(FISH[fish.id].xp * (1 + fish.d / 200)));
   c.send({ t: 'fishResult', ok: true, item: fish.id, qty, kg: fish.kg, xp });
   const rarity = ITEMS[fish.id].rarity;
