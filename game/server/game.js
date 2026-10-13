@@ -32,6 +32,7 @@ import { attuneNearby } from './travel.js';
 import { expireJobs, pushStorage } from './trade.js';
 import './gear.js'; // these register their RPCs
 import './perf.js';
+import './perks.js'; // level-up unlocks, the level-40 choice, salvage
 import { TUTORIAL } from './tutorial.js';
 import { Quests } from './quests.js';
 import { Orders } from './orders.js';
@@ -41,6 +42,7 @@ import { Journal } from './journal.js';
 import { Explore } from './explore.js';
 import { Landmarks, landmarksChanged } from './landmarks.js';
 import { resetJournalCache } from '../shared/journal.js';
+import { Digest, DIGEST_AFTER_MS } from './digest.js';
 import * as rep from './rep.js';
 
 export { TUTORIAL };
@@ -187,6 +189,7 @@ export class Game {
     this.journal = new Journal(this);
     this.explore = new Explore(this);
     this.landmarks = new Landmarks(this);
+    this.digest = new Digest(this);
     // Festive and Hearth Rest add to every xp grant.
     this.heroes.xpBonus = (hero, skill, amount) => {
       const c = this.online.get(hero.id);
@@ -422,8 +425,11 @@ export class Game {
       c.send({ t: 'craftResult', ...leftover });
       c.pushInventory();
     }
-    const away = this.shops.awaySummary(accountId, Date.now(), this.lastActive.get(accountId));
-    if (away) c.send({ t: 'awaySales', ...away });
+    const lastSeen = this.lastActive.get(accountId);
+    const digestDue = lastSeen != null && Date.now() - lastSeen >= DIGEST_AFTER_MS;
+    const away = this.shops.awaySummary(accountId, Date.now(), lastSeen);
+    if (away && !digestDue) c.send({ t: 'awaySales', ...away }); // (after 12 h the digest says it)
+    this.digest.onConnect(c, lastSeen != null ? Date.now() - lastSeen : 0);
     pushStorage(this, c); // goods waiting in storage, per town
     this.explore.load(c); // the cells walked and places found
     this.quests.ensure(c); // a new hero's first quest, and any chain that has opened up

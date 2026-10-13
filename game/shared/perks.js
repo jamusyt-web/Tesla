@@ -31,7 +31,7 @@ export const MILESTONES = {
   herbalism: { 15: { bloom: 0.1 }, 20: { gentleHands: 0.1 }, 25: { rareHerb: 0.5 }, 35: { auraRegrowHerb: 0.2 } },
   fishing: { 10: { biteWindow: 100 }, 15: { recordSkew: 0.05 }, 25: { nightAngler: 0.3 }, 35: { fishFry: 0.1 } },
   combat: { 15: { secondStance: 1 }, 20: { rally: 0.05 }, 30: { mentor: 0.2 }, 35: { guardian: 0.3 } },
-  crafting: { 5: { steadyHands: 1 }, 10: { salvage: 1 }, 15: { batchCap: 5 }, 25: { makersMark: 1 }, 30: { quickFee: 0.02 }, 35: { apprentice: 1 } },
+  crafting: { 5: { steadyHands: 1 }, 10: { salvage: 1 }, 15: { batchCap: 5 }, 30: { quickFee: 0.02 }, 35: { apprentice: 1 } },
 };
 
 // The level-40 choice in each skill (hero.perks[skill] = 'a' | 'b'); at 50 you get both.

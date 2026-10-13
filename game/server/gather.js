@@ -8,6 +8,7 @@ import { weatherAt, isNight } from '../shared/clock.js';
 import { fightRating, replayFight, rollFish, fishingGear, tableOf, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
 import { fail } from './db.js';
 import { emit } from './events.js';
+import { highlight } from './digest.js';
 import { rint, q2 } from './channel.js';
 import { stateOf, spend, STATE_FX } from './nodestates.js';
 
@@ -221,7 +222,10 @@ export function land(g, c, toggles, endTick, now) {
   const xp = g.heroes.addXp(c.hero, 'fishing', Math.round(FISH[fish.id].xp * (1 + fish.d / 200) * (1 + (c.effects().fishXp || 0) + fry)));
   c.send({ t: 'fishResult', ok: true, item: fish.id, qty, kg: fish.kg, xp });
   const rarity = ITEMS[fish.id].rarity;
-  if (rarity === 'epic' || rarity === 'legendary') g.announce(`${c.hero.name} landed a ${fish.kg} kg ${ITEMS[fish.id].name}!`);
+  if (rarity === 'epic' || rarity === 'legendary') {
+    g.announce(`${c.hero.name} landed a ${fish.kg} kg ${ITEMS[fish.id].name}!`);
+    highlight(g, `${c.hero.name} landed a ${fish.kg} kg ${ITEMS[fish.id].name}.`);
+  }
   c.pushInventory();
   emit(c, 'fish', { item: fish.id, qty, kg: fish.kg, node: f.node, legend: !!FISH[fish.id].legend });
   return { ok: true };

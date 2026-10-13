@@ -19,6 +19,7 @@ import { emit, on } from './events.js';
 import { register } from './rpc.js';
 import { needTown, browseTown, townName, towns } from './towns.js';
 import * as rep from './rep.js';
+import { highlight } from './digest.js';
 
 export class Orders {
   constructor(game) {
@@ -191,6 +192,7 @@ export class Orders {
       if (!g.online.has(s.account_id)) g.notices?.add(s.account_id, 'big', { town }, `The ${townName(town)} Big Order you gave to was filled! +${BIG_REP} reputation.`, now);
     }
     const text = `The ${townName(town)} Big Order is filled! Festive: +10% xp for everyone in town.`;
+    highlight(g, `The ${townName(town)} Big Order was filled.`);
     for (const o of g.online.values()) {
       if (o.ch?.isRun) continue;
       if (townAt(o.ent.x, o.ent.z)?.id === town) o.giveBoon('festive');

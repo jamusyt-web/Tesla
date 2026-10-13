@@ -16,6 +16,7 @@ import { ITEMS } from '../shared/items.js';
 import { NavGrid } from '../shared/world.js';
 import { tx, fail } from './db.js';
 import { emit } from './events.js';
+import { highlight } from './digest.js';
 
 export const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
@@ -236,6 +237,7 @@ export class DungeonRun extends Channel {
     for (const id of ids) emit(this.game.online.get(id) ?? null, 'dungeon', { kind: this.kind, tier: this.tier, seconds, party: ids.length, heroId: id });
     this.broadcast({ t: 'dboss', seconds, best, chest: this.layout.bossChest });
     this.game.announce(`${names.join(', ')} conquered ${this.def.name} (${TIERS[this.tier].name}) in ${fmtTime(seconds)}${best ? '. A new record!' : ''}`);
+    if (best || this.tier >= 4) highlight(this.game, `${names.join(', ')} conquered ${this.def.name} (${TIERS[this.tier].name})${best ? ' in record time' : ''}.`);
     this.#announceFinds(ids, 'boss');
   }
 
