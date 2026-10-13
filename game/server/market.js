@@ -1,4 +1,4 @@
-import { isItem } from '../shared/items.js';
+import { ITEMS, isItem, isTradeable } from '../shared/items.js';
 import { tx, fail } from './db.js';
 import { MARKET_TAX } from '../shared/economy.js';
 import { stash } from './storage.js';
@@ -48,6 +48,7 @@ export class Market {
     qty = Number(qty);
     if (side !== 'buy' && side !== 'sell') fail('Bad order side.');
     if (!isItem(item)) fail('Unknown item.');
+    if (!isTradeable(item)) fail(`${ITEMS[item].name} can't change hands.`);
     if (!Number.isInteger(price) || price < 1 || price > MAX_PRICE) fail('Price must be a whole number of gold.');
     if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) fail('Quantity must be between 1 and 9999.');
     if (!ioc && this.q.openCount.get(accountId).n >= MAX_OPEN_ORDERS) fail(`You can have at most ${MAX_OPEN_ORDERS} open orders.`);

@@ -82,8 +82,39 @@ export const MONSTERS = {
 };
 mergeInto(MONSTERS, CONTENT.monsters, 'monsters');
 
-// Hero combat stats derived from level + gear.
-export function heroStats(level, combatLvl, gear) {
+// ── One curve for every new monster (SPEC §4.2) ──
+// L is the recommended Combat level. Hearthvale's monsters above predate it.
+export const ROLES = {
+  normal: { hp: 1, atk: 1, def: 0, xp: 1, gold: 1 },
+  boss: { hp: 1.75, atk: 1.1, def: 2, xp: 1.5, gold: 2 },
+  elite: { hp: 2.4, atk: 1.15, def: 2, xp: 2, gold: 1.5 }, // hp grows with each fighter
+  dboss: { hp: 2, atk: 1.05, def: 2, xp: 1.5, gold: 2.5 }, // dungeon bosses
+};
+export function mobStats(L, role = 'normal', fighters = 1) {
+  const R = ROLES[role] ?? ROLES.normal;
+  const over = Math.max(0, L - 12);
+  const per = role === 'elite' ? 1 + 0.6 * (Math.max(1, fighters) - 1) : 1;
+  const g = L ** 0.6 * R.gold;
+  return {
+    lvl: L,
+    hp: Math.round((22 * L + 0.25 * over * over) * R.hp * per),
+    atk: Math.round((2.6 * L + 2) * R.atk),
+    def: L + R.def,
+    xp: Math.round(10 * L * (1 + over / 40) * R.xp),
+    gold: [Math.round(7 * g), Math.round(11 * g)],
+  };
+}
+
+// An elite: a base monster (its look, moves and drops) restatted to its own
+// level, with hp for the number of heroes fighting it.
+export function eliteDef(type, L, fighters = 1, name = null) {
+  const base = MONSTERS[type];
+  return { ...base, ...mobStats(L, 'elite', fighters), name: name ?? `Elite ${base.name}`, elite: true, boss: false };
+}
+
+// Hero combat stats derived from level + gear, and the hero's effects
+// (shared/perks.js: atkPct, defHpPct, a set's hp, a tonic's atk/def).
+export function heroStats(level, combatLvl, gear, E = {}) {
   let atk = 8 + level * 2 + combatLvl * 2;
   let def = 2 + level;
   let hp = 90 + level * 12;
@@ -93,7 +124,10 @@ export function heroStats(level, combatLvl, gear) {
     def += g.def || 0;
     hp += g.hp || 0;
   }
-  return { atk, def, hp };
+  hp += E.setHp || 0;
+  const atkPct = (E.atkPct || 0) + (E.tonicAtk || 0);
+  const defPct = (E.defHpPct || 0) + (E.tonicDef || 0);
+  return { atk: Math.round(atk * (1 + atkPct)), def: Math.round(def * (1 + defPct)), hp: Math.round(hp * (1 + (E.defHpPct || 0))) };
 }
 
 export const damage = (atk, def, mult = 1, rng = Math.random) =>

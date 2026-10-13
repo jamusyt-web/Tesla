@@ -12,6 +12,14 @@ const FIELDS = new Set(['buffs', 'perks', 'respecs', 'rested', 'home', 'title'])
 
 // Data-access helpers for a hero's persistent state. Every mutation goes
 // through here so gold/items can never go negative or appear from nowhere.
+const parseJson = (s) => {
+  try {
+    return JSON.parse(s || '{}') ?? {};
+  } catch {
+    return {};
+  }
+};
+
 export class Heroes {
   constructor(db) {
     this.db = db;
@@ -69,6 +77,8 @@ export class Heroes {
       stones: JSON.parse(r.stones || '[]'),
       home: r.home ?? 'hearthvale',
       title: r.title ?? null,
+      perks: parseJson(r.perks), // level-40 choices: { skill: 'a' | 'b' }
+      buffs: parseJson(r.buffs), // shared/buffs.js
       x: r.x ?? SPAWN.x,
       z: r.z ?? SPAWN.z,
     };
@@ -151,6 +161,10 @@ export class Heroes {
     return { skill, amount, leveled: after > before, level: after, heroLeveled: hero.level > prevHero, heroLevel: hero.level };
   }
 
+  // Keep a hero's buffs (they survive logging out).
+  saveBuffs(hero) {
+    this.setField(hero.id, 'buffs', JSON.stringify(hero.buffs ?? {}));
+  }
   setEquip(hero, slot, itemId) {
     hero.equip[slot] = itemId;
     this.q.equip.run(JSON.stringify(hero.equip), hero.id);

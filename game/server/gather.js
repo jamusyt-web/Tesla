@@ -1,14 +1,26 @@
 // Gathering and fishing: swinging at trees, rocks and herbs (shared nodes,
 // everyone who helped gets a roll), casting, hooking and the reel fight.
-import { ITEMS } from '../shared/items.js';
+import { ITEMS, isItem } from '../shared/items.js';
 import { levelFromXp, doubleChance } from '../shared/skills.js';
-import { NODE_TYPES, INTERACT_RANGE, FISH_RANGE, SWING_FLOOR, isPerfectSwing } from '../shared/world.js';
-import { fightRating, replayFight, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
+import { NODE_TYPES, LAKES, INTERACT_RANGE, FISH_RANGE, SWING_FLOOR, isPerfectSwing } from '../shared/world.js';
+import { zoneAt, biomeAt } from '../shared/places.js';
+import { weatherAt, isNight } from '../shared/clock.js';
+import { fightRating, replayFight, rollFish, fishingGear, tableOf, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
 import { fail } from './db.js';
 import { emit } from './events.js';
 import { rint, q2 } from './channel.js';
+import { stateOf, spend, STATE_FX } from './nodestates.js';
 
 export const GATHER_ACTS = new Set(['chop', 'mine', 'pick']);
+
+// Per kind of node, the effects that apply (shared/perks.js).
+const BY_KIND = {
+  tree: { power: 'treePower', double: 'doubleLog', perfect: 'perfectTree', regrow: 'auraRegrowTree' },
+  rock: { power: 'rockPower', double: 'doubleOre', perfect: 'perfectRock', regrow: 'auraRegrowRock' },
+  herb: { power: null, double: 'doubleHerb', perfect: null, regrow: 'auraRegrowHerb' },
+};
+// Trees whose sap a forager can tap (SPEC §4.8, Foraging 15).
+const SAP_TREES = new Set(['tree_maple', 'tree_frostpine']);
 
 export function hitNode(g, c, nodeId, now) {
   const ch = c.ch;
@@ -28,20 +40,24 @@ export function hitNode(g, c, nodeId, now) {
   const e = c.ent;
   if (Math.hypot(e.x - n.x, e.z - n.z) > INTERACT_RANGE + t.r * n.s + 0.4) fail('Get closer first.');
   const lvl = levelFromXp(c.hero.skills[t.skill] || 0);
-  if (lvl < t.lvl) fail(`Requires ${t.skill[0].toUpperCase() + t.skill.slice(1)} level ${t.lvl}.`);
+  // A rich or ancient node asks more of you (SPEC §4.3).
+  const need = t.lvl + (STATE_FX[stateOf(n)]?.gate ?? 0);
+  if (lvl < need) fail(`${stateOf(n) ? `This ${['', 'rich', 'ancient'][stateOf(n)]} ${t.name}` : 'It'} needs ${t.skill[0].toUpperCase() + t.skill.slice(1)} level ${need}.`);
+  const E = c.effects();
+  const K = BY_KIND[t.kind] ?? {};
   let power = 1;
   let period = 450;
   if (t.tool) {
     const tool = ITEMS[c.hero.equip[t.tool]];
     if (!tool || g.heroes.count(c.hero.id, c.hero.equip[t.tool]) < 1) fail(`You need ${t.tool === 'axe' ? 'an axe' : 'a pickaxe'}.`);
     if (tool.tier < t.tier) fail(`Needs a tier ${t.tier} ${t.tool === 'axe' ? 'axe' : 'pickaxe'} or better.`);
-    power = tool.power;
+    power = tool.power + (E.toolPower || 0) + (E[K.power] || 0);
     period = tool.speed;
   }
   const since = now - e.lastSwing;
   if (since < period * SWING_FLOOR) return { tooFast: true, wait: Math.ceil(period * SWING_FLOOR - since) }; // swing still in progress
   // Rhythm bonus: swing again right as the timing ring closes = PERFECT (2x).
-  const perfect = !!t.tool && e.lastNode === n.id && isPerfectSwing(since, period);
+  const perfect = !!t.tool && e.lastNode === n.id && isPerfectSwing(since, period, E[K.perfect] || 0);
   e.lastSwing = now;
   e.lastNode = n.id;
   e.act = t.kind === 'tree' ? 'chop' : t.kind === 'rock' ? 'mine' : 'pick';
@@ -50,43 +66,74 @@ export function hitNode(g, c, nodeId, now) {
   const dmg = power * (perfect ? 2 : 1);
   n.hp = Math.max(0, n.hp - dmg);
   n.hitters.add(c.hero.id);
+  c.useBuffs('swing');
   ch.broadcast({ t: 'nh', id: n.id, by: c.hero.id, hp: n.hp, dmg, perfect, rot: q2(e.rot) });
   if (n.hp > 0) return { hp: n.hp, perfect };
 
+  // Gentle hands: now and then a picked herb is left growing.
+  if (t.kind === 'herb' && Math.random() < (E.gentleHands || 0)) {
+    n.hp = t.hp;
+    grantGather(g, c, t, n, true);
+    n.hitters.clear();
+    ch.broadcast({ t: 'nh', id: n.id, by: c.hero.id, hp: n.hp, dmg: 0, perfect: false, rot: q2(e.rot) });
+    return { hp: n.hp, kept: true };
+  }
   // Broken! Everyone who helped gets a full roll (co-op friendly).
   n.alive = false;
   n.brokeAt = now;
-  n.respawnAt = now + t.respawn * 1000;
+  // A Grove Keeper (or Stone/Herb Keeper) among the helpers: it regrows sooner.
+  let regrow = 0;
+  for (const pid of n.hitters) regrow = Math.max(regrow, ch.players.get(pid)?.effects?.()[K.regrow] || 0);
+  n.respawnAt = now + t.respawn * 1000 * (1 - regrow);
   // Everyone working it puts their tool away (others saw them frozen mid-chop).
   for (const pid of n.hitters) {
     const pe = ch.players.get(pid)?.ent;
     if (pe && pe.lastNode === n.id && GATHER_ACTS.has(pe.act)) pe.act = 'idle';
   }
-  ch.broadcast({ t: 'node', id: n.id, alive: false, hp: 0, by: c.hero.id, respawnIn: t.respawn * 1000 });
+  ch.broadcast({ t: 'node', id: n.id, alive: false, hp: 0, by: c.hero.id, respawnIn: n.respawnAt - now });
   for (const pid of n.hitters) {
     const pc = ch.players.get(pid);
     if (pc) grantGather(g, pc, t, n, pc === c);
   }
   n.hitters.clear();
+  spend(ch, n); // a rich or ancient node is spent once it falls
   return { broke: true, perfect };
 }
 
 export function grantGather(g, c, t, n, finisher) {
   const lvl = levelFromXp(c.hero.skills[t.skill] || 0);
+  const E = c.effects();
+  const K = BY_KIND[t.kind] ?? {};
+  const S = STATE_FX[stateOf(n)] ?? STATE_FX[0];
   const loot = {};
+  const give = (id, q) => isItem(id) && q > 0 && (loot[id] = (loot[id] || 0) + q);
   for (const d of t.drops) {
-    let q = rint(d.min, d.max);
-    if (q && Math.random() < doubleChance(lvl)) q *= 2;
-    if (q) loot[d.id] = (loot[d.id] || 0) + q;
+    let q = rint(d.min, d.max) * S.yield;
+    if (q && Math.random() < doubleChance(lvl) + (E[K.double] || 0)) q *= 2;
+    give(d.id, q);
   }
+  // Bloom: an extra herb now and then.
+  if (t.kind === 'herb' && t.drops[0] && Math.random() < (E.bloom || 0)) give(t.drops[0].id, 1);
+  // Sap tap: the forager's chance of amber sap from maples and frostpines.
+  if (SAP_TREES.has(n.type) && Math.random() < (E.sapTap || 0)) give('amber_sap', 1);
   const rares = [];
+  const rareMul = (r) => (finisher ? 1.5 : 1) * S.rare * (t.kind === 'herb' ? 1 + (E.rareHerb || 0) : 1) * (r.id === 'sunstone' && E.sunstoneX2 ? 2 : 1);
   for (const r of t.rare)
-    if (Math.random() < r.p * (finisher ? 1.5 : 1)) {
-      loot[r.id] = (loot[r.id] || 0) + 1;
+    if (Math.random() < r.p * rareMul(r)) {
+      give(r.id, 1);
       rares.push(r.id);
     }
+  // An ancient node always gives one rare.
+  if (S.sureRare && t.rare.length && !rares.length) {
+    const r = t.rare[Math.floor(Math.random() * t.rare.length)];
+    give(r.id, 1);
+    rares.push(r.id);
+  }
   for (const [id, q] of Object.entries(loot)) g.heroes.addItem(c.hero.id, id, q, 'gather');
-  const xp = g.heroes.addXp(c.hero, t.skill, t.xp);
+  // Xp: the node's state, a meal, and forest lore in the woods.
+  const forest = zoneAt(n.x, n.z)?.kind === 'forest' ? E.forestXp || 0 : 0;
+  const xp = g.heroes.addXp(c.hero, t.skill, Math.round(t.xp * S.xp * (1 + (E.gatherXp || 0) + forest)));
+  c.useBuffs('gather');
   c.send({ t: 'loot', node: n.id, loot, xp, rare: rares });
   for (const r of rares) g.announce(`${c.hero.name} found a ${ITEMS[r].name}!`);
   c.pushInventory();
@@ -103,10 +150,13 @@ export function cast(g, c, nodeId, now) {
   if (!rod || g.heroes.count(c.hero.id, c.hero.equip.rod) < 1) fail('You need a fishing rod.');
   const e = c.ent;
   if (Math.hypot(e.x - n.x, e.z - n.z) > FISH_RANGE) fail('Get closer to the water.');
+  const table = tableOf(spotTable(n));
+  if (levelFromXp(c.hero.skills.fishing || 0) < table.lvl) fail(`Fishing ${table.lvl} needed here.`);
+  c.useBuffs('cast');
   e.path = null;
   e.rot = Math.atan2(n.x - e.x, n.z - e.z);
   e.act = 'fish';
-  const window = 900 + rod.tier * 200;
+  const window = 900 + rod.tier * 200 + (c.effects().biteWindow || 0);
   e.fishing = { node: n.id, state: 'wait', biteAt: now + 1800 + Math.random() * 4200, window };
   c.ch.broadcast({ t: 'cast', by: c.hero.id, node: n.id, rot: q2(e.rot) });
   return { ok: true };
@@ -160,9 +210,13 @@ export function land(g, c, toggles, endTick, now) {
   }
   const fish = f.fish;
   const lvl = levelFromXp(c.hero.skills.fishing || 0);
-  const qty = Math.random() < doubleChance(lvl) && fish.id !== 'old_boot' && fish.id !== 'lake_king' ? 2 : 1;
+  // Legendaries and boots never come in twos.
+  const qty = Math.random() < doubleChance(lvl) && !FISH[fish.id].legend && fish.id !== 'old_boot' ? 2 : 1;
   g.heroes.addItem(c.hero.id, fish.id, qty, 'fish');
-  const xp = g.heroes.addXp(c.hero, 'fishing', Math.round(FISH[fish.id].xp * (1 + fish.d / 200)));
+  // A friend with Fish Fry within 20 m warms your xp.
+  let fry = 0;
+  for (const o of c.ch.players.values()) if (o !== c && Math.hypot(o.ent.x - c.ent.x, o.ent.z - c.ent.z) <= 20) fry = Math.max(fry, o.effects?.().fishFry || 0);
+  const xp = g.heroes.addXp(c.hero, 'fishing', Math.round(FISH[fish.id].xp * (1 + fish.d / 200) * (1 + (c.effects().fishXp || 0) + fry)));
   c.send({ t: 'fishResult', ok: true, item: fish.id, qty, kg: fish.kg, xp });
   const rarity = ITEMS[fish.id].rarity;
   if (rarity === 'epic' || rarity === 'legendary') g.announce(`${c.hero.name} landed a ${fish.kg} kg ${ITEMS[fish.id].name}!`);
@@ -178,3 +232,27 @@ export const GATHER_HANDLERS = {
   reel: (g, c, m, now) => reel(g, c, now),
   land: (g, c, m, now) => land(g, c, m.toggles, m.end, now),
 };
+
+// Which fish table a spot uses: its own, else its lake's, else Mirror Lake's.
+export function spotTable(n) {
+  if (n.table) return n.table;
+  const lake = LAKES.find((l) => Math.hypot(n.x - l.x, n.z - l.z) < l.r + 4);
+  return lake?.fish ?? 'mirror';
+}
+
+// What bites now, for this hero at this spot (the channel calls this when
+// the float dips): the fish and the fight gear.
+export function biteFor(c, n, deep, now = Date.now()) {
+  const rod = ITEMS[c.hero.equip.rod];
+  const tier = rod?.tier || 1;
+  const lvl = levelFromXp(c.hero.skills.fishing || 0);
+  const E = c.effects(now);
+  const ctx = {
+    now,
+    weather: weatherAt(biomeAt(n.x, n.z), now)?.kind ?? null,
+    luck: (E.luck || 0) + (isNight(now) ? E.nightAngler || 0 : 0),
+    rareWeight: E.rareWeight || 0,
+    kgSkew: (E.kgSkew || 0) + (E.recordSkew || 0),
+  };
+  return { fish: rollFish(Math.random, spotTable(n), tier, lvl, deep, ctx), gear: fishingGear(tier, lvl, (rod?.rodZone || 0) + (E.rodZone || 0)) };
+}

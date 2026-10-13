@@ -5,7 +5,7 @@ import { portrait } from './portrait.js';
 import { ITEMS, RARITY, CATEGORIES } from '../../../shared/items.js';
 import { SKILLS, SKILL_IDS, levelProgress, levelFromXp } from '../../../shared/skills.js';
 import { townCount } from '../../../shared/places.js';
-import { iconEl, itemSlot, qtyInput, itemDesc } from './itemui.js';
+import { iconEl, itemSlot, qtyInput, itemDesc, fxText } from './itemui.js';
 
 // Panel builders are called as fn.call(panels, c, args) (see panels.js), so
 // `this` is the Panels; the helpers below are called the same way.
@@ -86,6 +86,7 @@ function itemDetail(id, isEq) {
       (it.cat === 'tool' || it.slot) && !isEq ? h('button.btn.green.small', { on: { click: () => this.rpc('equip', { item: id }, `Equipped ${it.name}!`) } }, 'Equip') : null,
       isEq ? h('span.chip.on', 'Equipped') : null,
       id === 'hearth_charm' && have > 0 ? h('button.btn.green.small', { on: { click: () => (this.close(), this.hud.game?.travelHome()) } }, 'Go home') : null,
+      it.buff && have > 0 ? h('button.btn.green.small', { on: { click: () => this.rpc('use', { item: id }, `${it.name}: ${fxText(it.buff.fx)}`) } }, 'Use') : null,
       sellable > 0 ? h('div.qty', q) : null,
       sellable > 0 ? h('button.btn.small', { on: { click: () => npcSell.call(this, id, +q.value) } }, 'Sell to merchant') : null,
       h('button.btn.blue.small', { on: { click: () => this.open('market', { item: id }) } }, 'Market'),
@@ -124,15 +125,26 @@ function heroTab(body) {
     h('div.section-title', 'Equipment'),
     h(
       'div.grid',
-      ...['weapon', 'armor', 'trinket', 'axe', 'pick', 'rod'].map((slot) => {
+      ...['weapon', 'armor', 'trinket', 'charm', 'axe', 'pick', 'rod'].map((slot) => {
         const id = me.equip[slot];
         return h('div', { style: { textAlign: 'center' } }, id ? itemSlot(id, null) : h('div.slot', { style: { opacity: 0.4 } }, '—'), h('div.muted', slot === 'pick' ? 'pickaxe' : slot));
       }),
     ),
+    ...buffRows(me.buffs),
     h('div.section-title', 'Skills'),
     ...SKILL_IDS.map((k) => {
       const p = levelProgress(me.skills[k] || 0);
       return h('div.skillrow', h('span', SKILLS[k].icon), h('div', h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '14px' } }, h('span', SKILLS[k].name), h('span.muted', `${fmt(p.into)}/${fmt(p.need)}`)), h('div.bar', h('i', { style: { width: `${p.pct * 100}%` } }))), h('b', `Lv ${p.level}`));
     }),
   );
+}
+
+// Meals, tonics and lures in effect, and how long they last.
+function buffRows(buffs = {}) {
+  const on = Object.entries(buffs).filter(([, b]) => b && (b.until ? b.until > Date.now() : b.left > 0));
+  if (!on.length) return [];
+  return [
+    h('div.section-title', 'Buffs'),
+    ...on.map(([slot, b]) => h('div.kv', h('span', `${slot[0].toUpperCase() + slot.slice(1)}: ${ITEMS[b.item]?.name ?? b.item}`), h('b', `${fxText(b.fx)} · ${b.until ? `${Math.max(1, Math.round((b.until - Date.now()) / 60000))} min` : `${b.left} left`}`))),
+  ];
 }

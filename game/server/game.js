@@ -1,5 +1,7 @@
 import './map.js'; // loads the world map first: everything below reads it
-import { ITEMS } from '../shared/items.js';
+import { ITEMS, WORN } from '../shared/items.js';
+import { effectsOf, perkNames } from '../shared/perks.js';
+import { useBuffs } from '../shared/buffs.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
 import { levelFromXp } from '../shared/skills.js';
 import { heroStats } from '../shared/monsters.js';
@@ -83,15 +85,41 @@ class Client {
     if (this.ws.readyState === 1) this.ws.send(data);
   }
 
-  // Special abilities from equipped gear (e.g. Wraithsteel's quick special).
+  // Everything the hero's gear, sets, charm, milestones and buffs do (shared/perks.js).
+  // Cached for a second; anything that changes them (equip, buffs, a
+  // level) clears the cache with fxChanged().
+  effects(now = Date.now()) {
+    if (!this.fx || now - this.fx.at > 1000) this.fx = { at: now, E: effectsOf(this.hero, now) };
+    return this.fx.E;
+  }
+  fxChanged() {
+    this.fx = null;
+  }
+  // The gear perks in force (e.g. Wraithsteel's quick special).
   perks() {
-    return new Set(['weapon', 'armor', 'trinket'].map((s) => ITEMS[this.hero.equip[s]]?.perk).filter(Boolean));
+    return perkNames(this.effects());
   }
 
   stats() {
     const h = this.hero;
-    const gear = ['weapon', 'armor', 'trinket'].map((s) => ITEMS[h.equip[s]]);
-    return heroStats(h.level, levelFromXp(h.skills.combat || 0), gear);
+    const gear = WORN.map((s) => ITEMS[h.equip[s]]);
+    return heroStats(h.level, levelFromXp(h.skills.combat || 0), gear, this.effects());
+  }
+
+  // One use of a buff's kind ('swing', 'gather', 'cast', 'battle', 'craft').
+  useBuffs(per) {
+    const r = useBuffs(this.hero.buffs, per);
+    if (!r.changed) return;
+    this.hero.buffs = r.buffs;
+    this.fxChanged();
+    this.game.heroes.saveBuffs(this.hero);
+    this.send({ t: 'buffs', buffs: r.buffs });
+    for (const id of r.ended) this.send({ t: 'toast', text: `Your ${ITEMS[id]?.name ?? 'buff'} wore off.` });
+  }
+  // Walk speed out of battle (a charm or a travel buff).
+  syncSpeed() {
+    const mul = 1 + (this.effects().moveSpeed || 0);
+    if (mul !== this.ent.speedMul) this.setSpeed(mul);
   }
 
   publicInfo() {
@@ -104,7 +132,7 @@ class Client {
   }
   publicSelf() {
     const shop = this.game.shops.info(this.hero.id);
-    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, speedMul: this.ent.speedMul, stones: this.hero.stones.filter((id) => stoneById(id)), shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
+    return { ...this.publicInfo(), admin: this.game.auth.isAdmin(this.hero.id), gold: this.game.heroes.gold(this.hero.id), skills: this.hero.skills, inv: this.game.heroes.inventory(this.hero.id), hp: Math.round(this.ent.hp), maxHp: this.ent.maxHp, stats: this.stats(), tutorial: this.hero.tutorial, speedMul: this.ent.speedMul, home: this.hero.home, title: this.hero.title, perks: this.hero.perks, buffs: this.hero.buffs, stones: this.hero.stones.filter((id) => stoneById(id)), shop: { till: shop?.till || 0, open: shop ? !!shop.open : true }, craft: this.game.crafting.publicState(this) };
   }
 
   pushInventory() {
@@ -346,6 +374,7 @@ export class Game {
     const seat = [...this.runs.values()].map((run) => [run, run.seatFor(accountId)]).find(([, m]) => m);
     if (seat) seat[0].enter(c, seat[1]);
     else this.pickChannel().add(c);
+    c.syncSpeed(); // a charm or buff that quickens your step
     this.parties.online(c);
     if (leftover) {
       c.send({ t: 'craftResult', ...leftover });

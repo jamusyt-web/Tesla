@@ -13,7 +13,8 @@ import { BATTLE_PANELS } from './battle-panels.js';
 import { glyph } from './glyphs.js';
 import { townBuilding } from '../../../shared/places.js';
 import { doorPoint } from '../../../shared/world.js';
-import { inYard, spotsOf } from '../../../shared/stations.js';
+import { inYard, spotsOf, stationsOf } from '../../../shared/stations.js';
+import { effectsOf } from '../../../shared/perks.js';
 import { iconEl, itemDesc } from './itemui.js';
 
 export { iconEl }; // (other UI files import it from here)
@@ -131,12 +132,12 @@ export class Panels {
       const lvl = levelFromXp(this.me.skills.crafting || 0);
       c.body.append(
         h('div.muted', { style: { marginBottom: '8px' } }, `Crafting level ${lvl}. Pick a recipe, walk to its station and make it yourself — good timing gives bonus materials or Fine and Masterwork gear.`),
-        h('div.tabs', { style: { flexWrap: 'wrap' } }, ...Object.entries(STATIONS).map(([k, st]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), (pick = null), render()) } }, `${st.icon} ${st.label}`))),
+        h('div.tabs', { style: { flexWrap: 'wrap' } }, ...Object.entries(STATIONS).filter(([k]) => stationsOf(k).length).map(([k, st]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), (pick = null), render()) } }, `${st.icon} ${st.label}`))),
       );
       for (const r of RECIPES.filter((x) => x.station === tab)) {
         const out = ITEMS[r.out];
         const locked = lvl < r.lvl;
-        const cap = batchCap(r, lvl);
+        const cap = batchCap(r, lvl, effectsOf(this.me).batchCap || 0);
         const afford = Math.min(cap, ...Object.entries(r.in).map(([id, n]) => Math.floor((this.me.inv[id] || 0) / n)));
         const m = info?.mastery?.[r.id];
         const open = pick === r.id;

@@ -8,6 +8,8 @@ export const RECIPES = [
   { id: 'oak_plank', out: 'oak_plank', qty: 1, in: { oak_log: 2 }, lvl: 1, xp: 4, station: 'workbench', pattern: 'saw' },
   { id: 'birch_plank', out: 'birch_plank', qty: 1, in: { birch_log: 2 }, lvl: 3, xp: 8, station: 'workbench', pattern: 'saw' },
   { id: 'stone_brick', out: 'stone_brick', qty: 1, in: { stone: 2 }, lvl: 1, xp: 3, station: 'grindstone', pattern: 'dress' },
+  { id: 'whetstone', out: 'whetstone', qty: 1, in: { stone_brick: 2, copper_bar: 1 }, lvl: 4, xp: 12, station: 'grindstone', pattern: 'dress' },
+  { id: 'mint_tea', out: 'mint_tea', qty: 1, in: { mint_leaf: 2, sunpetal: 1 }, lvl: 3, xp: 10, station: 'cookpot', pattern: 'brew' },
   { id: 'copper_bar', out: 'copper_bar', qty: 1, in: { copper_ore: 2, oak_log: 1 }, lvl: 2, xp: 8, station: 'forge', pattern: 'smelt' },
   { id: 'iron_bar', out: 'iron_bar', qty: 1, in: { iron_ore: 2, birch_log: 1 }, lvl: 5, xp: 15, station: 'forge', pattern: 'smelt' },
   { id: 'gold_bar', out: 'gold_bar', qty: 1, in: { gold_ore: 2, pine_log: 1 }, lvl: 8, xp: 28, station: 'forge', pattern: 'smelt' },

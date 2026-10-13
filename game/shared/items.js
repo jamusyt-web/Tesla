@@ -1,5 +1,16 @@
 // Item catalog shared by server (rules) and client (display).
 // value = base NPC value in gold. Market prices float freely around it.
+// Fields beyond the basics (SPEC §4.1):
+//   tag     what kind of goods it is (merchants buy by tag; shared/economy.js)
+//   req     { combat }: the Combat level needed to equip it
+//   slot    weapon | armor | trinket | charm (the fifth slot)
+//   bound   can't be sold, listed, posted, stocked or traded
+//   nowarp  waystones won't carry you while it's in your bag
+//   kit     a passage kit (rope | picks | lantern), never used up
+//   buff    { slot: meal | tonic | lure, fx, uses: { per, n } | { ms } } (shared/buffs.js)
+//   fx      what a charm does (effect names as in shared/perks.js)
+//   set     the dungeon set it belongs to (shared/sets.js)
+//   perk    a gear perk (shared/perks.js)
 import { CONTENT, mergeInto } from './content/index.js';
 
 export const RARITY = {
@@ -16,6 +27,7 @@ export const CATEGORIES = {
   consumable: 'Consumables',
   tool: 'Tools',
   gear: 'Gear',
+  special: 'Keepsakes',
 };
 
 // Tool skins drive the 3D model: head shape + colors. New skins (cosmetics)
@@ -69,6 +81,15 @@ export const ITEMS = {
   moon_elixir: { name: 'Moon Elixir', icon: '⚗️', cat: 'consumable', tag: 'potion', value: 110, rarity: 'rare', heal: 150 },
   // Used up for one free trip to your home stone (travel.home).
   hearth_charm: { name: 'Hearth Charm', icon: '🏡', cat: 'consumable', tag: 'kit', value: 44, rarity: 'uncommon' },
+  whetstone: { name: 'Whetstone', icon: '🔪', cat: 'consumable', tag: 'potion', value: 20, rarity: 'common', buff: { slot: 'tonic', fx: { toolPower: 1 }, uses: { per: 'swing', n: 60 } } },
+  mint_tea: { name: 'Mint Tea', icon: '🍵', cat: 'consumable', tag: 'food', value: 18, rarity: 'common', buff: { slot: 'meal', fx: { gatherXp: 0.1 }, uses: { per: 'gather', n: 40 } } },
+
+  // ── Keepsakes: trophies, letters and atlas pages (bound) ──
+  trophy_hearthvale: { name: 'Hearthvale Trophy', icon: '🏆', cat: 'special', tag: 'trophy', value: 0, rarity: 'rare', bound: true },
+  letter_amberfold: { name: 'Letter to Amberfold', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
+  letter_rimeholt: { name: 'Letter to Rimeholt', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
+  letter_sandmere: { name: 'Letter to Sandmere', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
+  letter_starfall: { name: 'Letter to Starfall', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
 
   // ── Tools (power = damage per swing, speed = rhythm period ms) ──
   axe_wood: { name: 'Wooden Axe', icon: '🪓', cat: 'tool', tag: 'tool', tool: 'axe', tier: 1, power: 1, speed: 700, value: 15, rarity: 'common', skin: toolSkin('#9a6b3f', '#c89a62', '#e0bd8a') },
@@ -93,10 +114,14 @@ export const ITEMS = {
   amulet_sapphire: { name: 'Sapphire Amulet', icon: '📿', cat: 'gear', tag: 'gear', slot: 'trinket', atk: 5, def: 5, hp: 40, value: 520, rarity: 'epic' },
   // Dungeon gear: crafted from Grave Dust (the Hollow Crypt), now and then found in its chests.
   // `perk`: Wraithsteel charges your special faster; the Ghostlight Amulet makes healing items heal more.
-  wraith_blade: { name: 'Wraithsteel Blade', icon: '🗡️', cat: 'gear', tag: 'gear', slot: 'weapon', atk: 19, value: 430, rarity: 'rare', perk: 'quickSpecial', skin: toolSkin('#2a2238', '#9aa6d8', '#dfe6ff', '#8fb0ff') },
-  barrow_plate: { name: 'Barrow Plate', icon: '🛡️', cat: 'gear', tag: 'gear', slot: 'armor', def: 8, hp: 35, value: 400, rarity: 'rare' },
-  ghostlight_amulet: { name: 'Ghostlight Amulet', icon: '🧿', cat: 'gear', tag: 'gear', slot: 'trinket', atk: 2, def: 2, hp: 20, value: 320, rarity: 'rare', perk: 'mender' },
+  wraith_blade: { name: 'Wraithsteel Blade', icon: '🗡️', cat: 'gear', tag: 'gear', slot: 'weapon', atk: 19, value: 430, rarity: 'rare', perk: 'quickSpecial', set: 'barrow', skin: toolSkin('#2a2238', '#9aa6d8', '#dfe6ff', '#8fb0ff') },
+  barrow_plate: { name: 'Barrow Plate', icon: '🛡️', cat: 'gear', tag: 'gear', slot: 'armor', def: 8, hp: 35, value: 400, rarity: 'rare', set: 'barrow' },
+  ghostlight_amulet: { name: 'Ghostlight Amulet', icon: '🧿', cat: 'gear', tag: 'gear', slot: 'trinket', atk: 2, def: 2, hp: 20, value: 320, rarity: 'rare', perk: 'mender', set: 'barrow' },
+  // Charms (the fifth slot): an effect rather than stats.
+  charm_wayfarer: { name: "Wayfarer's Charm", icon: '🧭', cat: 'gear', tag: 'charm', slot: 'charm', value: 0, rarity: 'epic', bound: true, fx: { moveSpeed: 0.08 } },
 };
+// Ysolde's Atlas: twelve pages found around the Hearthlands (SPEC §5.5).
+for (let i = 1; i <= 12; i++) ITEMS[`atlas_page_${i}`] = { name: `Ysolde's Atlas, page ${i}`, icon: '📜', cat: 'special', tag: 'trophy', value: 0, rarity: 'rare', bound: true };
 mergeInto(ITEMS, CONTENT.items, 'items');
 
 // ── Crafted quality: Fine and Masterwork versions of tools and gear ──
@@ -108,7 +133,11 @@ export const QUALITY = [
   { key: 'fine', label: 'Fine', stat: 1.15, speed: 0.95, zone: 0.015, value: 1.4 },
   { key: 'master', label: 'Masterwork', stat: 1.3, speed: 0.9, zone: 0.03, value: 2.2 },
 ];
-export const QUALITY_BASES = ['axe_copper', 'axe_iron', 'axe_gold', 'pick_copper', 'pick_iron', 'pick_gold', 'rod_fine', 'rod_master', 'sword_copper', 'sword_iron', 'sword_gold', 'armor_leather', 'armor_iron', 'amulet_sapphire', 'wraith_blade', 'barrow_plate', 'ghostlight_amulet'];
+// Every tool, and every weapon, armor and trinket, except kits, charms and
+// set pieces. (The barrow pieces predate that rule and keep their versions.)
+const KEEP_QUALITY = ['wraith_blade', 'barrow_plate', 'ghostlight_amulet'];
+const hasQuality = (it) => !it.set && it.tag !== 'kit' && it.tag !== 'charm' && (it.cat === 'tool' || (it.cat === 'gear' && ['weapon', 'armor', 'trinket'].includes(it.slot)));
+export const QUALITY_BASES = [...new Set([...Object.keys(ITEMS).filter((id) => hasQuality(ITEMS[id])), ...KEEP_QUALITY])];
 export const qualityId = (base, q) => (q ? `${base}~${QUALITY[q].key}` : base);
 for (const base of QUALITY_BASES) {
   const it = ITEMS[base];
@@ -131,5 +160,9 @@ export const isItem = (id) => Object.prototype.hasOwnProperty.call(ITEMS, id);
 
 // Starter kit every new hero gets.
 export const STARTER_INVENTORY = { axe_wood: 1, pick_wood: 1, rod_basic: 1, sword_wood: 1, health_potion: 2 };
-export const STARTER_EQUIP = { axe: 'axe_wood', pick: 'pick_wood', rod: 'rod_basic', weapon: 'sword_wood', armor: null, trinket: null };
+export const STARTER_EQUIP = { axe: 'axe_wood', pick: 'pick_wood', rod: 'rod_basic', weapon: 'sword_wood', armor: null, trinket: null, charm: null };
+// The slots worn for battle stats and effects (tools are held, not worn).
+export const WORN = ['weapon', 'armor', 'trinket', 'charm'];
+// Can it change hands (market, merchant, shop, board, trade)?
+export const isTradeable = (id) => !!ITEMS[id] && !ITEMS[id].bound;
 export const STARTER_GOLD = 100;

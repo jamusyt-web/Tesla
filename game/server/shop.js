@@ -1,4 +1,4 @@
-import { ITEMS, isItem } from '../shared/items.js';
+import { ITEMS, isItem, isTradeable } from '../shared/items.js';
 import { SHOP, customersOf, demandCap, fillNow, npcBuyChance, buyQtyMax, footfall, poisson, pickDisplay } from '../shared/shop.js';
 import { REGIONS } from '../shared/world.js';
 import { tx, fail } from './db.js';
@@ -114,6 +114,7 @@ export class Shops {
     price = Number(price);
     if (!Number.isInteger(slot) || slot < 0 || slot >= SHOP.SLOTS) fail('Bad display.');
     if (!isItem(item)) fail('Unknown item.');
+    if (!isTradeable(item)) fail(`${ITEMS[item].name} can't change hands.`);
     if (!Number.isInteger(qty) || qty < 1) fail('Bad quantity.');
     if (!Number.isInteger(price) || price < 1 || price > SHOP.MAX_PRICE) fail('Bad price.');
     return tx(this.db, () => {

@@ -89,3 +89,56 @@ test('specs only use integers and keep every window reachable', () => {
     }
   }
 });
+
+// ── Tiers 5–7 (Phase 1, M4) ──
+import { recipeTier, windows } from '../../shared/crafting.js';
+// Every pattern at each new tier (no real recipes up there yet).
+const PATTERN_OF = { smelt: 'iron_bar', saw: 'oak_plank', scrape: 'leather', forge_tool: 'axe_iron', forge_blade: 'sword_iron', forge_plate: 'armor_iron', stew: 'fish_stew', brew: 'health_potion' };
+const atTier = (lvl) => Object.values(PATTERN_OF).map((id) => RECIPE_BY_ID[id]).filter(Boolean).map((r) => ({ ...r, id: `${r.id}_t${lvl}`, lvl }));
+
+test('tiers 5–7: more steps, the same reachable windows, and replays still agree', () => {
+  assert.deepEqual([13, 20, 21, 28, 29, 40].map((lvl) => recipeTier({ lvl })), [5, 5, 6, 6, 7, 7]);
+  const base = buildSpec(RECIPE_BY_ID.sword_iron, { lvl: 12, seed: 3 });
+  for (const [lvl, t] of [[13, 5], [21, 6], [29, 7]])
+    for (const r of atTier(lvl)) {
+      const spec = buildSpec(r, { lvl, batch: 1, seed: 5 });
+      assert.equal(spec.tier, t);
+      const { P, G, W } = spec.win;
+      assert.ok(P >= 2 && P < G && G < W, `${r.id}: ${P}/${G}/${W}`);
+      for (const st of spec.steps) {
+        for (const v of Object.values(st)) if (typeof v === 'number') assert.ok(Number.isInteger(v), `${r.id} ${JSON.stringify(st)}`);
+        if (st.k === 'sweep') assert.ok(st.c >= W + 6 && st.c <= st.H - W - 6, `${r.id} sweep reachable`);
+        if (st.k === 'press') assert.ok(st.at + W + 4 <= st.F, `${r.id} press reachable`);
+      }
+      if (r.pattern === 'forge_blade') assert.ok(spec.steps.length > base.steps.length, 'harder tiers have more steps');
+      if (t >= 6) assert.ok(spec.steps.some((st) => st.skin === 'chill'), 'a chill from tier 6');
+      // A careful player can still ace it, and the server replays it exactly.
+      const { s, tog } = bot(spec, 20, 9);
+      const back = replayCraft(JSON.parse(JSON.stringify(spec)), tog, s.tick, [2, 2]);
+      assert.deepEqual(back.res, s.res);
+      assert.ok(scoreOf(s) >= 70, `${r.id}: careful play scores ${scoreOf(s)}`);
+    }
+});
+
+test('Smith and Steady Hands widen the windows, but never past the next one out', () => {
+  for (let t = 1; t <= 7; t++) {
+    const plain = windows(t, 0);
+    const smith = windows(t, 0, { P: 1, G: 1 });
+    assert.ok(smith.P >= plain.P && smith.G >= plain.G);
+    assert.ok(smith.P < smith.G && smith.G < smith.W);
+  }
+  const spec = buildSpec(RECIPE_BY_ID.oak_plank, { lvl: 1, seed: 1, bonus: { P: 1 } });
+  assert.equal(spec.win.P, windows(1, 0).P + 1, 'the bonus is baked into the stored spec');
+  // Woodwright: extra planks; Artisan: more Masterwork.
+  const r = RECIPE_BY_ID.oak_plank;
+  const o = outcomeOf({ r, batch: 20, score: 60, flawless: false, over: 0, E: { bonusPlank: 1 } }, () => 0);
+  assert.equal(o.qty, 40, 'every plank came with a spare');
+  const mw = (E) => {
+    let n = 0;
+    let x = 1;
+    const rng = () => ((x = (x * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 4000; i++) if (outcomeOf({ r: RECIPE_BY_ID.sword_iron, batch: 1, score: 95, flawless: false, over: 0, E }, rng).mw) n++;
+    return n / 4000;
+  };
+  assert.ok(mw({ masterworkPct: 0.04 }) > mw({}) + 0.02);
+});

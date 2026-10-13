@@ -19,6 +19,10 @@ const WIN = { 1: [4, 9, 15], 2: [4, 8, 14], 3: [3, 8, 13], 4: [3, 7, 12] }; // p
 const LEAD = { 1: 54, 2: 48, 3: 44, 4: 40 };
 const SWEEP_H = { 1: 78, 2: 70, 3: 62, 4: 56 };
 const PRESS_F = { 1: 96, 2: 88, 3: 80, 4: 72 };
+// Tiers 5–7 keep tier 4's timings (±3 ticks is already the limit for touch);
+// they're harder by having more steps (see harder() below).
+for (const T of [WIN, LEAD, SWEEP_H, PRESS_F]) for (const t of [5, 6, 7]) T[t] = T[4];
+export const MAX_TIER = 7;
 const HEAT_MOD = { P: 1, G: 0, W: -1, M: -1 }; // a good heat makes the hammer windows kinder
 export const GRADE_BONUS = { S: 0.2, A: 0.12, B: 0.05, C: 0, D: 0 };
 export const XP_MULT = { S: 1.4, A: 1.2, B: 1.0, C: 0.9, D: 0.75 };
@@ -30,6 +34,11 @@ export const STATIONS = {
   workbench: { label: 'Workbench', verb: 'Craft', icon: '🪚' },
   grindstone: { label: 'Grindstone', verb: 'Grind', icon: '⚙️' },
   cookpot: { label: 'Cookpot', verb: 'Cook', icon: '🍲' },
+  // Each new town's signature station (in its yard only).
+  smokehouse: { label: 'Smokehouse', verb: 'Smoke', icon: '🍖' },
+  quench_trough: { label: 'Quench Trough', verb: 'Temper', icon: '💧' },
+  glassworks: { label: 'Glassworks', verb: 'Blow', icon: '🔮' },
+  starforge: { label: 'Starforge', verb: 'Forge', icon: '✨' },
 };
 
 // What each step is called on screen, by its "skin".
@@ -61,6 +70,7 @@ export const STEP_TEXT = {
   simmer: 'Simmer',
   boil: 'Boil',
   distill: 'Distill',
+  chill: 'Chill',
 };
 
 const S = (k, skin, o = {}) => ({ k, skin, ...o });
@@ -87,13 +97,25 @@ function forged(n, t) {
   return [S('press', 'heat', { heat: 1 }), ...rep(t >= 3 ? h : n, S('strike', 'hammer')), ...(t >= 3 ? [S('press', 'reheat', { heat: 1 }), ...rep(n - h, S('strike', 'hammer'))] : []), S('sweep', 'quench', { w: 2 })];
 }
 
-export const recipeTier = (r) => (r.lvl <= 2 ? 1 : r.lvl <= 5 ? 2 : r.lvl <= 8 ? 3 : 4);
+export const recipeTier = (r) => (r.lvl <= 2 ? 1 : r.lvl <= 5 ? 2 : r.lvl <= 8 ? 3 : r.lvl <= 12 ? 4 : r.lvl <= 20 ? 5 : r.lvl <= 28 ? 6 : 7);
+// Tiers 5–7 add steps: a reheat and another strike group (5), a chill (6),
+// and one more strike group (7). Strikes use the recipe's own strike skin.
+function harder(steps, t) {
+  if (t < 5) return steps;
+  const skin = [...steps].reverse().find((st) => st.k === 'strike')?.skin ?? 'hammer';
+  const group = () => rep(3, S('strike', skin));
+  const out = [...steps, S('press', 'reheat', { heat: 1 }), ...group()];
+  if (t >= 6) out.push(S('sweep', 'chill'));
+  if (t >= 7) out.push(...group());
+  return out;
+}
 export const isStackable = (r) => ['material', 'consumable'].includes(ITEMS[r.out].cat);
-// How many you can make in one sitting (grows with Crafting level).
-export function batchCap(r, lvl) {
+// How many you can make in one sitting (grows with Crafting level; extra:
+// the Crafting 15 milestone's +5).
+export function batchCap(r, lvl, extra = 0) {
   const cat = ITEMS[r.out].cat;
-  if (cat === 'material') return Math.min(25, 5 + 2 * (lvl - 1));
-  if (cat === 'consumable') return Math.min(10, 3 + (lvl - 1));
+  if (cat === 'material') return Math.min(25, 5 + 2 * (lvl - 1)) + extra;
+  if (cat === 'consumable') return Math.min(10, 3 + (lvl - 1)) + extra;
   return 1;
 }
 // Bigger batches take a little more work.
@@ -104,11 +126,15 @@ export function extraSteps(r, batch) {
   return 0;
 }
 // Timing windows; crafting well above a recipe's level makes them kinder.
-export function windows(tier, over) {
+// bonus: { P, G } extra ticks from perks (Smith's perfectTick; Steady Hands
+// on good windows for tiers up to 4), never past the next window out.
+export function windows(tier, over, bonus = {}) {
   let [P, G, W] = WIN[tier];
   const b = over >= 15 ? 2 : over >= 5 ? 1 : 0;
   P = Math.min(6, P + b);
   G = Math.min(11, G + b);
+  G = Math.min(W - 1, G + (bonus.G || 0));
+  P = Math.min(G - 1, P + (bonus.P || 0));
   return { P, G, W };
 }
 
@@ -124,12 +150,12 @@ function mulberry32(seed) {
 }
 
 // The step list for one craft (JSON; the server stores it and replays it as stored).
-export function buildSpec(r, { lvl = 1, batch = 1, seed = 1, sid = '' } = {}) {
+export function buildSpec(r, { lvl = 1, batch = 1, seed = 1, sid = '', bonus = {} } = {}) {
   const rng = mulberry32(seed);
   const tier = recipeTier(r);
-  const win = windows(tier, lvl - r.lvl);
+  const win = windows(tier, lvl - r.lvl, bonus);
   const { W } = win;
-  const steps = PATTERNS[r.pattern](tier, extraSteps(r, batch)).map((st) => {
+  const steps = harder(PATTERNS[r.pattern](Math.min(tier, 4), extraSteps(r, batch)), tier).map((st) => {
     const base = { k: st.k, skin: st.skin, w: st.w || 1, ...(st.heat ? { heat: 1 } : {}) };
     if (st.k === 'strike') return { ...base, lead: Math.max(W + EARLY + IGNORE + 2, Math.round((LEAD[tier] / (st.tempo || 1)) * (0.9 + rng() * 0.2))) };
     if (st.k === 'sweep') {
@@ -267,17 +293,22 @@ export const isFlawless = (s) => s.res.length > 0 && s.res.every((q) => q === 'P
 // What comes out. Never less than the plain recipe; refining and food get
 // bonus yield, tools and gear can come out Fine or (rarely, server-rolled)
 // Masterwork. rng is injected so tests are deterministic.
-export function outcomeOf({ r, batch, score, flawless, over }, rng = Math.random) {
+// E: the crafter's effects (shared/perks.js): bonusPlank/bonusBar/
+// bonusConsumable (a chance of one more per unit) and masterworkPct.
+export function outcomeOf({ r, batch, score, flawless, over, E = {} }, rng = Math.random) {
   const grade = gradeOf(score);
   const xpMult = XP_MULT[grade];
   if (isStackable(r)) {
     const base = r.qty * batch;
     const raw = base * GRADE_BONUS[grade];
-    const bonus = Math.floor(raw) + (rng() < raw - Math.floor(raw) ? 1 : 0);
+    let bonus = Math.floor(raw) + (rng() < raw - Math.floor(raw) ? 1 : 0);
+    const tag = ITEMS[r.out].tag;
+    const extra = tag === 'plank' ? E.bonusPlank : tag === 'bar' ? E.bonusBar : ITEMS[r.out].cat === 'consumable' ? E.bonusConsumable : 0;
+    if (extra) for (let i = 0; i < base; i++) if (rng() < extra) bonus++;
     return { grade, item: r.out, q: 0, base, bonus, qty: base + bonus, xpMult, mw: false };
   }
   let q = 0;
-  if (grade === 'S' && rng() < Math.min(0.5, (0.15 + 0.01 * Math.max(0, Math.min(10, over))) * (flawless ? 2 : 1))) q = 2;
+  if (grade === 'S' && rng() < Math.min(0.5, (0.15 + 0.01 * Math.max(0, Math.min(10, over))) * (flawless ? 2 : 1) + (E.masterworkPct || 0))) q = 2;
   else if (score >= 85) q = 1;
   return { grade, item: qualityId(r.out, q), q, base: r.qty, bonus: 0, qty: r.qty, xpMult, mw: q === 2, quality: QUALITY[q].label };
 }

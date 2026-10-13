@@ -1,10 +1,9 @@
 // Channels: live copies of the town, and dungeon runs, which extend them.
 // (The battles fought in them are in battle.js.)
-import { ITEMS } from '../shared/items.js';
-import { MONSTERS } from '../shared/monsters.js';
+import { MONSTERS, eliteDef } from '../shared/monsters.js';
 import { NODE_TYPES, SPAWNS, stepPath, isWalkable, WORLD_RADIUS, isDeepSpot, MOVE_SPEED } from '../shared/world.js';
-import { levelFromXp } from '../shared/skills.js';
-import { rollFish, fishingGear, fightRating, FISH_MAX_TICKS } from '../shared/fishing.js';
+import { fightRating, FISH_MAX_TICKS } from '../shared/fishing.js';
+import { biteFor } from './gather.js';
 import { world } from './static.js';
 import { emit, listening } from './events.js';
 import { tickNodeStates, stateOf } from './nodestates.js';
@@ -230,7 +229,7 @@ export class Channel {
   tick(now, dt) {
     this.tickNo++;
     if (this.sleeps && this.tickNo % 10 === 1) this.#wake();
-    if (this.sleeps && this.tickNo % 20 === 0) tickNodeStates(this, now);
+    if (!this.isRun && this.tickNo % 20 === 0) tickNodeStates(this, now);
     const attune = this.tickNo % 10 === 0; // twice a second is plenty
     const pos = this.tickNo % 20 === 0 && listening('pos'); // once a second, for whoever tracks where heroes go
     for (const c of this.players.values()) {
@@ -241,7 +240,7 @@ export class Channel {
         stepPath(e, dt, MOVE_SPEED * (e.speedMul ?? 1));
         if (!e.path && e.act === 'walk') e.act = 'idle';
       }
-      if (!c.battle && e.hp < e.maxHp && this.regen) e.hp = Math.min(e.maxHp, e.hp + this.regen * dt);
+      if (!c.battle && e.hp < e.maxHp && this.regen) e.hp = Math.min(e.maxHp, e.hp + (this.regen + (c.effects?.().regenOut || 0)) * dt);
       if (GATHER_ACTS.has(e.act) && now - e.lastSwing > 2500) e.act = 'idle'; // stopped swinging
       if (c.craft) {
         this.game.crafting.expire(c, now);
@@ -251,10 +250,8 @@ export class Channel {
       if (f && f.state === 'wait' && now >= f.biteAt) {
         // Decide what bit now; the client needs the fight parameters to play it.
         f.state = 'bite';
-        const rod = ITEMS[c.hero.equip.rod];
-        const lvl = levelFromXp(c.hero.skills.fishing || 0);
-        f.fish = rollFish(Math.random, rod?.tier || 1, lvl, isDeepSpot(this.nodes.get(f.node)));
-        f.gear = fishingGear(rod?.tier || 1, lvl, rod?.rodZone || 0);
+        const spot = this.nodes.get(f.node);
+        Object.assign(f, biteFor(c, spot, isDeepSpot(spot), now));
         const { d, behavior, seed } = f.fish;
         c.send({ t: 'bite', window: f.window, fish: { d, behavior, seed }, gear: f.gear, rating: fightRating(d, f.gear) });
       }
@@ -352,7 +349,10 @@ export class Channel {
 
   // Battle hooks (a dungeon run overrides these).
   koHp = 0.3; // knocked-out heroes get up with this share of their health
-  monsterDef(mob) {
+  // An elite camp (spawn flag `elite`, with its own `lvl`) restats its
+  // monster to that level, with hp for the heroes fighting it.
+  monsterDef(mob, fighters = 1) {
+    if (mob.sp?.elite) return eliteDef(mob.type, mob.sp.lvl ?? MONSTERS[mob.type].lvl, fighters, mob.sp.name);
     return mob.def ?? MONSTERS[mob.type];
   }
   // A monster fell: it respawns later.

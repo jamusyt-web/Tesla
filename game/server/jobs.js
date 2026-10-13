@@ -1,4 +1,4 @@
-import { ITEMS, isItem } from '../shared/items.js';
+import { ITEMS, isItem, isTradeable } from '../shared/items.js';
 import { MARKET_TAX_PM } from '../shared/economy.js';
 import { tx, fail } from './db.js';
 import { stash } from './storage.js';
@@ -60,6 +60,7 @@ export class Jobs {
     qty = Number(qty);
     per = Number(per);
     if (!isItem(item)) fail('Pick an item for the job.');
+    if (!isTradeable(item)) fail(`${ITEMS[item].name} can't change hands.`);
     if (!Number.isInteger(qty) || qty < 1 || qty > MAX_QTY) fail(`Ask for between 1 and ${MAX_QTY}.`);
     if (!Number.isInteger(per) || per < 1 || per > MAX_PER) fail('The pay must be a whole number of gold per item.');
     if (this.q.openCount.get(accountId).n >= MAX_OPEN_JOBS) fail(`You can have at most ${MAX_OPEN_JOBS} jobs up at once.`);

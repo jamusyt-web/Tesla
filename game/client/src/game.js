@@ -580,6 +580,8 @@ export class GameClient {
       s.on('attuned', (m) => this.onAttuned(m)),
       s.on('nh', (m) => this.onNodeHit(m)),
       s.on('node', (m) => this.onNode(m)),
+      s.on('nst', (m) => this.town.nodes.get(m.id)?.setSt(m.st)), // a node turned rich or ancient (or back)
+      s.on('buffs', (m) => (this.hud.me.buffs = m.buffs || {})),
       s.on('loot', (m) => this.onLoot(m)),
       s.on('cast', (m) => {
         const pv = this.players.get(m.by);
@@ -1417,6 +1419,10 @@ export class GameClient {
     } else if (ev.k === 'thorns') {
       const pv = this.players.get(ev.to);
       if (pv) this.floatText(pv.av.root.position.clone().setY(2.7), `${ev.dmg} thorns`, 'dmg');
+    } else if (ev.k === 'reflect') {
+      if (mobPos) this.floatText(mobPos, `${ev.dmg} thorns`, 'dmg');
+    } else if (ev.k === 'chill') {
+      if (mobPos) this.floatText(mobPos, 'Chilled!', 'loot');
     } else if (ev.k === 'mobHeal') {
       if (mobPos) this.floatText(mobPos, `+${ev.amt}`, 'heal');
     } else if (ev.k === 'warn') {

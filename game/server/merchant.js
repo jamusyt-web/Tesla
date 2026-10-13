@@ -1,7 +1,7 @@
 // Each town's merchant (a standing bid for everything, SPEC §6.2) and its
 // supplier stall (a few goods for sale, at most 150 of each a day). The
 // rules and numbers are in shared/economy.js; this keeps the pools.
-import { ITEMS, isItem } from '../shared/items.js';
+import { ITEMS, isItem, isTradeable } from '../shared/items.js';
 import { poolNow, unitBid, merchantSale, suppliesOf, supplyAsk, supplyDaily } from '../shared/economy.js';
 import { today } from './telemetry.js';
 import { tx, fail } from './db.js';
@@ -24,13 +24,14 @@ export class Merchant {
   }
   // The merchant's bid for one unit right now (0: it won't buy that).
   bid(town, item, now = Date.now()) {
-    return isItem(item) ? unitBid(town, item, this.pool(town, item, now)) : 0;
+    return isTradeable(item) ? unitBid(town, item, this.pool(town, item, now)) : 0;
   }
   // What selling qty would pay: { unit, total, glut, full }.
   quote(town, item, qty, now = Date.now()) {
     if (!isItem(item)) fail('Unknown item.');
     qty = Number(qty);
     if (!Number.isInteger(qty) || qty < 1 || qty > 9999) fail('Bad amount.');
+    if (!isTradeable(item)) return { unit: 0, total: 0, glut: false, full: false };
     const r = merchantSale(town, item, qty, this.pool(town, item, now));
     return { unit: r.unit, total: r.total, glut: r.glut, full: r.full };
   }

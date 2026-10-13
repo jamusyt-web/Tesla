@@ -2,7 +2,7 @@
 // recipes, dungeon kinds and chest tables in its own file here (for example
 // content/amberfold.js), shaped like:
 //   export default { id, items: {}, nodes: {}, monsters: {}, recipes: [], dungeons: {}, chests: {},
-//                    trade?, supplies?, customers? }   (the last three: that town's economy, shared/economy.js and shop.js)
+//                    sets: {}, fish: {}, fishTables: {}, trade?, supplies?, customers? }   (the last three: that town's economy, shared/economy.js and shop.js)
 // The base tables (items.js, nodes.js, monsters.js, recipes.js, dungeon.js)
 // merge CONTENT in when they load, so the rest of the game sees one table.
 // Packs are plain data: they must not import those tables themselves.
@@ -10,9 +10,9 @@
 const PACKS = []; // none yet: Hearthvale's content lives in the base tables
 
 function collect(packs) {
-  const out = { items: {}, nodes: {}, monsters: {}, recipes: [], dungeons: {}, chests: {}, trade: {}, supplies: {}, customers: {} };
+  const out = { items: {}, nodes: {}, monsters: {}, recipes: [], dungeons: {}, chests: {}, sets: {}, fish: {}, fishTables: {}, trade: {}, supplies: {}, customers: {} };
   for (const p of packs) {
-    for (const k of ['items', 'nodes', 'monsters', 'dungeons', 'chests']) mergeInto(out[k], p[k] ?? {}, `${p.id} ${k}`);
+    for (const k of ['items', 'nodes', 'monsters', 'dungeons', 'chests', 'sets', 'fish', 'fishTables']) mergeInto(out[k], p[k] ?? {}, `${p.id} ${k}`);
     out.recipes.push(...(p.recipes ?? []));
     // A town's merchant rates, supplier stock and shop customers, by town id.
     for (const k of ['trade', 'supplies', 'customers']) if (p[k]) out[k][p.id] = p[k];

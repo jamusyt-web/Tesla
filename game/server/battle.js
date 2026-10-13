@@ -71,8 +71,13 @@ export class Battle {
     if (this.over) fail('That battle just ended.');
     if (this.fighters.size >= 4) fail('This battle is full (4 heroes).');
     const st = c.stats();
-    const perks = c.perks?.() ?? new Set();
-    this.fighters.set(c.hero.id, { c, hp: Math.max(1, Math.min(c.ent.hp, st.hp)), max: st.hp, atk: st.atk, def: st.def, charge: 0, need: perks.has('quickSpecial') ? 2 : 3, mend: perks.has('mender') ? 1.4 : 1, choice: null, alive: true });
+    const E = c.effects?.() ?? {};
+    // Specials charge in 3, one fewer with a quick or fast special (never below 2).
+    const need = Math.max(2, 3 - (E.quickSpecial ? 1 : 0) - (E.fastSpecial ? 1 : 0));
+    // Rally: joining a friend's fight lifts both of you.
+    const rally = E.rally && this.fighters.size ? E.rally : 0;
+    if (rally) for (const o of this.fighters.values()) o.rally = Math.max(o.rally, rally);
+    this.fighters.set(c.hero.id, { c, E, hp: Math.max(1, Math.min(c.ent.hp, st.hp)), max: st.hp, atk: st.atk, def: st.def, charge: 0, need, mend: 1 + (E.mender || 0), rally, choice: null, alive: true });
     c.cancelFishing();
     c.battle = this;
     c.ent.act = 'battle';
@@ -145,7 +150,9 @@ export class Battle {
       } catch (e) {
         console.error('battle reward failed', e);
       }
-      const xp = g.heroes.addXp(f.c.hero, 'combat', def.xp);
+      // Mentor: a hero 8+ levels above you in the fight lifts your xp.
+      const mentor = Math.max(0, ...[...this.fighters.values()].filter((m) => m !== f && m.c.hero.level - f.c.hero.level >= 8).map((m) => m.E?.mentor || 0));
+      const xp = g.heroes.addXp(f.c.hero, 'combat', Math.round(def.xp * (1 + mentor)));
       emit(f.c, 'kill', { monster: this.mob.type, lvl: def.lvl, boss: !!def.boss, elite: !!def.elite, inRun: !!this.ch.isRun, gold, loot });
       s.gold += gold;
       for (const [it, n] of Object.entries(loot)) s.loot[it] = (s.loot[it] || 0) + n;
@@ -155,21 +162,44 @@ export class Battle {
     }
   }
 
+  // Party auras from heroes still standing: { atk, def } fractions.
+  #auras() {
+    const a = { atk: 0, def: 0 };
+    for (const f of this.fighters.values())
+      if (f.alive) {
+        a.atk += f.E?.starlit || 0;
+        a.def += f.E?.auraDef || 0;
+      }
+    return a;
+  }
+
   resolve() {
     const ev = [];
     const H = this.ch.game.heroes;
+    const aura = this.#auras();
     for (const [id, f] of this.fighters) {
       if (!f.alive) continue;
       const ch = f.choice || { a: 'attack' }; // idle heroes auto-attack so nobody stalls the party
       f.defending = false;
       if (ch.a === 'attack' || ch.a === 'skill') {
         const skill = ch.a === 'skill' && f.charge >= f.need;
-        const crit = Math.random() < 0.12;
-        let dmg = damage(f.atk, this.def.def, skill ? 2.4 : 1);
+        const crit = Math.random() < 0.12 + (f.E?.critChance || 0);
+        let dmg = damage(f.atk * (1 + aura.atk + (f.rally || 0)), this.def.def, skill ? 2.4 : 1);
         if (crit) dmg = Math.round(dmg * 1.6);
         this.mobHp = Math.max(0, this.mobHp - dmg);
         f.charge = skill ? 0 : Math.min(f.need, f.charge + 1);
         ev.push({ k: 'hit', from: id, to: 'mob', dmg, crit, skill });
+        // Critical Heal: a crit mends you a little.
+        if (crit && f.E?.critHeal && f.hp < f.max) {
+          const amt = Math.min(f.max - f.hp, Math.round(f.max * f.E.critHeal));
+          f.hp += amt;
+          ev.push({ k: 'heal', who: id, amt });
+        }
+        // Frostbite: your special chills the monster's attack for 2 rounds.
+        if (skill && f.E?.frostbite) {
+          this.chill = { cut: f.E.frostbite, rounds: 2 };
+          ev.push({ k: 'chill', mob: this.mob.id });
+        }
         // Thorns: hitting it hurts back.
         if (this.def.thorns && this.mobHp > 0) {
           const back = Math.max(1, Math.round(dmg * this.def.thorns));
@@ -183,7 +213,8 @@ export class Battle {
         if (this.mobHp <= 0) break;
       } else if (ch.a === 'defend') {
         f.defending = true;
-        f.charge = Math.min(f.need, f.charge + 1);
+        // Second Stance: a defend charges your special twice as fast.
+        f.charge = Math.min(f.need, f.charge + 1 + (f.E?.secondStance ? 1 : 0));
         ev.push({ k: 'defend', who: id });
       } else if (ch.a === 'potion') {
         try {
@@ -235,7 +266,8 @@ export class Battle {
       this.push();
       return;
     }
-    this.#monsterTurn(ev);
+    this.#monsterTurn(ev, aura);
+    if (this.chill && --this.chill.rounds <= 0) this.chill = null;
     for (const f of this.fighters.values()) f.choice = null;
     this.round++;
     this.deadline = Date.now() + ROUND_MS;
@@ -253,8 +285,13 @@ export class Battle {
   // The monster's turn. Town monsters act once; dungeon monsters act once per
   // hero still standing (at different heroes where they can). An area move
   // takes the whole turn; a frenzied monster gets one more action when hurt.
-  #monsterTurn(ev) {
+  #monsterTurn(ev, aura = { def: 0 }) {
     const d = this.def;
+    const atk = d.atk * (1 - (this.chill?.cut || 0));
+    // Guardian: a guardian defending shields the most hurt ally.
+    const standing = [...this.fighters.entries()].filter(([, f]) => f.alive);
+    const guard = standing.filter(([, f]) => f.defending && f.E?.guardian).reduce((m, [, f]) => Math.max(m, f.E.guardian), 0);
+    const ward = guard ? standing.filter(([, f]) => !f.defending).sort((a, b) => a[1].hp / a[1].max - b[1].hp / b[1].max)[0]?.[0] : null;
     const aliveCount = () => [...this.fighters.values()].filter((f) => f.alive).length;
     let actions = d.perFighter ? aliveCount() : 1;
     if (d.frenzy && this.mobHp < this.mobMax / 2) actions++;
@@ -277,11 +314,18 @@ export class Battle {
       let dealt = 0;
       for (const [id, f] of targets) {
         hitThisRound.add(id);
-        let dmg = damage(d.atk, f.def, move.mult * (move.aoe && !move.full ? 0.7 : 1));
+        let dmg = damage(atk, f.def * (1 + aura.def), move.mult * (move.aoe && !move.full ? 0.7 : 1));
         if (f.defending) dmg = Math.max(1, Math.round(dmg * 0.35));
+        else if (id === ward) dmg = Math.max(1, Math.round(dmg * (1 - guard)));
         f.hp = Math.max(0, f.hp - dmg);
         dealt += dmg;
         ev.push({ k: 'hit', from: 'mob', to: id, dmg, move: move.name, aoe: !!move.aoe || undefined, blocked: !!f.defending });
+        // Thornguard: some of the blow goes back.
+        if (f.E?.thornguard && this.mobHp > 0) {
+          const back = Math.max(1, Math.round(dmg * f.E.thornguard));
+          this.mobHp = Math.max(1, this.mobHp - back);
+          ev.push({ k: 'reflect', from: id, dmg: back });
+        }
         if (f.hp <= 0) {
           f.alive = false;
           ev.push({ k: 'ko', who: id });
@@ -305,6 +349,7 @@ export class Battle {
     const results = {};
     for (const [id, f] of this.fighters) {
       const c = f.c;
+      c.useBuffs?.('battle');
       c.battle = null;
       c.ent.act = 'idle';
       c.ent.hp = f.alive ? Math.max(1, f.hp) : Math.round(f.max * this.ch.koHp);

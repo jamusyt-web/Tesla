@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { ITEMS } from '../shared/items.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
 import { levelFromXp } from '../shared/skills.js';
-import { buildSpec, replayCraft, finalizeCraft, scoreOf, isFlawless, outcomeOf, batchCap, isStackable, CRAFT_TICK, CRAFT_MAX_TICKS, STATIONS } from '../shared/crafting.js';
+import { buildSpec, replayCraft, finalizeCraft, scoreOf, isFlawless, outcomeOf, batchCap, isStackable, recipeTier, CRAFT_TICK, CRAFT_MAX_TICKS, STATIONS } from '../shared/crafting.js';
 import { spotsOf, inYard, nearestStation } from '../shared/stations.js';
 import { townAt } from '../shared/places.js';
 import { REGIONS } from '../shared/world.js';
@@ -95,7 +95,8 @@ export class Crafting {
     if (c.battle) fail("You're in a battle!");
     if (c.room) fail("You're inside a shop.");
     batch = Number(batch);
-    if (!Number.isInteger(batch) || batch < 1 || batch > batchCap(r, lvl)) fail('Bad batch size.');
+    const E = c.effects();
+    if (!Number.isInteger(batch) || batch < 1 || batch > batchCap(r, lvl, E.batchCap || 0)) fail('Bad batch size.');
     const H = this.game.heroes;
     const escrow = Object.fromEntries(Object.entries(r.in).map(([id, n]) => [id, n * batch]));
     for (const [id, n] of Object.entries(escrow)) if (H.count(c.hero.id, id) < n) fail(`Not enough ${ITEMS[id].name}.`);
@@ -105,7 +106,7 @@ export class Crafting {
       fail(`Walk up to the ${STATIONS[r.station].label} first.`);
     }
     const sid = crypto.randomBytes(6).toString('base64url');
-    const spec = buildSpec(r, { lvl, batch, seed: crypto.randomInt(2 ** 31), sid });
+    const spec = buildSpec(r, { lvl, batch, seed: crypto.randomInt(2 ** 31), sid, bonus: this.#bonus(c, r, E, spot) });
     tx(this.db, () => {
       for (const [id, n] of Object.entries(escrow)) H.takeItem(c.hero.id, id, n);
       this.q.insert.run(c.hero.id, sid, r.id, batch, r.station, JSON.stringify(spec), JSON.stringify(escrow), now, now + SESSION_MS);
@@ -204,7 +205,8 @@ export class Crafting {
       this.#clear(c);
       return { sid: cr.sid, refunded: cr.escrow, via };
     }
-    const out = outcomeOf({ r, batch: cr.batch, score, flawless, over: lvl - r.lvl }, this.rng);
+    const E = c.effects();
+    const out = outcomeOf({ r, batch: cr.batch, score, flawless, over: lvl - r.lvl, E }, this.rng);
     const result = { sid: cr.sid, recipe: r.id, grade: out.grade, score, flawless, steps: s.res, out, via };
     const granted = tx(this.db, () => {
       if (this.q.del.run(c.hero.id, cr.sid).changes !== 1) return false;
@@ -217,7 +219,8 @@ export class Crafting {
       const done = this.q.logged.get(c.hero.id, cr.sid);
       return done ? JSON.parse(done.result) : result;
     }
-    result.xp = H.addXp(c.hero, 'crafting', Math.round(r.xp * cr.batch * out.xpMult));
+    result.xp = H.addXp(c.hero, 'crafting', Math.round(r.xp * cr.batch * out.xpMult * (1 + (E.craftXp || 0))));
+    c.useBuffs?.('craft');
     if (via === 'play' || via === 'stop') this.q.masteryUp.run(c.hero.id, r.id, ['S', 'A', 'B'].includes(out.grade) ? 1 : 0, score);
     const m = this.q.masteryOne.get(c.hero.id, r.id);
     result.mastery = { n: m?.n || 0, best: m?.best || 0, quick: isStackable(r) && (m?.n || 0) >= QUICK_UNLOCK };
@@ -230,6 +233,15 @@ export class Crafting {
     if (!quiet) c.pushInventory();
     emit(c, 'craft', { recipe: r.id, out: r.out, item: out.item, qty: out.qty, grade: out.grade, via });
     return result;
+  }
+
+  // Extra window ticks: Smith (perfect +1); Steady Hands on tiers up to 4,
+  // yours or (Apprentice) a friend's working the same yard.
+  #bonus(c, r, E, spot) {
+    let steady = !!E.steadyHands;
+    if (!steady && c.ch)
+      for (const o of c.ch.players.values()) if (o !== c && o.effects?.().apprentice && Math.hypot(o.ent.x - spot.x, o.ent.z - spot.z) < 15) steady = true;
+    return { P: E.perfectTick || 0, G: steady && recipeTier(r) <= 4 ? 1 : 0 };
   }
 
   #clear(c) {
@@ -251,7 +263,7 @@ export class Crafting {
     if (!inYard(c.ent.x, c.ent.z)) fail('Quick crafting works in the Workshop yard.');
     times = Math.max(1, Math.min(50, Number(times) || 1));
     const H = this.game.heroes;
-    const fee = Math.ceil(QUICK_FEE * r.qty * times * ITEMS[r.out].value);
+    const fee = Math.ceil((QUICK_FEE - (c.effects().quickFee || 0)) * r.qty * times * ITEMS[r.out].value);
     tx(this.db, () => {
       for (const [id, n] of Object.entries(r.in)) H.takeItem(c.hero.id, id, n * times);
       H.addGold(c.hero.id, -fee, 'craftFee');
