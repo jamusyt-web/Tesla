@@ -219,3 +219,8 @@ test('a whetstone wears on tool swings, not herbs; a Keeper standing near regrow
     done();
   }
 });
+
+test('the Compass knows how much more rich and ancient nodes ask', async () => {
+  const { STATE_GATE } = await import('../../shared/goals.js');
+  assert.deepEqual([STATE_FX[1].gate, STATE_FX[2].gate], [STATE_GATE[1], STATE_GATE[2]]);
+});
