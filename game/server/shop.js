@@ -153,7 +153,7 @@ export class Shops {
       if (!s) fail('That display is empty now.');
       if (s.item !== item || s.price !== price) fail('The price just changed — have another look.');
       if (s.qty < qty) fail(`Only ${s.qty} left.`);
-      this.heroes.addGold(buyerId, -s.price * qty); // throws "Not enough gold." → full rollback
+      this.heroes.addGold(buyerId, -s.price * qty, 'shopBuy'); // throws "Not enough gold." → full rollback
       this.heroes.addItem(buyerId, s.item, qty);
       const sale = this.#sell(ownerId, s, qty, { kind: 'player', buyer: buyerName, buyerId, feePm: SHOP.P2P_FEE_PM, now });
       return { sale, s: this.slot(ownerId, slot) };
@@ -165,7 +165,7 @@ export class Shops {
       const gold = this.till(id);
       if (!gold) fail('Nothing in the till yet.');
       this.q.emptyTill.run(id);
-      this.heroes.addGold(id, gold);
+      this.heroes.addGold(id, gold, 'shopTill');
       return { gold };
     });
   }

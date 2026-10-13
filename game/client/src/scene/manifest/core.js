@@ -1,4 +1,4 @@
-// Every external 3D model the game uses, by "slot". Swap any model by
+// The core model group: every external 3D model the game uses today, by "slot". Swap any model by
 // pointing its url at a different .glb (files live in client/public/models/,
 // your own go in client/public/models/custom/). See ASSETS.md.
 //

@@ -3,6 +3,12 @@ import { SKILL_IDS, levelFromXp, heroLevel } from '../shared/skills.js';
 import { sanitizeAvatar, NAME_RE } from '../shared/avatar.js';
 import { SPAWN } from '../shared/world.js';
 import { tx, fail } from './db.js';
+import { goldFlow } from './telemetry.js';
+import { emit } from './events.js';
+
+// Hero columns other modules may read and write without owning this file.
+// (They arrive with migration 009; reading one before it has run fails.)
+const FIELDS = new Set(['buffs', 'perks', 'respecs', 'rested', 'home', 'title']);
 
 // Data-access helpers for a hero's persistent state. Every mutation goes
 // through here so gold/items can never go negative or appear from nowhere.
@@ -68,10 +74,23 @@ export class Heroes {
   gold(id) {
     return this.q.gold.get(id)?.gold ?? 0;
   }
-  addGold(id, n) {
+  // reason labels where the gold came from or went (telemetry, SPEC §6.5).
+  addGold(id, n, reason = 'other') {
     if (!Number.isInteger(n)) fail('Bad amount');
     if (n < 0 && this.gold(id) < -n) fail('Not enough gold.');
     this.q.addGold.run(n, id);
+    goldFlow(this.db, reason, n);
+    emit(null, 'gold', { id, n, reason });
+  }
+
+  // A simple hero column (see FIELDS), as stored.
+  getField(id, col) {
+    if (!FIELDS.has(col)) fail(`Unknown hero field ${col}.`);
+    return this.db.prepare(`SELECT ${col} AS v FROM heroes WHERE account_id = ?`).get(id)?.v;
+  }
+  setField(id, col, value) {
+    if (!FIELDS.has(col)) fail(`Unknown hero field ${col}.`);
+    this.db.prepare(`UPDATE heroes SET ${col} = ? WHERE account_id = ?`).run(value, id);
   }
 
   inventory(id) {

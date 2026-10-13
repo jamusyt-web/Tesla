@@ -9,6 +9,7 @@
 // room are barred until its pack is beaten; the Vault also needs the Bone Key
 // an Elite drops. Everything here is deterministic from the seed.
 import { mulberry32 } from './world.js';
+import { CONTENT, mergeInto } from './content/index.js';
 
 export const CELL = 4; // metres per cell
 export const PLAYER_R = 0.45;
@@ -28,6 +29,7 @@ export const DUNGEONS = {
     boss: { monster: 'pale_count', adds: ['thrall', 'thrall', 'crypt_skeleton'] },
   },
 };
+mergeInto(DUNGEONS, CONTENT.dungeons, 'dungeons');
 // Each tier is the same crypt, harder; clearing one unlocks the next.
 export const TIERS = {
   1: { name: 'Tier 1', hp: 1, atk: 1, def: 0, loot: 1, rec: { level: 5, gear: 'a Copper Sword' } },
@@ -155,6 +157,7 @@ export const CHESTS = {
     },
   },
 };
+mergeInto(CHESTS, CONTENT.chests, 'chests');
 export const FIRST_CLEAR_GOLD = 150;
 export function rollChest(kind, chest, { party = 1, tier = 1, mod = 'still', firstToday = false, rng = Math.random } = {}) {
   const C = CHESTS[kind][chest];

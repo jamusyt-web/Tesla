@@ -239,7 +239,7 @@ export class DungeonRun extends Channel {
 
   #give(id, loot) {
     const H = this.game.heroes;
-    H.addGold(id, loot.gold);
+    H.addGold(id, loot.gold, 'dungeon');
     for (const [it, n] of Object.entries(loot.items)) H.addItem(id, it, n);
   }
   #grant(id, chest, loot) {

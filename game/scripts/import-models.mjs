@@ -1,4 +1,4 @@
-// Copies every model referenced in client/src/scene/manifest.js (MODELS and
+// Copies every model referenced in client/src/scene/manifest/ (MODELS and
 // the modular MODULE_PACKS pieces) from a folder
 // of unzipped asset packs into client/public/models/, along with any texture
 // files the models reference (e.g. Kenney's Textures/colormap.png), and
@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MODELS, MODULE_PACKS } from '../client/src/scene/manifest.js';
+import { MODELS, MODULE_PACKS } from '../client/src/scene/manifest/index.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'client', 'public', 'models');

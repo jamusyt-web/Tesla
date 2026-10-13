@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Avatar } from '../scene/avatar.js';
 import * as assets from '../scene/assets.js';
-import { MODELS } from '../scene/manifest.js';
+import { MODELS } from '../scene/manifest/index.js';
 import { PROC_ICONS } from './proc-icons.js';
 
 // Renders avatar portraits to data URLs with one shared offscreen renderer.

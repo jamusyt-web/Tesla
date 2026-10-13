@@ -1,28 +1,26 @@
 import * as THREE from 'three';
 import { Avatar } from './scene/avatar.js';
-import { useGrade } from './scene/grade.js';
+import { createRenderer, setupPasses, renderFrame, warm, updateCamera, fadeOccluders } from './scene/render.js';
+import { Mood } from './scene/mood.js';
 import { Mob } from './scene/mobs.js';
 import { buildTown } from './scene/town.js';
 import { Particles, Rings } from './scene/fx.js';
 import { Townsfolk } from './scene/townsfolk.js';
 import { RoomView } from './room.js';
+import { Labels } from './ui/labels.js';
 import { DungeonView } from './scene/dungeon.js';
-import { CraftGame } from './ui/craftgame.js';
+import { goCraft, craftDone, resumeCraft, goBuilding, goBoard, goStone, travelTo, ownerTeleport, goCrypt, enterCrypt, guideToCrypt, contextAction } from './world/services.js';
 import { glyph } from './ui/glyphs.js';
-import { RECIPE_BY_ID } from '../../shared/recipes.js';
-import { spotsOf, stationPos } from '../../shared/stations.js';
-import { STATIONS } from '../../shared/crafting.js';
+import { stationPos } from '../../shared/stations.js';
 import { h } from './util/dom.js';
 import { sfx } from './util/sfx.js';
 import { ITEMS } from '../../shared/items.js';
 import { MONSTERS } from '../../shared/monsters.js';
 import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
-  NODES, buildColliders, NavGrid, stepPath, approachPoint, doorPoint, zonesOfKind,
-  BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, GATE, ZONES, SWING_GATE,
-  stoneById, stoneFront, STONE_RANGE, PROPS, ENTRANCES, entranceFront,
+  NODES, buildColliders, NavGrid, stepPath, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById,
 } from '../../shared/world.js';
-import { USE_RANGE, ENTRANCE_RANGE, MAX_WIPES } from '../../shared/dungeon.js';
+import { USE_RANGE } from '../../shared/dungeon.js';
 
 const INTERP_DELAY = 130; // ms behind real time we render other players
 const lerpAngle = (a, b, t) => {
@@ -38,7 +36,6 @@ const STATIC = (() => {
   return { nodes: new Map(NODES.map((n) => [n.id, n])), col, nav: new NavGrid(col) };
 })();
 
-const MOOD = { fog: new THREE.Color('#b8c4c8'), fogWild: new THREE.Color('#9faea6'), sun: new THREE.Color('#ffe4bc'), sunWild: new THREE.Color('#ffd0a0') };
 const QUARTER = Math.PI / 2;
 // The next frame (so a veil is on screen), or 100 ms in a background tab where frames don't come.
 const nextFrame = () => new Promise((r) => (requestAnimationFrame(() => setTimeout(r, 0)), setTimeout(r, 100)));
@@ -107,16 +104,13 @@ export class GameClient {
 
     const low = isTouch || Math.min(screen.width, screen.height) < 700;
     this.low = low;
-    const renderer = new THREE.WebGLRenderer({ antialias: !low || devicePixelRatio < 2, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, low ? 1.5 : 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    useGrade(renderer);
+    const renderer = createRenderer(low);
     this.renderer = renderer;
     this.el = h('div#game');
     this.el.append(renderer.domElement);
     this.el.append(h('div.vignette'));
-    this.labelLayer = h('div.labels');
+    this.labels = new Labels(this);
+    this.labelLayer = this.labels.layer;
     this.el.append(this.labelLayer);
     root.append(this.el);
 
@@ -145,15 +139,13 @@ export class GameClient {
 
     this.fx = new Particles(scene);
     this.fx.puff = new Particles(scene, 300, true);
-    // X-ray pass: heroes behind buildings/trees still show as a soft silhouette.
-    this.silMat = new THREE.MeshBasicMaterial({ color: '#fff1b0', transparent: true, opacity: 0.55, depthFunc: THREE.GreaterDepth, depthWrite: false, fog: false });
-    renderer.autoClear = false;
-    renderer.shadowMap.autoUpdate = false;
+    setupPasses(this);
+    this.mood = new Mood(this);
     this.rings = new Rings(scene);
     this.town = buildTown(scene, this.fx, { low });
     this.folk = new Townsfolk(scene, STATIC.nav, { low });
     this.nodeLabels = new Map();
-    this.#makeStaticLabels();
+    this.labels.makeStatic();
     this.#makeMarker();
     this.#makeGuide();
     this.raycaster = new THREE.Raycaster();
@@ -176,115 +168,42 @@ export class GameClient {
     this.room?.resize();
   }
 
-  // ── Crafting ─────────────────────────────────────────────────────────
-  // Walk to the recipe's station, then make it by hand.
+  // ── Town services (world/services.js) ───────────────────────────────
   goCraft(recipe, batch = 1) {
-    const r = RECIPE_BY_ID[recipe];
-    if (!r || !this.me) return;
-    if (this.dungeon) return this.#underground();
-    if (this.battle || this.room) return this.hud.toast('Not right now!', 'err');
-    if (this.craft) return this.hud.toast("You're already crafting.", 'err');
-    if (this.fishing) this.endFishing();
-    this.stopGather();
-    const L = this.me.local;
-    const sp = spotsOf(r.station)
-      .slice(0, 2)
-      .sort((a, b) => Math.hypot(a.x - L.x, a.z - L.z) - Math.hypot(b.x - L.x, b.z - L.z))[0];
-    const start = () => this.#startCraft(recipe, batch);
-    if (Math.hypot(L.x - sp.x, L.z - sp.z) < 1.5) return start();
-    this.hud.toast(`Off to the ${STATIONS[r.station].label}…`);
-    if (!this.walkTo(sp.x, sp.z, true, start)) this.hud.toast("Can't reach the station.", 'err');
+    return goCraft(this, recipe, batch);
   }
-  async #startCraft(recipe, batch) {
-    try {
-      const st = await this.sock.rpc('craft.start', { recipe, batch });
-      this.#beginCraft(st, recipe, batch);
-    } catch (e) {
-      this.hud.toast(e.message, 'err');
-    }
+  goBuilding(id) {
+    return goBuilding(this, id);
   }
-  #beginCraft(st, recipe, batch) {
-    this.hud.worldMap.close();
-    this.craft = { ...st, recipe, batch };
-    const L = this.me.local;
-    L.path = [[st.spot.x, st.spot.z]];
-    this.intent = null;
-    this.me.av.hold(st.station === 'anvil' ? 'pick' : null);
-    this.me.av.setState('gather');
-    const station = st.station;
-    this.hud.craftGame = new CraftGame(this.hud, st, {
-      onDone: (fin) => this.#finishCraft(fin),
-      onStop: (fin) => this.#finishCraft(fin),
-      onStep: (step, q) => {
-        if (step.k === 'strike') this.me.av.play('swing', 0.32);
-        else if (step.k === 'sweep') this.me.av.play('pick', 0.4);
-        else this.me.av.play('cast', 0.45);
-        const p = stationPos(station);
-        if (p && q !== 'M') this.fx.burst(new THREE.Vector3(p.x, 1.1, p.z), { n: q === 'P' ? 14 : 6, color: station === 'cookpot' ? ['#ffffff', '#d9f3ff'] : station === 'forge' || station === 'anvil' ? ['#ffd84a', '#ff9a3c', '#fff1a8'] : ['#e0bd8a', '#c89a62'], speed: 4, up: 3, size: 0.12, life: 0.5, gravity: 6 });
-      },
-    });
+  goBoard(id, point = null) {
+    return goBoard(this, id, point);
   }
-  async #finishCraft(fin) {
-    const cr = this.craft;
-    try {
-      const res = await this.sock.rpc('craft.finish', fin);
-      this.#craftDone(res, cr);
-    } catch (e) {
-      if (/Disconnected|Not connected|too long/.test(e.message)) {
-        this.pendingFinish = fin; // send it again once we're back
-        return;
-      }
-      this.hud.toast(e.message, 'err');
-      this.hud.craftGame?.close();
-      this.#endCraftLocal();
-    }
+  goStone(id, opts) {
+    return goStone(this, id, opts);
   }
-  #craftDone(res, cr) {
-    this.#endCraftLocal();
-    if (res.refunded) {
-      this.hud.craftGame?.close();
-      return this.hud.toast('That craft was interrupted — your materials are back in your bag.');
-    }
-    if (res.xp) this.hud.onXp(res.xp);
-    const g = this.hud.craftGame;
-    if (!g) return this.hud.toast(`${res.out.qty}× ${ITEMS[res.out.item].name} (grade ${res.grade})`, 'good');
-    g.showResult(res, {
-      onAgain: cr ? () => (g.close(), this.goCraft(cr.recipe, cr.batch)) : null,
-      onEquip: (id) => this.sock.rpc('equip', { item: id }).then(() => this.hud.toast(`Equipped ${ITEMS[id].name}!`, 'good')).catch((e) => this.hud.toast(e.message, 'err')),
-    });
+  travelTo(id) {
+    return travelTo(this, id);
   }
-  #endCraftLocal() {
-    this.craft = null;
-    this.pendingFinish = null;
-    if (this.me) {
-      this.me.av.hold(null);
-      this.me.av.setState('idle');
-    }
+  ownerTeleport(x, z) {
+    return ownerTeleport(this, x, z);
   }
-  // After (re)connecting: carry on, finish as-is, or report what happened.
-  #resumeCraft(you) {
-    const c = you.craft;
-    if (this.pendingFinish && c?.sid === this.pendingFinish.sid) {
-      const fin = this.pendingFinish;
-      this.pendingFinish = null;
-      return this.#finishCraft(fin);
-    }
-    if (c && this.craft?.sid === c.sid) return; // still playing it here
-    if (c) {
-      // Reloaded or another device: it can only be finished as it is.
-      this.sock
-        .rpc('craft.finish', { sid: c.sid, toggles: [], end: 0, off: [0, 0], stop: true })
-        .then((res) => this.hud.toast(`Your ${ITEMS[res.out?.item]?.name || 'craft'} was finished as it was (grade ${res.grade}).`))
-        .catch(() => {});
-    } else if (this.craft) {
-      this.hud.craftGame?.close();
-      this.#endCraftLocal();
-    }
+  goCrypt(id) {
+    return goCrypt(this, id);
   }
+  enterCrypt(kind, opts) {
+    return enterCrypt(this, kind, opts);
+  }
+  guideToCrypt(kind) {
+    return guideToCrypt(this, kind);
+  }
+  contextAction() {
+    return contextAction(this);
+  }
+
 
   // ── Shops ────────────────────────────────────────────────────────────
   async enterShop(owner, { auto = false } = {}) {
-    if (this.dungeon) return this.#underground();
+    if (this.dungeon) return this.underground();
     if (this.battle) return this.hud.toast("You're in a battle!", 'err');
     if (this.hud.fight) return;
     if (this.fishing) this.endFishing();
@@ -297,7 +216,7 @@ export class GameClient {
     }
   }
   openInterior(p) {
-    this.#fade();
+    this.fade();
     this.hud.worldMap.close();
     if (this.room) this.closeInterior({ quiet: true });
     if (this.me) this.me.local.path = null;
@@ -318,14 +237,15 @@ export class GameClient {
   }
   closeInterior({ quiet = false } = {}) {
     if (!this.room) return;
-    if (!quiet) this.#fade();
+    if (!quiet) this.fade();
     this.room.dispose();
     this.room = null;
     this.labelLayer.style.display = '';
     this.hud.setMode('town');
     this.hud.panels.close();
   }
-  #fade() {
+  // A quick fade to black and back (entering a shop, travelling).
+  fade() {
     const f = h('div.fade');
     this.el.append(f);
     setTimeout(() => f.remove(), 450);
@@ -337,22 +257,16 @@ export class GameClient {
     if (!hidden) pv.body.buf = [];
   }
 
-  // ── Labels (HTML overlay, always crisp, never clipped) ──────────────
-  #makeStaticLabels() {
-    this.staticLabels = this.town.labels.map((l) => {
-      const el =
-        l.kind === 'place'
-          ? h('div.place', { on: { click: (e) => (e.stopPropagation(), this.goBuilding(l.id)) } }, h('span.ic', l.glyph ? glyph(l.glyph) : l.icon), l.text)
-          : l.kind === 'board'
-            ? h('div.place', { on: { click: (e) => (e.stopPropagation(), this.goBoard(l.id)) } }, h('span.ic', glyph(l.glyph)), l.text)
-          : l.kind === 'stone'
-            ? h('div.place.stone', { on: { click: (e) => (e.stopPropagation(), this.goStone(l.id, { openMap: true })) } }, h('span.ic', glyph(l.glyph)), l.text)
-          : l.kind === 'crypt'
-            ? h('div.place.crypt', { on: { click: (e) => (e.stopPropagation(), this.goCrypt(l.id)) } }, h('span.ic', glyph(l.glyph)), l.text)
-            : h('div.zone-tag', l.text);
-      this.labelLayer.append(el);
-      return { ...l, el };
-    });
+  // ── Labels (ui/labels.js) ─────────────────────────────────────────────
+  project(v, out = {}) {
+    return this.labels.project(v, out);
+  }
+  // Floating text at a world position (damage numbers, loot, PERFECT!).
+  floatText(pos, text, cls = '') {
+    this.labels.float(pos, text, cls);
+  }
+  get staticLabels() {
+    return this.labels.static;
   }
   #makeMarker() {
     const m = new THREE.Group();
@@ -456,24 +370,7 @@ export class GameClient {
     G.dots.instanceMatrix.needsUpdate = true;
   }
 
-  project(v, out = {}) {
-    const p = v.clone().project(this.camera);
-    out.x = (p.x * 0.5 + 0.5) * innerWidth;
-    out.y = (-p.y * 0.5 + 0.5) * innerHeight;
-    out.vis = p.z < 1 && p.z > -1 && out.x > -100 && out.x < innerWidth + 100 && out.y > -100 && out.y < innerHeight + 100;
-    return out;
-  }
 
-  // Floating text at a world position (damage numbers, loot, PERFECT!).
-  floatText(pos, text, cls = '') {
-    const s = this.project(pos);
-    if (!s.vis) return;
-    const el = h('div.float' + (cls ? '.' + cls.split(' ').join('.') : ''), text);
-    el.style.left = s.x + 'px';
-    el.style.top = s.y + 'px';
-    this.labelLayer.append(el);
-    setTimeout(() => el.remove(), 1700);
-  }
 
   // ── Entities ─────────────────────────────────────────────────────────
   addPlayer(p, isMe = false) {
@@ -601,7 +498,7 @@ export class GameClient {
         this.#setHidden(pv, false);
       }),
       s.on('craftResult', (m) => {
-        this.#craftDone(m, null);
+        craftDone(this, m, null);
         if (m.reason === 'timeout') this.hud.toast('Your craft ran out of time and was finished as it was.');
         else if (m.reason === 'offline') this.hud.toast(`While you were away your ${ITEMS[m.out?.item]?.name || 'craft'} was finished as it was.`);
       }),
@@ -701,7 +598,7 @@ export class GameClient {
       .finally(() => {
         this.swapping = false;
         this.sock.resume();
-        this.#warm().finally(() => veil.out());
+        warm(this).finally(() => veil.out());
       });
   }
 
@@ -709,13 +606,6 @@ export class GameClient {
     const el = h('div.veil', h('div.veil-text', text));
     this.el.append(el);
     return { out: () => (el.classList.add('out'), setTimeout(() => el.remove(), 350)) };
-  }
-  // Compile every shader the new scene needs before anyone sees it.
-  async #warm() {
-    try {
-      this.#updateCamera(0.016);
-      await this.renderer.compileAsync?.(this.scene, this.camera);
-    } catch {}
   }
 
   #welcome(m) {
@@ -739,7 +629,7 @@ export class GameClient {
       this.hud.onWelcome(m);
       this.hud.setOnline(this.players.size);
       for (const b of m.battles) this.onBattle(b);
-      this.#resumeCraft(m.you);
+      resumeCraft(this, m.you);
       return;
     }
     for (const n of this.town.nodes.values()) {
@@ -759,7 +649,7 @@ export class GameClient {
     this.channel = m.channel;
     for (const [id, ws] of this.town.stones) ws.setAttuned((m.you.stones ?? []).includes(id));
     this.hud.onWelcome(m);
-    this.#resumeCraft(m.you);
+    resumeCraft(this, m.you);
     if (this.lastRoom != null) {
       // We dropped while inside a shop: step back in.
       const o = this.lastRoom;
@@ -1058,7 +948,7 @@ export class GameClient {
     if (need) return this.hud.toast(need, 'err');
     const tool = ITEMS[this.hud.me.equip[t.tool]];
     this.gather = { node: id, tool: t.tool, period: tool.speed, last: 0, queued: false, kind: t.kind, dead: false };
-    if (this.hud.questLock?.kind === 'tree' && t.kind === 'tree') this.hud.questLock = { kind: 'tree', id }; // the guide follows your choice
+    if (this.hud.goal.lock?.kind === 'tree' && t.kind === 'tree') this.hud.goal.lock = { kind: 'tree', id }; // the guide follows your choice
     this.me.av.hold(t.tool);
     this.me.av.setState('gather');
     this.hud.showRhythm(this.gather);
@@ -1288,18 +1178,6 @@ export class GameClient {
   }
 
   // ── Buildings & monsters ─────────────────────────────────────────────
-  goBuilding(id) {
-    if (this.battle) return;
-    if (this.dungeon) return this.#underground();
-    if (id === 'gate') return this.walkTo(GATE.x, GATE.z - 6, true);
-    const b = BUILDINGS.find((x) => x.id === id);
-    const [dx, dz] = doorPoint(b);
-    const L = this.me.local;
-    const open = () => (b.action === 'shop' ? this.enterShop(this.myId) : this.hud.openBuilding(b.action));
-    if (Math.hypot(L.x - dx, L.z - dz) < 2.5) return open();
-    this.stopGather();
-    this.walkTo(dx, dz, true, open);
-  }
 
   goMob(id) {
     const mv = this.mobs.get(id);
@@ -1318,65 +1196,7 @@ export class GameClient {
     this.walkTo(mv.x + (dx / d) * 3.2, mv.z + (dz / d) * 3.2, true, engage);
   }
 
-  // Walk up to a bulletin board (by prop id, or the one tapped), then open it.
-  goBoard(id, point = null) {
-    const pr = id ? PROPS.find((p) => p.id === id) : PROPS.filter((p) => p.slot === 'proc_job_board').sort((a, b) => Math.hypot(a.x - point.x, a.z - point.z) - Math.hypot(b.x - point.x, b.z - point.z))[0];
-    if (!pr || this.battle) return;
-    if (this.dungeon) return this.#underground();
-    const open = () => this.hud.panels.open('jobs');
-    const [fx, fz] = [pr.x + Math.sin(pr.rot || 0) * 1.8, pr.z + Math.cos(pr.rot || 0) * 1.8];
-    const L = this.me.local;
-    if (Math.hypot(L.x - fx, L.z - fz) < 3) return open();
-    this.stopGather();
-    if (!this.walkTo(fx, fz, true, open)) open();
-  }
 
-  // ── Waystones (fast travel) ──────────────────────────────────────────
-  // Walk up to a waystone; with openMap, open the world map on arrival to
-  // pick where to go. Returns false if there's no way there.
-  goStone(id, { openMap = false } = {}) {
-    const st = stoneById(id);
-    if (!st || this.battle) return false;
-    if (this.dungeon) return this.#underground(), false;
-    const L = this.me.local;
-    const arrive = () => openMap && this.hud.worldMap.open(typeof openMap === 'object' ? openMap : {});
-    if (Math.hypot(L.x - st.x, L.z - st.z) < STONE_RANGE - 1) return arrive(), true;
-    this.stopGather();
-    const [fx, fz] = stoneFront(st, 2);
-    return this.walkTo(fx, fz, true, arrive);
-  }
-  async travelTo(id) {
-    if (this.travelling) return false;
-    if (this.dungeon) return this.#underground(), false;
-    this.travelling = true;
-    this.me.local.path = null;
-    this.intent = null;
-    try {
-      const r = await this.sock.rpc('travel', { to: id });
-      this.hud.toast(`Travelled to ${stoneById(r.to)?.name ?? 'the waystone'} (−${r.fee} 🪙)`, 'gold');
-      return true;
-    } catch (e) {
-      this.hud.toast(e.message, 'err');
-      return false;
-    } finally {
-      this.travelling = false;
-    }
-  }
-  // Server owners: jump anywhere on land (to check on building work).
-  async ownerTeleport(x, z) {
-    if (this.travelling) return false;
-    if (this.dungeon) return this.#underground(), false;
-    this.travelling = true;
-    try {
-      await this.sock.rpc('owner.teleport', { x, z });
-      return true;
-    } catch (e) {
-      this.hud.toast(e.message, 'err');
-      return false;
-    } finally {
-      this.travelling = false;
-    }
-  }
   // Someone travelled by waystone: they vanish in a flash and reappear.
   onTeleport(m) {
     const pv = this.players.get(m.id);
@@ -1401,7 +1221,7 @@ export class GameClient {
       this.me.av.root.position.set(m.x, 0, m.z);
       this.me.av.root.rotation.y = m.rot;
       if (!this.dungeon) this.town.focus(m.x, m.z, Infinity); // build where you land before the fade clears
-      this.#fade();
+      this.fade();
       if (!this.dungeon) sfx.warp();
     } else {
       pv.body.buf = [];
@@ -1629,7 +1449,7 @@ export class GameClient {
   turn(dir) {
     this.cam.yaw = Math.round(this.cam.yaw / QUARTER) * QUARTER + dir * QUARTER;
   }
-  #underground() {
+  underground() {
     this.hud.toast("Not down here. Leave the crypt first.", 'err');
   }
 
@@ -1651,12 +1471,9 @@ export class GameClient {
     this.folk.root.visible = false;
     this.setGuide(null);
     this.guide.dots.count = 0;
-    for (const l of this.staticLabels) l.el.style.display = 'none';
-    for (const l of view.labels) {
-      l.el = h('div.place.dplace' + (l.lock ? '.lock' : ''), { on: { click: (e) => (e.stopPropagation(), this.useThing(l.what)) } }, h('span.ic', glyph(l.glyph)), h('span.tx', l.text));
-      this.labelLayer.append(l.el);
-    }
-    this.#lighting(true);
+    this.labels.showStatic(false);
+    this.labels.makeDungeon(view);
+    this.mood.setCrypt(true);
     Object.assign(this.cam, { yaw: 0, curYaw: 0, pitch: 0.95, curPitch: 0.95, dist: isTouch ? 15 : 16 });
     this.#syncRun(d.state, false);
     this.hud.setMode('dungeon');
@@ -1667,52 +1484,16 @@ export class GameClient {
     this.battles.clear();
     this.town.root.visible = true;
     this.folk.root.visible = true;
-    for (const l of this.staticLabels) l.el.style.display = '';
-    this.#lighting(false);
+    this.labels.showStatic(true);
+    this.mood.setCrypt(false);
     Object.assign(this.cam, { pitch: 0.8, dist: isTouch ? 16 : 18 });
     this.hud.setMode('town');
   }
   #disposeRun() {
-    for (const l of this.dungeon.labels) l.el?.remove();
+    this.labels.removeDungeon(this.dungeon);
     this.dungeon.dispose();
     this.dungeon = null;
     this.run = null;
-  }
-  // Crypt light: dark blue-grey fog, a cool moon overhead, a touch more exposure.
-  #lighting(crypt) {
-    const f = this.scene.fog;
-    const sc = this.sun.shadow.camera;
-    if (crypt) {
-      this.townLight ??= { fog: f.color.clone(), near: f.near, far: f.far, hemi: [this.hemi.color.clone(), this.hemi.groundColor.clone(), this.hemi.intensity], sun: [this.sun.color.clone(), this.sun.intensity], exp: this.renderer.toneMappingExposure, clear: this.renderer.getClearColor(new THREE.Color()) };
-      f.color.set('#1b1e27');
-      // (Not scene.background: that would clear the screen on each of the frame's three passes.)
-      this.renderer.setClearColor(f.color);
-      this.hemi.color.set('#a9b8d6');
-      this.hemi.groundColor.set('#6a5546');
-      this.hemi.intensity = 1.35;
-      this.sun.color.set('#c9d6ff');
-      this.sun.intensity = 1.0;
-      this.renderer.toneMappingExposure = 1.25;
-      sc.left = sc.bottom = -22;
-      sc.right = sc.top = 22;
-    } else if (this.townLight) {
-      const T = this.townLight;
-      f.color.copy(T.fog);
-      f.near = T.near;
-      f.far = T.far;
-      this.renderer.setClearColor(T.clear);
-      this.hemi.color.copy(T.hemi[0]);
-      this.hemi.groundColor.copy(T.hemi[1]);
-      this.hemi.intensity = T.hemi[2];
-      this.sun.color.copy(T.sun[0]);
-      this.sun.intensity = T.sun[1];
-      this.renderer.toneMappingExposure = T.exp;
-      sc.left = sc.bottom = -34;
-      sc.right = sc.top = 34;
-      this.mood = undefined; // the Wilds' haze is worked out afresh
-    }
-    sc.updateProjectionMatrix();
-    this.el.classList.toggle('in-dungeon', crypt);
   }
   // Bring the crypt up to date with the server (on arrival and reconnects).
   #syncRun(st, animate = true) {
@@ -1725,15 +1506,8 @@ export class GameClient {
     if (st.vaultOpened) v.openChest('vault');
     if (st.lastLight) v.usedFire('rest');
     if (st.shrine) v.usedFire('shrine');
-    this.#refreshLabels();
+    this.labels.refreshDungeon();
     this.hud.runUpdate();
-  }
-  #refreshLabels() {
-    for (const l of this.dungeon?.labels ?? []) {
-      if (!l.el) continue;
-      l.el.querySelector('.tx').textContent = l.text;
-      l.el.querySelector('.ic').replaceChildren(glyph(l.glyph));
-    }
   }
   // The room you're standing in (corridors count as the room they lead to).
   myRoom() {
@@ -1765,7 +1539,7 @@ export class GameClient {
     if (!this.run) return;
     this.run.state.key = true;
     this.dungeon.setKey(true);
-    this.#refreshLabels();
+    this.labels.refreshDungeon();
     this.hud.showBanner('The Bone Key!', `${m.by.join(' & ')} took it from the elite. The Vault can be opened.`);
     sfx.rare();
     this.hud.runUpdate();
@@ -1800,7 +1574,7 @@ export class GameClient {
     this.run.state.boss = true;
     this.run.done = m.seconds;
     this.dungeon.showBossChest(true);
-    this.#refreshLabels();
+    this.labels.refreshDungeon();
     setTimeout(() => {
       this.hud.showBanner('Victory!', `${this.run?.layout.name ?? 'The crypt'} conquered in ${fmtTime(m.seconds)}${m.best ? ' · a new record!' : ''}`);
       this.hud.confetti(60);
@@ -1878,65 +1652,7 @@ export class GameClient {
     this.sock.rpc('dungeon.leave').catch((e) => this.hud.toast(e.message, 'err'));
   }
 
-  // The best thing to do right now in the crypt (the round button and E/Space).
-  contextAction() {
-    const v = this.dungeon;
-    const L = this.me?.local;
-    if (!v || !L || this.battle) return null;
-    const room = this.myRoom();
-    // A friend fighting in this room: join them.
-    for (const b of this.battles.values()) {
-      const mv = this.mobs.get(b.mob);
-      if (!mv || mv.room !== room || b.fighters.length >= 4 || b.fighters.some((f) => f.id === this.myId)) continue;
-      const who = b.fighters[0]?.name ?? 'your party';
-      return { label: `Join ${who}'s fight`, glyph: 'swords', fn: () => this.goMob(b.mob) };
-    }
-    const st = this.run.state;
-    let best = null;
-    for (const l of v.labels) {
-      if (l.hidden || l.lock || !v.isRevealed(l.room)) continue;
-      const d = Math.hypot(L.x - l.x, L.z - l.z);
-      if (d > 5.5 || (best && d >= best.d)) continue;
-      const a =
-        l.what === 'rest' ? (!st.lastLight ? ['Rest (Last Light)', 'fire'] : null)
-        : l.what === 'shrine' ? (!st.shrine ? ['Pray', 'spark'] : null)
-        : l.what === 'vault' ? (st.key ? ['Open the Vault', 'key'] : null)
-        : l.what === 'boss' ? (st.boss ? ['Open the chest', 'trophy'] : null)
-        : l.what === 'exit' ? ['Leave', 'stairs'] : null;
-      if (a) best = { d, label: a[0], glyph: a[1], fn: () => this.useThing(l.what) };
-    }
-    return best;
-  }
 
-  // The crypt door in town: its panel opens at once; Enter walks you over first.
-  goCrypt(id) {
-    if (this.dungeon) return;
-    const e = ENTRANCES.find((x) => x.id === id) ?? ENTRANCES[0];
-    if (e) this.hud.panels.open('dungeon', { kind: e.kind });
-  }
-  enterCrypt(kind, opts = {}) {
-    const e = ENTRANCES.find((x) => x.kind === kind);
-    if (!e || !this.me) return;
-    if (this.battle) return this.hud.toast("You're in a battle!", 'err');
-    const [fx, fz] = entranceFront(e);
-    const L = this.me.local;
-    const go = () =>
-      this.sock
-        .rpc('dungeon.enter', { kind, ...opts })
-        .then((r) => r?.ready && this.hud.toast('Ready check sent: in you go when everyone answers.', 'good'))
-        .catch((err) => this.hud.toast(err.message, 'err'));
-    if (Math.hypot(L.x - fx, L.z - fz) <= ENTRANCE_RANGE - 2) return go();
-    this.stopGather();
-    this.hud.toast('Walking to the crypt…');
-    if (!this.walkTo(fx, fz, true, go)) this.hud.toast("Can't find the way there.", 'err');
-  }
-  // Show the way to the crypt (the guide beacon).
-  guideToCrypt(kind = 'hollow_crypt') {
-    const e = ENTRANCES.find((x) => x.kind === kind);
-    if (!e || this.dungeon) return;
-    const [fx, fz] = entranceFront(e);
-    this.walkTo(fx, fz, true);
-  }
 
   // ── Main loop ────────────────────────────────────────────────────────
   loop = () => {
@@ -1955,16 +1671,7 @@ export class GameClient {
       return;
     }
     this.update(dt);
-    r.shadowMap.needsUpdate = true;
-    r.clear();
-    // 1) world  2) heroes hidden behind the world, as silhouettes  3) heroes
-    r.render(this.scene, this.camera);
-    this.camera.layers.set(1);
-    this.scene.overrideMaterial = this.silMat;
-    r.render(this.scene, this.camera);
-    this.scene.overrideMaterial = null;
-    r.render(this.scene, this.camera);
-    this.camera.layers.set(0);
+    renderFrame(this);
   };
 
   update(dt) {
@@ -2087,38 +1794,17 @@ export class GameClient {
       this.town.update(dt, this.t, this.camera);
       this.folk.update(dt);
     }
-    this.#fadeOccluders(dt);
+    fadeOccluders(this, dt);
     this.fx.update(dt);
     this.fx.puff.update(dt);
     this.rings.update(dt);
     this.#updateGuide(dt);
-    this.#updateCamera(dt);
-    this.#updateLabels();
+    updateCamera(this, dt);
+    this.mood.update();
+    this.labels.update();
     this.hud.frame(dt);
   }
 
-  // Fade buildings that sit between the camera and your hero.
-  #fadeOccluders(dt) {
-    if (!this.me) return;
-    const head = this.battle ? new THREE.Vector3(this.cam.target.x, 1.4, this.cam.target.z) : new THREE.Vector3(this.me.local.x, 1.4, this.me.local.z);
-    const dir = head.clone().sub(this.camera.position);
-    const len = dir.length();
-    const ray = new THREE.Ray(this.camera.position, dir.normalize());
-    const hit = new THREE.Vector3();
-    for (const f of this.dungeon?.fades ?? this.town.fades) {
-      const blocks = ray.intersectBox(f.box, hit) && hit.distanceTo(this.camera.position) < len - 0.5 && !f.box.containsPoint(head);
-      const target = blocks ? 0.28 : 1;
-      if (Math.abs(f.op - target) < 0.01) continue;
-      f.op += (target - f.op) * Math.min(1, dt * 8);
-      if (Math.abs(f.op - target) < 0.01) f.op = target;
-      for (const m of f.mats) {
-        m.transparent = f.op < 1;
-        m.opacity = f.op;
-        m.depthWrite = f.op >= 1;
-      }
-      for (const o of f.outlines) o.visible = f.op > 0.9;
-    }
-  }
 
   #faceMob(me) {
     const mv = this.mobs.get(this.battle.mob);
@@ -2150,108 +1836,7 @@ export class GameClient {
     this.walkTo(L.x + (dx / d) * 2.2, L.z + (dz / d) * 2.2);
   }
 
-  #updateCamera(dt) {
-    const me = this.me;
-    if (!me) return;
-    const c = this.cam;
-    let tx = me.local.x;
-    let tz = me.local.z;
-    let dist = c.dist;
-    let pitch = c.pitch;
-    let yaw = c.yaw;
-    if (this.battle) {
-      const mv = this.mobs.get(this.battle.mob);
-      if (mv) {
-        tx = (me.local.x + mv.x) / 2;
-        tz = (me.local.z + mv.z) / 2;
-        if (this.dungeon) {
-          // Underground: keep the quarter turn (the cut-away walls depend on it).
-          dist = defOf(mv).boss ? 15 : 12;
-          pitch = 0.8;
-        } else {
-          // Side-on view of the fight.
-          yaw = Math.atan2(mv.x - me.local.x, mv.z - me.local.z) + Math.PI / 2 + 0.35;
-          dist = defOf(mv).boss ? 15 : 11.5;
-          pitch = 0.55;
-        }
-      }
-    }
-    if (this.dungeon && !this.battle) dist = Math.max(10, Math.min(20, dist));
-    c.target.x += (tx - c.target.x) * Math.min(1, dt * 7);
-    c.target.z += (tz - c.target.z) * Math.min(1, dt * 7);
-    c.curYaw = c.curYaw === undefined ? yaw : lerpAngle(c.curYaw, yaw, Math.min(1, dt * 4));
-    c.curDist = c.curDist === undefined ? dist : c.curDist + (dist - c.curDist) * Math.min(1, dt * 4);
-    c.curPitch = c.curPitch === undefined ? pitch : c.curPitch + (pitch - c.curPitch) * Math.min(1, dt * 4);
-    const cam = this.camera;
-    const hor = Math.cos(c.curPitch) * c.curDist;
-    cam.position.set(c.target.x + Math.sin(c.curYaw) * hor, Math.sin(c.curPitch) * c.curDist + 1, c.target.z + Math.cos(c.curYaw) * hor);
-    if (this.shakeAmt > 0) {
-      this.shakeAmt = Math.max(0, this.shakeAmt - dt * 1.8);
-      cam.position.x += (Math.random() - 0.5) * this.shakeAmt;
-      cam.position.y += (Math.random() - 0.5) * this.shakeAmt;
-    }
-    cam.lookAt(c.target.x, 1.4, c.target.z);
-    if (this.dungeon) {
-      // Moonlight from almost straight above (short shadows), fog just past the hero.
-      this.sun.position.set(c.target.x + 6, 40, c.target.z + 12);
-      this.sun.target.position.set(c.target.x, 0, c.target.z);
-      this.scene.fog.near = c.curDist + 8;
-      this.scene.fog.far = c.curDist + 34;
-      return;
-    }
-    // Keep the shadow camera centred on the player.
-    this.sun.position.set(c.target.x + 40, 34, c.target.z + 10);
-    this.sun.target.position.set(c.target.x, 0, c.target.z);
-    // Mood: the Wilds are hazier, greener-grey and a touch dimmer than town.
-    let w = 0;
-    for (const zn of zonesOfKind('wilds')) w = Math.max(w, 1 - THREE.MathUtils.smoothstep(Math.hypot(c.target.x - zn.x, c.target.z - zn.z), zn.r * 0.2, zn.r));
-    if (w !== this.mood) {
-      this.mood = w;
-      const f = this.scene.fog;
-      f.color.lerpColors(MOOD.fog, MOOD.fogWild, w);
-      f.near = 20 - 6 * w;
-      f.far = 100 - 30 * w;
-      this.hemi.intensity = 1.3 - 0.25 * w;
-      this.sun.color.lerpColors(MOOD.sun, MOOD.sunWild, w);
-    }
-  }
 
-  #updateLabels() {
-    const cam = this.camera.position;
-    const tmp = {};
-    const v = new THREE.Vector3();
-    for (const pv of this.players.values()) {
-      v.copy(pv.av.root.position).setY(3.0);
-      this.project(v, tmp);
-      const far = v.distanceTo(cam) > 70;
-      pv.tag.style.display = tmp.vis && !far && !pv.hidden ? '' : 'none';
-      if (tmp.vis) pv.tag.style.transform = `translate3d(${tmp.x}px, ${tmp.y}px, 0) translate(-50%, -100%)`;
-    }
-    for (const mv of this.mobs.values()) {
-      v.copy(mv.mob.root.position).setY(mv.mob.height || 1.6);
-      this.project(v, tmp);
-      const show = tmp.vis && mv.mob.root.visible && (mv.state === 'battle' || Math.hypot(mv.x - this.me.local.x, mv.z - this.me.local.z) < (this.dungeon ? 18 : 13));
-      mv.tag.style.display = show ? '' : 'none';
-      if (show) mv.tag.style.transform = `translate3d(${tmp.x}px, ${tmp.y}px, 0) translate(-50%, -100%)`;
-    }
-    if (this.dungeon) {
-      for (const l of this.dungeon.labels) {
-        if (!l.el) continue;
-        this.project(l.pos, tmp);
-        const show = tmp.vis && !l.hidden && !this.battle && this.dungeon.isRevealed(l.room) && l.pos.distanceTo(cam) < 60;
-        l.el.style.display = show ? '' : 'none';
-        if (show) l.el.style.transform = `translate3d(${tmp.x}px, ${tmp.y}px, 0) translate(-50%, -100%)`;
-      }
-      return;
-    }
-    for (const l of this.staticLabels) {
-      this.project(l.pos, tmp);
-      const d = l.pos.distanceTo(cam);
-      const show = tmp.vis && d < (l.kind === 'zone' ? 75 : 95) && !this.battle;
-      l.el.style.display = show ? '' : 'none';
-      if (show) l.el.style.transform = `translate3d(${tmp.x}px, ${tmp.y}px, 0) translate(-50%, ${l.kind === 'zone' ? '-50%' : '-100%'})`;
-    }
-  }
 
   // Helpers used by the HUD
   myPos() {

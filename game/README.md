@@ -113,20 +113,32 @@ docker build -t hearthvale . && docker run -p 8787:8787 -v hearthvale-data:/data
 ```
 maps/     world.json  the world map: everything placed in the world (see below)
 shared/   rules & data used by BOTH server and client (items, recipes, skills,
-          monsters, avatar options, world rules + the map loader, A* navigation)
-server/   game.js   channels, 20Hz tick, movement, gathering, fishing, battles, chat
-          channel.js a channel (one live copy of town) + the turn-based Battle
+          monsters, avatar options, the world map loader)
+          nodes.js  gathering node types      nav.js  colliders, walkability, A* navigation
+          places.js which region / town / biome a point is in
+          content/  content packs (a town's items, nodes, monsters, recipes…) merged into the tables
+server/   game.js   the hub: connections, the 20 Hz tick, channels, shops, dungeons, chat
+          rpc.js    the RPC table (each module registers its own)
+          events.js the event bus (gather, craft, kill, …): tutorial.js listens to it
+          gather.js gathering + fishing   move.js walking   travel.js waystones
+          trade.js  market, merchant, bulletin board RPCs   gear.js equip, potions, profiles
+          channel.js a channel (one live copy of town)      battle.js turn-based battles
           dungeons.js dungeon runs (a run is a private channel)   party.js parties
           market.js order book + matching + escrow     jobs.js bulletin board
           shop.js   player shops: displays, till, NPC customer simulation
           rooms.js  shop interiors (who's inside, movement)
           heroes.js inventory/gold/xp persistence      auth.js  invites + sessions
+          db.js     the database (migrations 1–6); migrations/ holds 007 on
           map.js    loads the world map, serves it at /api/map, saves edits
           app.js    HTTP API + WebSocket upgrade        index.js entry point
-client/   src/game.js       renderer, camera, input, prediction, interpolation
+client/   src/game.js       the game client: entities, input, prediction, interpolation
+          src/scene/        render.js (frame passes, camera), mood.js (fog and light),
+                            town, dungeon, avatar, tools, monsters, particles (three.js, toon-shaded),
+                            manifest/ (the model slots, in groups)
+          src/world/        services.js: walking to buildings, stations, waystones, the crypt
           src/editor/       the world editor (owners only): editor.js, kinds.js
-          src/scene/        town, dungeon, avatar, tools, monsters, particles (three.js, toon-shaded)
-          src/ui/           HUD, menus (bag, workshop, market, shop, town hall), world map, creator
+          src/ui/           HUD (hud.js + goalcard, dock, banners, context, labels), panels
+                            (bag, workshop, market, board, shop, town hall), world map, creator
 scripts/  bots.js (populate the lobby), dev.js, invite.js, admin.js (server owners),
           dungeon-balance.js (simulates dungeon runs with the real numbers)
 ```
@@ -135,7 +147,7 @@ scripts/  bots.js (populate the lobby), dev.js, invite.js, admin.js (server owne
 
 Everything placed in the world lives in **`maps/world.json`**: the land itself (`lands`: circles that overlap into any coastline, so you can grow the island, join islands with land bridges, or start a new island far out at sea), buildings, the gate, plazas, fountains, lakes and docks, zones, dirt paths, gatherable nodes, monster camps (`spawns`), and every prop, tree and flower. The server loads it on start and sends it to each player's browser (`/api/map`), so both sides always build the same world. Small scatter (grass tufts, stepping stones, reeds, lily pads) is generated from it automatically.
 
-- **Format:** one entity per line, each with a unique `id`. The fields are documented at the top of `shared/world.js`. A prop's `slot` is a model from `client/src/scene/manifest.js` or a code-drawn kind from `client/src/scene/procprops.js` (`proc_…`).
+- **Format:** one entity per line, each with a unique `id`. The fields are documented at the top of `shared/world.js`. A prop's `slot` is a model from `client/src/scene/manifest/core.js` or a code-drawn kind from `client/src/scene/procprops.js` (`proc_…`).
 - **Regions and tiers:** `regions` lists the towns and areas with a difficulty `tier` (Hearthvale is tier 1, the starter town). Their names appear on the world map and across the screen as you walk in.
 - **Dungeon entrances:** `entrances` lists the crypt doors (`kind`, position, and `rot`, the way the door faces). The dungeons themselves aren't in the map: the server builds a new one for every run (`shared/dungeon.js`).
 - **Waystones:** `stones` lists the fast-travel stones (`name`, position, and `rot`, the way it faces: travellers arrive in front of it). Maps made before waystones existed get Hearthvale's two automatically.

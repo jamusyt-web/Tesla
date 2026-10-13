@@ -68,20 +68,20 @@ export class Market {
         }
         if (remaining && ioc) H.addItem(accountId, item, remaining);
       } else {
-        H.addGold(accountId, -price * qty); // escrow gold at the limit price
+        H.addGold(accountId, -price * qty, 'marketEscrow'); // escrow gold at the limit price
         for (;;) {
           if (!remaining) break;
           const o = this.q.bestSell.get(item, price, accountId);
           if (!o) break;
           const n = Math.min(remaining, o.qty - o.filled);
           this.#execute(item, o.price, n, accountId, o.account_id);
-          if (price > o.price) H.addGold(accountId, (price - o.price) * n); // refund price improvement
+          if (price > o.price) H.addGold(accountId, (price - o.price) * n, 'marketRefund'); // refund price improvement
           this.q.fill.run(n, n, o.id);
           notify.add(o.account_id);
           fills.push({ price: o.price, qty: n });
           remaining -= n;
         }
-        if (remaining && ioc) H.addGold(accountId, price * remaining);
+        if (remaining && ioc) H.addGold(accountId, price * remaining, 'marketRefund');
       }
       let order = null;
       if (remaining && !ioc) {
@@ -98,7 +98,7 @@ export class Market {
   #execute(item, price, qty, buyer, seller) {
     const gross = price * qty;
     const tax = Math.floor(gross * MARKET_TAX);
-    this.heroes.addGold(seller, gross - tax);
+    this.heroes.addGold(seller, gross - tax, 'marketSale');
     this.heroes.addItem(buyer, item, qty);
     this.q.trade.run(item, price, qty, buyer, seller, Date.now());
   }
@@ -110,7 +110,7 @@ export class Market {
       if (o.status !== 'open') fail('That order is already closed.');
       const left = o.qty - o.filled;
       if (o.side === 'sell') this.heroes.addItem(accountId, o.item, left);
-      else this.heroes.addGold(accountId, o.price * left);
+      else this.heroes.addGold(accountId, o.price * left, 'marketRefund');
       this.q.cancel.run(o.id);
       return o;
     });

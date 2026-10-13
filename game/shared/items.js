@@ -1,5 +1,6 @@
 // Item catalog shared by server (rules) and client (display).
 // value = base NPC value in gold. Market prices float freely around it.
+import { CONTENT, mergeInto } from './content/index.js';
 
 export const RARITY = {
   common: { label: 'Common', color: '#8a8f98' },
@@ -94,6 +95,7 @@ export const ITEMS = {
   barrow_plate: { name: 'Barrow Plate', icon: '🛡️', cat: 'gear', slot: 'armor', def: 8, hp: 35, value: 400, rarity: 'rare' },
   ghostlight_amulet: { name: 'Ghostlight Amulet', icon: '🧿', cat: 'gear', slot: 'trinket', atk: 2, def: 2, hp: 20, value: 320, rarity: 'rare', perk: 'mender' },
 };
+mergeInto(ITEMS, CONTENT.items, 'items');
 
 // ── Crafted quality: Fine and Masterwork versions of tools and gear ──
 // (made at the Anvil/Workbench/Grindstone by crafting well; see shared/crafting.js).

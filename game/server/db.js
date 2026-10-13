@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { applyMigrations } from './migrations/index.js';
 
 const DATA_DIR = process.env.DATA_DIR || path.resolve('data');
 
@@ -15,6 +16,7 @@ export function openDb(file = process.env.DB_FILE || path.join(DATA_DIR, 'hearth
   `);
   db.exec(SCHEMA_V0);
   migrate(db);
+  applyMigrations(db); // server/migrations/NNN_*.js, from 007 on
   return db;
 }
 
@@ -103,7 +105,8 @@ export const SCHEMA_V0 = `
 `;
 
 // Each migration runs once, in order, inside a transaction; PRAGMA
-// user_version records how far a database has got.
+// user_version records how far a database has got. These six are frozen:
+// new changes are files in server/migrations/ (see its index.js).
 const MIGRATIONS = [
   // 1: walk-in shops with passive selling (till, open/closed, NPC demand pools, fees).
   (db, now) => {

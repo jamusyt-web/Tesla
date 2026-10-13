@@ -5,6 +5,8 @@ import { levelFromXp } from '../shared/skills.js';
 import { buildSpec, replayCraft, finalizeCraft, scoreOf, isFlawless, outcomeOf, batchCap, isStackable, CRAFT_TICK, CRAFT_MAX_TICKS, STATIONS } from '../shared/crafting.js';
 import { spotsOf, inYard } from '../shared/stations.js';
 import { tx, fail } from './db.js';
+import { emit } from './events.js';
+import { register } from './rpc.js';
 
 const SESSION_MS = 150_000; // a craft not finished by then settles as-is
 const CANCEL_MS = 1500; // you can back out only right at the start
@@ -218,7 +220,7 @@ export class Crafting {
     if (!quiet && c.ch) c.ch.broadcast({ t: 'crafted', by: c.hero.id, station, item: out.item, qty: out.qty, grade: out.grade, mw: out.mw });
     if (out.mw) this.game.announce(`🔨 ${c.hero.name} forged a ${ITEMS[out.item].name}!`);
     if (!quiet) c.pushInventory();
-    if (r.out === 'oak_plank') c.advanceTutorial('craft');
+    emit(c, 'craft', { recipe: r.id, out: r.out, item: out.item, qty: out.qty, grade: out.grade, via });
     return result;
   }
 
@@ -244,12 +246,19 @@ export class Crafting {
     const fee = Math.ceil(QUICK_FEE * r.qty * times * ITEMS[r.out].value);
     tx(this.db, () => {
       for (const [id, n] of Object.entries(r.in)) H.takeItem(c.hero.id, id, n * times);
-      H.addGold(c.hero.id, -fee);
+      H.addGold(c.hero.id, -fee, 'craftFee');
       H.addItem(c.hero.id, r.out, r.qty * times);
     });
     const xp = H.addXp(c.hero, 'crafting', Math.round(r.xp * times * 0.5));
     c.pushInventory();
-    if (r.out === 'oak_plank') c.advanceTutorial('craft');
+    emit(c, 'craft', { recipe: r.id, out: r.out, item: r.out, qty: r.qty * times, grade: null, via: 'quick' });
     return { item: r.out, qty: r.qty * times, fee, xp };
   }
 }
+
+register('craft', () => fail('Crafting is hands-on now — pick a recipe and head to its station!'));
+register('craft.info', (g, c) => g.crafting.info(c), { inRun: true });
+register('craft.start', (g, c, a) => g.crafting.start(c, a));
+register('craft.finish', (g, c, a) => g.crafting.finish(c, a));
+register('craft.cancel', (g, c, a) => g.crafting.cancel(c, a));
+register('craft.quick', (g, c, a) => g.crafting.quick(c, a));

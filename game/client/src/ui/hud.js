@@ -4,12 +4,16 @@ import { sfx } from '../util/sfx.js';
 import { portrait } from './portrait.js';
 import { ITEMS } from '../../../shared/items.js';
 import { SKILLS, levelProgress } from '../../../shared/skills.js';
-import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, LANDS, EXTENT, SPAWNS, STONES, ENTRANCES, pathSegments, doorPoint, placeAt, GATE, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
+import { BUILDINGS, ZONES, LAKES, DOCKS, PLAZAS, LANDS, EXTENT, STONES, ENTRANCES, pathSegments, doorPoint, NODE_TYPES, isPerfectSwing } from '../../../shared/world.js';
 import { DUNGEONS, TIERS } from '../../../shared/dungeon.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import { Panels } from './panels.js';
-import { WorldMap, tierLabel } from './worldmap.js';
+import { WorldMap } from './worldmap.js';
 import { glyph, coin } from './glyphs.js';
+import { GoalCard } from './goalcard.js';
+import { Dock } from './dock.js';
+import { Banners } from './banners.js';
+import { ContextButton } from './context.js';
 import { newFight, stepFight, FISH_TICK } from '../../../shared/fishing.js';
 
 const RATING = { easy: ['Easy', '#437a36'], fair: ['Fair', '#8a6a2a'], tough: ['Tough', '#a8551e'], brutal: ['Brutal', '#a63a2e'] };
@@ -17,13 +21,6 @@ const sizeHint = (d) => (d < 20 ? 'A light tug' : d < 45 ? 'A steady pull' : d <
 
 const isTouchDevice = () => matchMedia('(pointer: coarse)').matches;
 const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-
-const TUTORIAL_TEXT = [
-  { text: 'Fell an oak in Whisperwood', hint: 'Tap a tree, then strike as the ring closes.', target: 'tree' },
-  { text: 'Saw oak planks at the Workshop', hint: 'Tap Craft, choose Oak Plank at the workbench, then saw in time.', target: 'workshop' },
-  { text: `Slay a ${MONSTERS.slime.name}`, hint: 'Beyond the Wilds Gate, to the north.', target: 'slime' },
-  { text: 'Stock a display in your shop', hint: 'Tap Shop, then tap an empty display and set a price.', target: 'shop' },
-];
 
 export class Hud {
   constructor(root, sock) {
@@ -41,6 +38,14 @@ export class Hud {
 
   attach(game) {
     this.game = game;
+  }
+
+  // Put a feature's element in a HUD slot ('root', 'top' or 'left'); returns it.
+  mount(slot, el) {
+    const host = this.slots[slot];
+    if (!host) throw new Error(`No HUD slot "${slot}".`);
+    host.append(el);
+    return el;
   }
 
   #build() {
@@ -68,49 +73,24 @@ export class Hud {
     const mapBtn = h('button.pill', { 'aria-label': 'World map', title: 'World map (M)', style: { padding: '8px 10px', color: 'var(--gold)' }, on: { click: () => (sfx.tap(), this.toggleMap()) } }, glyph('map', '20px'));
     const col = (...k) => h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } }, ...k);
     this.onlinePill = online;
-    this.el.append(h('div.topbar', chip, col(gold, online, this.runChip), h('div.spacer'), col(this.muteBtn, mapBtn), minimap));
-    this.banner = h('div.region-banner.hidden');
-    this.el.append(this.banner);
+    const topbar = h('div.topbar', chip, col(gold, online, this.runChip), h('div.spacer'), col(this.muteBtn, mapBtn), minimap);
+    this.el.append(topbar);
+    const leftcol = h('div.leftcol');
+    // Where feature modules put their UI (see mount).
+    this.slots = { root: this.el, top: topbar, left: leftcol };
+    this.banners = new Banners(this);
+    this.mount('root', this.banners.el);
 
-    this.questEl = h('div.quest.hidden');
-    this.partyFrame = h('div.partyframe.hidden');
-    this.arrowIcon = h('div.ga-icon', h('i'));
-    this.arrowLabel = h('div.ga-label');
-    this.arrow = h('div.guide-arrow.hidden', this.arrowIcon, this.arrowLabel);
-    this.el.append(h('div.leftcol', this.questEl, this.partyFrame), this.arrow);
+    this.goal = new GoalCard(this);
+    this.mount('left', this.goal.el);
+    this.partyFrame = this.mount('left', h('div.partyframe.hidden'));
+    this.mount('root', leftcol);
+    this.mount('root', this.goal.arrow);
 
-    const dockBtn = (ic, label, fn, badge) => h('button', { 'aria-label': label, on: { click: () => (sfx.tap(), fn()) } }, glyph(ic), h('span', label), badge);
-    this.shopBadge = h('i.badge.hidden', '0');
-    this.dock = h(
-      'div.dock',
-      dockBtn('bag', 'Bag', () => this.panels.open('bag')),
-      // These open straight away; the panel has a "Walk there" button too.
-      dockBtn('anvil', 'Craft', () => this.openPlace('workshop')),
-      dockBtn('scales', 'Market', () => this.openPlace('market')),
-      dockBtn('shop', 'Shop', () => this.game?.enterShop(this.myId), this.shopBadge),
-      dockBtn('castle', 'Town', () => this.openPlace('townhall')),
-    );
-    // Inside a shop the dock changes: leave, bag, the ledger (yours), other shops.
-    this.ledgerBtn = dockBtn('scroll', 'Ledger', () => this.panels.open('ledger'));
-    this.roomDock = h(
-      'div.dock.hidden',
-      dockBtn('door', 'Leave', () => this.game?.exitShop()),
-      dockBtn('bag', 'Bag', () => this.panels.open('bag')),
-      this.ledgerBtn,
-      dockBtn('village', 'Shops', () => this.panels.open('shops')),
-    );
-    // In a dungeon: the way out, your bag, the crypt's map, your party.
-    this.dungeonDock = h(
-      'div.dock.hidden',
-      (this.leaveBtn = dockBtn('door', 'Leave', () => this.panels.open('dleave'))),
-      dockBtn('bag', 'Bag', () => this.panels.open('bag')),
-      dockBtn('map', 'Map', () => this.panels.open('dmap')),
-      dockBtn('people', 'Party', () => this.panels.open('party')),
-    );
-    this.el.append(this.dock, this.roomDock, this.dungeonDock);
-    // The round button above the dock: the best thing to do right here.
-    this.ctxBtn = h('button.ctxbtn.hidden', { on: { click: () => (sfx.tap(), this.ctx?.fn()) } });
-    this.el.append(this.ctxBtn);
+    this.dock = new Dock(this);
+    for (const el of this.dock.els) this.mount('root', el);
+    this.context = new ContextButton(this);
+    this.mount('root', this.context.el);
     this.prompts = h('div.prompts');
     this.el.append(this.prompts);
     this.lowHp = h('div.lowhp.hidden');
@@ -147,7 +127,7 @@ export class Hud {
       this.me.tutorial = m.step;
       this.toast(`Quest complete! +${m.reward} 🪙`, 'gold');
       sfx.coin();
-      this.#renderQuest();
+      this.goal.render();
     });
     s.on('shopSale', (m) => this.#onShopSale(m));
     s.on('awaySales', (m) => {
@@ -188,7 +168,7 @@ export class Hud {
     this.setMe(y);
     this.setTill(y.shop?.till || 0);
     this.#renderFace();
-    this.#renderQuest();
+    this.goal.render();
     if (!this.mapBase) this.#drawMapBase(); // the island never changes while you play
     if (m.dungeon) this.chatLine({ sys: true, text: `${m.dungeon.layout.name} · ${TIERS[m.dungeon.layout.tier]?.name ?? ''}${m.players.length ? ` · with ${m.players.map((p) => p.name).join(', ')}` : ''}` });
     else this.chatLine({ sys: true, text: `Welcome to Hearthvale — Channel ${m.channel}. ${m.players.length ? `${m.players.length} other ${m.players.length === 1 ? 'hero is' : 'heroes are'} here!` : 'Invite friends from the Town Hall!'}` });
@@ -278,8 +258,7 @@ export class Hud {
   }
   setTill(v) {
     this.till = v || 0;
-    this.shopBadge.textContent = this.till >= 1000 ? `${(this.till / 1000).toFixed(this.till >= 10000 ? 0 : 1)}k` : String(this.till);
-    this.shopBadge.classList.toggle('hidden', !this.till);
+    this.dock.setTill(this.till);
   }
   // Town, inside a shop, or down a dungeon: swap the dock, hide what doesn't apply.
   setMode(mode, { isOwner = false } = {}) {
@@ -287,23 +266,19 @@ export class Hud {
     const room = mode === 'room';
     const dun = mode === 'dungeon';
     this.#showDock();
-    this.ledgerBtn.style.display = isOwner ? '' : 'none';
+    this.dock.setOwner(isOwner);
     this.el.classList.toggle('in-room', room);
     this.el.classList.toggle('in-dungeon', dun);
     this.onlinePill.classList.toggle('hidden', dun);
     this.runChip.classList.toggle('hidden', !dun);
     if (!dun) {
-      this.ctxBtn.classList.add('hidden');
+      this.context.hide();
       this.lowHp.classList.add('hidden');
     }
     this.runUpdate();
   }
   #showDock() {
-    const m = this.mode ?? 'town';
-    const fighting = !!this.battleTop;
-    this.dock.classList.toggle('hidden', fighting || m !== 'town');
-    this.roomDock.classList.toggle('hidden', fighting || m !== 'room');
-    this.dungeonDock.classList.toggle('hidden', fighting || m !== 'dungeon');
+    this.dock.show(this.mode ?? 'town', !!this.battleTop);
   }
   toggleMap() {
     if (this.game?.dungeon) return this.panels.cur?.name === 'dmap' ? this.panels.close() : this.panels.open('dmap');
@@ -327,17 +302,6 @@ export class Hud {
     const secs = run.done ?? Math.max(0, (this.sock.serverNow() - run.state.startedAt) / 1000);
     this.runTime.textContent = fmtTime(secs);
     this.runChip.classList.toggle('done', run.done != null);
-  }
-  // The round button: join a friend's fight, rest, pray, open a chest, leave.
-  #updateContext() {
-    const ctx = this.game?.dungeon && !this.game.battle ? this.game.contextAction() : null;
-    this.ctx = ctx;
-    this.ctxBtn.classList.toggle('hidden', !ctx);
-    if (!ctx) return;
-    const key = ctx.label + ctx.glyph;
-    if (this.ctxBtn.dataset.k === key) return;
-    this.ctxBtn.dataset.k = key;
-    this.ctxBtn.replaceChildren(glyph(ctx.glyph), h('span', ctx.label));
   }
 
   // ── Party ──────────────────────────────────────────────────────────
@@ -462,64 +426,8 @@ export class Hud {
     this.panels.open('profile', { id });
   }
 
-  // ── Quest / guide ──────────────────────────────────────────────────
-  #renderQuest() {
-    const step = this.me.tutorial ?? 0;
-    const q = TUTORIAL_TEXT[step];
-    if (!q) {
-      this.questEl.classList.add('hidden');
-      this.arrow.classList.add('hidden');
-      return;
-    }
-    clear(this.questEl).append(
-      h('b', `Quest ${step + 1}/${TUTORIAL_TEXT.length}`),
-      h('div', { style: { fontWeight: 600 } }, q.text),
-      h('div.muted', q.hint),
-      h('button.btn.small.green', { style: { marginTop: '6px' }, on: { click: () => this.#questTarget()?.go() } }, glyph('compass'), 'Take me there'),
-      h('br'),
-      h('button.skip', { on: { click: () => (this.sock.rpc('tutorialSkip'), (this.me.tutorial = 99), this.#renderQuest()) } }, 'skip tutorial'),
-    );
-    this.questEl.classList.remove('hidden');
-  }
+  // ── Every frame ────────────────────────────────────────────────────
 
-  // Where the current quest wants you to go. Targets are *locked* (one tree,
-  // one slime) until done, so the guide never flips between candidates.
-  #questTarget() {
-    const step = this.me.tutorial ?? 0;
-    const q = TUTORIAL_TEXT[step];
-    const g = this.game;
-    if (!q || !g) return null;
-    const p = g.myPos();
-    if (q.target === 'tree') {
-      const lock = this.questLock?.kind === 'tree' ? g.town.nodes.get(this.questLock.id) : null;
-      if (!lock || !lock.alive) {
-        const n = g.nearestNode('tree_oak');
-        this.questLock = n ? { kind: 'tree', id: n.id } : null;
-      }
-      if (!this.questLock) return null;
-      const n = g.nodePos(this.questLock.id);
-      return { x: n.x, z: n.z, y: 5.4, label: 'Oak tree', go: () => g.goNode(n.id) };
-    }
-    if (q.target === 'slime') {
-      if (p.z > GATE.z - 1) return { x: GATE.x, z: GATE.z, y: 8.5, label: 'Wilds Gate', go: () => g.walkTo(GATE.x, GATE.z - 6, true) };
-      let mv = this.questLock?.kind === 'slime' ? g.mobs.get(this.questLock.id) : null;
-      if (!mv || mv.state === 'dead') {
-        mv = null;
-        for (const m of g.mobs.values()) if (m.type === 'slime' && m.state !== 'dead' && (!mv || Math.hypot(m.x - p.x, m.z - p.z) < Math.hypot(mv.x - p.x, mv.z - p.z))) mv = m;
-        this.questLock = mv ? { kind: 'slime', id: mv.id } : null;
-      }
-      if (!mv) {
-        // None in sight: head for the nearest slime camp on the map.
-        const camp = SPAWNS.filter((sp) => sp.monster === 'slime').sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0];
-        return camp ? { x: camp.x, z: camp.z, y: 2.6, label: MONSTERS.slime.name, go: () => g.walkTo(camp.x, camp.z, true) } : null;
-      }
-      const id = mv.id;
-      return { x: mv.x, z: mv.z, y: 2.6, label: MONSTERS.slime.name, go: () => g.goMob(id) };
-    }
-    const b = BUILDINGS.find((x) => x.id === q.target);
-    const [dx, dz] = doorPoint(b);
-    return { x: dx, z: dz, y: 3.2, label: b.label, go: () => this.travel(b.id) };
-  }
 
   frame(dt) {
     this.t = (this.t || 0) + dt;
@@ -527,45 +435,15 @@ export class Hud {
     if (this.mapT > 0.15) {
       this.mapT = 0;
       this.#drawMap();
-      this.#updatePlace();
+      this.banners.update();
       if (this.game?.dungeon) {
         this.#tickRun();
-        this.#updateContext();
+        this.context.update();
         this.lowHp.classList.toggle('hidden', !(this.me.hp > 0 && this.me.hp < this.me.maxHp * 0.3));
       }
     }
-    // Quest guide: in-world beacon + path trail, and an edge arrow when off-screen.
-    const tg = this.game && !this.game.battle && !this.game.fishing && !this.game.dungeon ? this.#questTarget() : null;
-    this.game?.setGuide(tg);
-    if (tg) {
-      const p = this.game.myPos();
-      const dist = Math.hypot(tg.x - p.x, tg.z - p.z);
-      const s = this.game.project(new THREE.Vector3(tg.x, tg.y, tg.z));
-      const m = 50;
-      const onScreen = s.vis && s.x > m && s.x < innerWidth - m && s.y > 110 && s.y < innerHeight - 130;
-      const hideNear = dist < 3.5 || !!this.game.gather;
-      this.arrow.classList.toggle('hidden', hideNear);
-      this.arrowLabel.textContent = `${tg.label} · ${Math.round(dist)}m`;
-      if (onScreen) {
-        this.arrow.classList.add('over');
-        this.arrow.style.transform = `translate(${s.x}px, ${s.y - 40 + Math.sin(this.t * 6) * 7}px)`;
-      } else {
-        // Direction relative to where the camera is looking (works even when
-        // the target is behind you). The arrow orbits your hero, so it never
-        // covers menus and always reads as "go this way".
-        this.arrow.classList.remove('over');
-        const yaw = this.game.cam.curYaw ?? this.game.cam.yaw;
-        const dx = tg.x - p.x;
-        const dz = tg.z - p.z;
-        const right = dx * Math.cos(yaw) - dz * Math.sin(yaw);
-        const fwd = -dx * Math.sin(yaw) - dz * Math.cos(yaw);
-        const ang = Math.atan2(-fwd, right);
-        const me = this.game.project(new THREE.Vector3(p.x, 1.1, p.z));
-        const r = Math.min(115, Math.min(innerWidth, innerHeight) * 0.22);
-        this.arrow.style.transform = `translate(${me.x + Math.cos(ang) * r}px, ${me.y + Math.sin(ang) * r}px)`;
-        this.arrowIcon.style.transform = `rotate(${ang}rad)`;
-      }
-    } else this.arrow.classList.add('hidden');
+    // Goal guide: in-world beacon + path trail, and an edge arrow when off-screen.
+    this.goal.frame(dt);
     // Rhythm ring follows the node on screen.
     if (this.rhythmState && this.game) {
       const g = this.rhythmState;
@@ -889,37 +767,8 @@ export class Hud {
   }
 
   // ── Region banner ──────────────────────────────────────────────────
-  // A title across the screen as you walk into a new region, and a smaller
-  // one for named zones inside it. A few metres of slack at the edges stop
-  // it flickering when you stand on a border.
-  #updatePlace() {
-    const g = this.game;
-    if (!g?.me || g.room || g.dungeon) return;
-    const p = g.myPos();
-    const raw = placeAt(p.x, p.z);
-    // Slack only when leaving for somewhere bigger (or nowhere): a smaller area inside is announced at once.
-    const keep = (old, now) => (old && old !== now && (!now || now.r >= old.r) && Math.hypot(p.x - old.x, p.z - old.z) < old.r + 3 ? old : now);
-    const prev = this.place;
-    const zone = keep(prev?.zone, raw.zone);
-    const region = keep(prev?.region, raw.region);
-    this.place = { zone, region };
-    if (g.battle) return;
-    if (region && region !== prev?.region) {
-      const kind = { town: 'Town', wild: 'Wild lands', outlaw: 'Outlaw zone · full-loot PvP' }[region.kind];
-      this.showBanner(region.name, [tierLabel(region.tier), kind].filter(Boolean).join(' · '));
-    } else if (zone && zone !== prev?.zone) {
-      const what = { forest: 'Woodcutting', quarry: 'Mining', garden: 'Herb gathering', lake: 'Fishing', wilds: 'Monsters roam here' }[zone.kind ?? zone.id];
-      this.showBanner(zone.label, what || region?.name || '', true);
-    }
-  }
   showBanner(title, sub, small = false) {
-    const b = this.banner;
-    b.className = 'region-banner' + (small ? ' small' : '');
-    b.replaceChildren(h('div.rb-rule'), h('div.rb-title', title), sub ? h('div.rb-sub', sub) : null, h('div.rb-rule'));
-    void b.offsetWidth; // restart the animation
-    b.classList.add('show');
-    clearTimeout(this.bannerT);
-    this.bannerT = setTimeout(() => b.classList.add('hidden'), 3600);
+    this.banners.show(title, sub, small);
   }
 
   // ── Battle UI ──────────────────────────────────────────────────────
@@ -929,8 +778,8 @@ export class Hud {
     if (this.panels.cur?.name !== 'result') this.panels.close();
     this.el.classList.add('fighting');
     this.chat.classList.add('hidden');
-    this.questEl.style.visibility = 'hidden';
-    this.ctxBtn.classList.add('hidden');
+    this.goal.hide(true);
+    this.context.hide();
     this.mobName = h('div.nm');
     this.mobHp = h('i');
     this.timerFill = h('i');
@@ -1057,7 +906,7 @@ export class Hud {
     this.el.classList.remove('fighting');
     this.#showDock();
     this.chat.classList.remove('hidden');
-    this.questEl.style.visibility = '';
+    this.goal.hide(false);
     if (r.quiet) return;
     if (r.fled) return this.toast('You got away safely.');
     if (r.inRun) {

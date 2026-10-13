@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { current as currentMap, serverMapProblems, SHIPPED_MAP } from '../map.js';
 import { NODES, SPAWNS, PROPS, upgradeMap, setWorld, isWalkable, landDistance, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKES, DOCKS, GATE, GATES, gateColliders, SWING_GATE, SWING_FLOOR, isPerfectSwing, mapProblems } from '../../shared/world.js';
 import { ITEMS } from '../../shared/items.js';
-import { MODELS } from '../../client/src/scene/manifest.js';
+import { MODELS } from '../../client/src/scene/manifest/index.js';
 import { PROC_BUILDERS } from '../../client/src/scene/procprops.js';
 
 const nodes = NODES;

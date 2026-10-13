@@ -1,5 +1,7 @@
 // Monster types and their battle stats (turn-based, resolved on the server).
 // Where they live is set by the camps (spawns) in the world map.
+import { CONTENT, mergeInto } from './content/index.js';
+
 export const MONSTERS = {
   slime: {
     name: 'Bog Slime', lvl: 1, hp: 40, atk: 6, def: 1, xp: 14, gold: [4, 9], color: '#6aa844',
@@ -78,6 +80,7 @@ export const MONSTERS = {
     moves: [{ name: 'Maul', mult: 1 }, { name: 'Roar', mult: 1.3, aoe: true }],
   },
 };
+mergeInto(MONSTERS, CONTENT.monsters, 'monsters');
 
 // Hero combat stats derived from level + gear.
 export function heroStats(level, combatLvl, gear) {

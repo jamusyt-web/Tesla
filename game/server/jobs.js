@@ -38,7 +38,7 @@ export class Jobs {
     const out = [];
     for (const j of this.q.expired.all(now))
       tx(this.db, () => {
-        if (j.left > 0) this.heroes.addGold(j.poster, j.left * j.per);
+        if (j.left > 0) this.heroes.addGold(j.poster, j.left * j.per, 'jobRefund');
         this.q.close.run('expired', now, j.id);
         out.push({ poster: j.poster, item: j.item, left: j.left, refund: j.left * j.per });
       });
@@ -62,7 +62,7 @@ export class Jobs {
     const total = qty * per;
     if (this.heroes.gold(accountId) < total) fail(`That job pays ${total} gold in all; you don't have that much.`);
     return tx(this.db, () => {
-      this.heroes.addGold(accountId, -total); // held until delivered, cancelled or expired
+      this.heroes.addGold(accountId, -total, 'jobEscrow'); // held until delivered, cancelled or expired
       const id = Number(this.q.insert.run(accountId, item, qty, qty, per, now, now + JOB_DAYS * 86400_000).lastInsertRowid);
       return this.#row(this.q.get.get(id));
     });
@@ -84,7 +84,7 @@ export class Jobs {
       H.addItem(j.poster, j.item, qty);
       const gross = qty * j.per;
       const tax = H.takeFee(accountId, gross, MARKET_TAX_PM);
-      H.addGold(accountId, gross - tax);
+      H.addGold(accountId, gross - tax, 'jobPay');
       const left = j.left - qty;
       if (left === 0) this.q.close.run('done', now, id);
       return { job: id, poster: j.poster, item: j.item, qty, gross, tax, paid: gross - tax, left };
@@ -97,7 +97,7 @@ export class Jobs {
     if (j.status !== 'open') fail('That job is already closed.');
     return tx(this.db, () => {
       const refund = j.left * j.per;
-      if (refund) this.heroes.addGold(accountId, refund);
+      if (refund) this.heroes.addGold(accountId, refund, 'jobRefund');
       this.q.close.run('cancelled', now, j.id);
       return { refund, delivered: j.qty - j.left, item: j.item };
     });

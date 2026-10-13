@@ -114,6 +114,14 @@ export const PROC_BUILDERS = {
   },
 };
 
+// Add a code-drawn prop kind from another module (a new biome's props, say):
+// slot must start with proc_, and each kind is defined once.
+export function registerProc(slot, builder) {
+  if (!slot.startsWith('proc_')) throw new Error(`Proc slot "${slot}" must start with proc_.`);
+  if (PROC_BUILDERS[slot]) throw new Error(`Proc slot "${slot}" is defined twice.`);
+  PROC_BUILDERS[slot] = builder;
+}
+
 // A fast-travel waystone (map list `stones`, not a prop): a carved pillar on a
 // stepped base with glowing runes on its front (+z) and a floating crystal.
 // It glows brightly once you've attuned to it. Returns { group, setAttuned }.

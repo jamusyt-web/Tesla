@@ -5,7 +5,7 @@ Hearthvale mixes three kinds of art:
 | What | Where it comes from | Change it by |
 |---|---|---|
 | **Your hero** (body, hair, outfits, hats, tools in hand) | Built in code: `client/src/scene/avatar.js`, `tools.js` | Options in `shared/avatar.js`, tool skins in `shared/items.js` |
-| **World models** (trees, rocks, buildings, props, creatures, item icons) | `.glb` files in `client/public/models/`, listed in `client/src/scene/manifest.js` | Editing the manifest (below) |
+| **World models** (trees, rocks, buildings, props, creatures, item icons) | `.glb` files in `client/public/models/`, listed in `client/src/scene/manifest/core.js` | Editing the manifest (below) |
 | **Everything else** (ground, water, sky, effects, UI) | Built in code: `client/src/scene/town.js`, `fx.js`, `style.css` | Code |
 
 *Where* things stand in the world is separate from what they look like: positions live in the world map, `maps/world.json` (see the README). A prop there names a model slot from the manifest, so swapping a slot's model changes every copy placed in the map.
@@ -19,7 +19,7 @@ Every imported model is drawn with the game's own look: cel shading, ink outline
    - Keep it light. Scenery should be roughly under 5,000 triangles; heroes and monsters under 15,000.
    - Animated creatures: name the clips `idle`, `walk`, `attack`, `hit`, `die` where you can. Without an `attack` or `hit` clip the game animates a lunge or knockback itself.
 2. Put the file in `client/public/models/custom/`, for example `client/public/models/custom/my-oak.glb`.
-3. In `client/src/scene/manifest.js`, point the slot at it and give it a size:
+3. In `client/src/scene/manifest/core.js`, point the slot at it and give it a size:
 
    ```js
    tree_oak: { url: '/models/custom/my-oak.glb', height: 4.8 },

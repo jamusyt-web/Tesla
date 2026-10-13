@@ -4,7 +4,7 @@
 import { NODE_TYPES, CRYPT } from '../../../shared/world.js';
 import { DUNGEONS } from '../../../shared/dungeon.js';
 import { MONSTERS } from '../../../shared/monsters.js';
-import { MODELS } from '../scene/manifest.js';
+import { MODELS } from '../scene/manifest/index.js';
 import { PROC_BUILDERS } from '../scene/procprops.js';
 import * as assets from '../scene/assets.js';
 

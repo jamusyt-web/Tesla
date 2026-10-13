@@ -1,47 +1,39 @@
 import './map.js'; // loads the world map first: everything below reads it
-import { ITEMS, isItem } from '../shared/items.js';
+import { ITEMS } from '../shared/items.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
-import { levelFromXp, doubleChance } from '../shared/skills.js';
-import { MONSTERS, heroStats, damage } from '../shared/monsters.js';
-import {
-  NODES, SPAWNS, buildColliders, NavGrid, NODE_TYPES, stepPath,
-  INTERACT_RANGE, FISH_RANGE, SPAWN, isWalkable, WORLD_RADIUS, isDeepSpot, SWING_FLOOR, isPerfectSwing,
-  stoneById, stoneNear, stoneFront, travelFee, STONE_RANGE, landDistance, ENTRANCES, entranceFront,
-} from '../shared/world.js';
-import { rollFish, fishingGear, fightRating, replayFight, FISH, FISH_MAX_TICKS } from '../shared/fishing.js';
+import { levelFromXp } from '../shared/skills.js';
+import { heroStats } from '../shared/monsters.js';
+import { SPAWN, isWalkable, stoneById, ENTRANCES, entranceFront } from '../shared/world.js';
 import { GameError, fail } from './db.js';
 import { Heroes } from './heroes.js';
 import { Market } from './market.js';
 import { Shops } from './shop.js';
 import { ShopRoom } from './rooms.js';
 import { Crafting } from './crafting.js';
-import { Jobs, jobText } from './jobs.js';
+import { Jobs } from './jobs.js';
 import { SHOP } from '../shared/shop.js';
 import { Auth } from './auth.js';
-import { Channel, Battle, rint, q2 } from './channel.js';
+import { Channel, q2 } from './channel.js';
+import { Battle } from './battle.js';
 import { DungeonRun } from './dungeons.js';
 import { Parties } from './party.js';
 import { DUNGEONS, TIERS, MODIFIERS, ENTRANCE_RANGE, MAX_RUN_HEROES, MAX_RUNS, READY_MS, ENTER_COOLDOWN_MS, ENGAGE_PATH, modifierFor, weeklySeed, weekIndex, dayIndex } from '../shared/dungeon.js';
 import { world, rebuildWorld } from './static.js';
+import { register, dispatch, allowedInRun } from './rpc.js';
+import { emit } from './events.js';
+import { onMove } from './move.js';
+import { GATHER_HANDLERS } from './gather.js';
+import { attuneNearby } from './travel.js';
+import { expireJobs } from './trade.js';
+import './gear.js'; // these register their RPCs
+import { TUTORIAL } from './tutorial.js';
 
-const GATHER_ACTS = new Set(['chop', 'mine', 'pick']);
-
+export { TUTORIAL };
 export const CHANNEL_CAP = Number(process.env.CHANNEL_CAP || 40);
 const TICK_MS = 50; // 20 Hz simulation
-const NPC_SELL_RATE = 0.6; // instant-sell to the town merchant pays 60% of value
 const CHAT_MAX = 140;
-const TRAVEL_COOLDOWN_MS = 3000;
-
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-
-// Tutorial: the core loop in one session.
-export const TUTORIAL = [
-  { id: 'chop', text: 'Chop a tree in Whisperwood (west)', reward: 20 },
-  { id: 'craft', text: 'Saw Oak Planks at the Workshop', reward: 30 },
-  { id: 'fight', text: `Slay a ${MONSTERS.slime.name} beyond the Wilds Gate (north)`, reward: 50 },
-  { id: 'stock', text: 'Put something on a display in Your Shop', reward: 60 },
-];
 
 // ─────────────────────────────────────────────────────────────────────────
 // One connected player.
@@ -111,21 +103,9 @@ class Client {
     this.send({ t: 'me', gold: H.gold(this.hero.id), inv: H.inventory(this.hero.id), skills: this.hero.skills, level: this.hero.level, equip: this.hero.equip, stats: st, hp: Math.round(this.ent.hp), maxHp: st.hp });
   }
 
-  advanceTutorial(stepId) {
-    const i = this.hero.tutorial;
-    if (i >= TUTORIAL.length || TUTORIAL[i].id !== stepId) return;
-    const step = TUTORIAL[i];
-    this.game.heroes.addGold(this.hero.id, step.reward);
-    this.game.heroes.setTutorial(this.hero, i + 1);
-    this.send({ t: 'tutorial', step: i + 1, done: step.id, reward: step.reward });
-    this.pushInventory();
-  }
-
-  // Standing at a waystone you haven't been to: attune to it.
+  // Standing at a waystone you haven't been to: attune to it (server/travel.js).
   attuneNearby() {
-    const st = stoneNear(this.ent.x, this.ent.z);
-    if (!st || !this.game.heroes.attune(this.hero, st.id)) return;
-    this.send({ t: 'attuned', id: st.id, name: st.name });
+    attuneNearby(this);
   }
 }
 
@@ -164,18 +144,9 @@ export class Game {
     this.expireJobs();
     this.jobTimer = setInterval(() => this.expireJobs(), 60000);
   }
-  // Bulletin board jobs past their time: refund what's left, tell the poster.
+  // Bulletin board jobs past their time (server/trade.js).
   expireJobs(now = Date.now()) {
-    try {
-      for (const r of this.jobs.expire(now)) {
-        const o = this.online.get(r.poster);
-        if (!o) continue;
-        o.pushInventory();
-        o.send({ t: 'toast', kind: 'gold', text: `Your job for ${ITEMS[r.item]?.name ?? r.item} ran out${r.refund ? `: ${r.refund} 🪙 back` : ''}.` });
-      }
-    } catch (e) {
-      console.error('job expiry error', e);
-    }
+    expireJobs(this, now);
   }
   stop() {
     clearInterval(this.timer);
@@ -292,62 +263,6 @@ export class Game {
     c.ch.broadcast({ t: 'show', p: c.publicInfo() }, c);
     c.send(c.ch.fullSnapshot(c));
     return { x: q2(c.ent.x), z: q2(c.ent.z) };
-  }
-
-  // ── Fast travel ────────────────────────────────────────────────────
-  // From the waystone you're standing at to another you've attuned to, for a fee.
-  travel(c, to, now = Date.now()) {
-    if (c.room) fail('Leave the shop first.');
-    if (c.ch?.isRun) fail("Waystones don't work underground. Leave the dungeon first.");
-    if (c.battle) fail("You can't travel in the middle of a battle!");
-    if (c.craft) fail('Finish your craft first.');
-    const dest = stoneById(to);
-    if (!dest) fail('No such waystone.');
-    const here = stoneNear(c.ent.x, c.ent.z);
-    if (!here) fail('Walk up to a waystone first.');
-    c.attuneNearby(); // just arrived and travelling straight on
-    if (here.id === dest.id) fail("You're already here.");
-    if (!c.hero.stones.includes(dest.id)) fail(`You haven't been to ${dest.name} yet. Walk there once to attune to it.`);
-    if (now - (c.lastTravel || 0) < TRAVEL_COOLDOWN_MS) fail('The stone is still humming. Try again in a moment.');
-    const fee = travelFee(here, dest);
-    if (this.heroes.gold(c.hero.id) < fee) fail(`Travelling to ${dest.name} costs ${fee} gold.`);
-    const [fx, fz] = stoneFront(dest);
-    const open = isWalkable(fx, fz, world().col) ? [fx, fz] : world().nav.nearestOpen(fx, fz);
-    if (!open || Math.hypot(open[0] - dest.x, open[1] - dest.z) > STONE_RANGE) fail("That waystone's way is blocked.");
-    this.heroes.addGold(c.hero.id, -fee);
-    c.cancelFishing();
-    const e = c.ent;
-    const from = { x: e.x, z: e.z };
-    // Make room if someone's standing there, but stay at the stone, on this side of any wall.
-    [e.x, e.z] = c.ch.freeSpot(open[0], open[1], c, (nx, nz) => Math.hypot(nx - dest.x, nz - dest.z) <= STONE_RANGE - 1 && world().nav.clear(open[0], open[1], nx, nz));
-    Object.assign(e, { path: null, act: 'idle', rot: dest.rot ?? 0 });
-    c.lastTravel = now;
-    this.heroes.savePos(c.hero.id, e.x, e.z);
-    c.ch.teleported(c, from);
-    c.pushInventory();
-    return { to: dest.id, fee, x: q2(e.x), z: q2(e.z) };
-  }
-
-  // Server owners can jump anywhere on land (to check their building), free.
-  ownerTeleport(c, x, z) {
-    if (!this.auth.isAdmin(c.hero.id)) fail('Only server owners can do that.');
-    if (c.room) fail('Leave the shop first.');
-    if (c.ch?.isRun) fail('Leave the dungeon first.');
-    if (c.battle) fail("You can't travel in the middle of a battle!");
-    if (c.craft) fail('Finish your craft first.');
-    x = Number(x);
-    z = Number(z);
-    if (!Number.isFinite(x) || !Number.isFinite(z) || landDistance(x, z) > 0) fail("That's not on land.");
-    const open = isWalkable(x, z, world().col) ? [x, z] : world().nav.nearestOpen(x, z);
-    if (!open) fail("There's no room to stand there.");
-    c.cancelFishing();
-    const e = c.ent;
-    const from = { x: e.x, z: e.z };
-    [e.x, e.z] = c.ch.freeSpot(open[0], open[1], c);
-    Object.assign(e, { path: null, act: 'idle' });
-    this.heroes.savePos(c.hero.id, e.x, e.z);
-    c.ch.teleported(c, from);
-    return { x: q2(e.x), z: q2(e.z) };
   }
 
   // Everyone who can see/hear c: their channel plus whoever is in their shop room.
@@ -651,7 +566,7 @@ export class Game {
       const h = HANDLERS[m.t];
       if (!h) return;
       // Inside a dungeon only some things make sense (no fishing, travel, shops…).
-      if (c.ch?.isRun && !RUN_OK.has(m.t) && !(m.t === 'rpc' && RUN_RPC_OK(String(m.m)))) fail('Not inside the crypt.');
+      if (c.ch?.isRun && !RUN_OK.has(m.t) && !(m.t === 'rpc' && allowedInRun(String(m.m)))) fail('Not inside the crypt.');
       const res = h(this, c, m, now);
       if (m.rid) c.send({ t: 'res', rid: m.rid, ok: true, data: res ?? null });
     } catch (e) {
@@ -662,227 +577,14 @@ export class Game {
     }
   }
 
-  // ── Gathering ──────────────────────────────────────────────────────
-  hitNode(c, nodeId, now) {
-    const ch = c.ch;
-    const n = ch.nodes.get(nodeId);
-    if (!n) fail('Nothing there.');
-    const t = NODE_TYPES[n.type];
-    if (t.kind === 'fish') fail('Cast your rod to fish here.');
-    if (c.room) fail("You're inside a shop.");
-    if (c.craft) fail('Finish your craft first.');
-    if (!n.alive) {
-      // A swing that was already in flight when it fell (yours or a co-op
-      // partner's) isn't an error, just too late.
-      if (now - (n.brokeAt || 0) < 2000) return { gone: true };
-      fail(`This ${t.name} is regrowing.`);
-    }
-    if (c.battle) fail("You're in a battle!");
-    const e = c.ent;
-    if (Math.hypot(e.x - n.x, e.z - n.z) > INTERACT_RANGE + t.r * n.s + 0.4) fail('Get closer first.');
-    const lvl = levelFromXp(c.hero.skills[t.skill] || 0);
-    if (lvl < t.lvl) fail(`Requires ${t.skill[0].toUpperCase() + t.skill.slice(1)} level ${t.lvl}.`);
-    let power = 1;
-    let period = 450;
-    if (t.tool) {
-      const tool = ITEMS[c.hero.equip[t.tool]];
-      if (!tool || this.heroes.count(c.hero.id, c.hero.equip[t.tool]) < 1) fail(`You need ${t.tool === 'axe' ? 'an axe' : 'a pickaxe'}.`);
-      if (tool.tier < t.tier) fail(`Needs a tier ${t.tier} ${t.tool === 'axe' ? 'axe' : 'pickaxe'} or better.`);
-      power = tool.power;
-      period = tool.speed;
-    }
-    const since = now - e.lastSwing;
-    if (since < period * SWING_FLOOR) return { tooFast: true, wait: Math.ceil(period * SWING_FLOOR - since) }; // swing still in progress
-    // Rhythm bonus: swing again right as the timing ring closes = PERFECT (2x).
-    const perfect = !!t.tool && e.lastNode === n.id && isPerfectSwing(since, period);
-    e.lastSwing = now;
-    e.lastNode = n.id;
-    e.act = t.kind === 'tree' ? 'chop' : t.kind === 'rock' ? 'mine' : 'pick';
-    e.path = null;
-    e.rot = Math.atan2(n.x - e.x, n.z - e.z);
-    const dmg = power * (perfect ? 2 : 1);
-    n.hp = Math.max(0, n.hp - dmg);
-    n.hitters.add(c.hero.id);
-    ch.broadcast({ t: 'nh', id: n.id, by: c.hero.id, hp: n.hp, dmg, perfect, rot: q2(e.rot) });
-    if (n.hp > 0) return { hp: n.hp, perfect };
-
-    // Broken! Everyone who helped gets a full roll (co-op friendly).
-    n.alive = false;
-    n.brokeAt = now;
-    n.respawnAt = now + t.respawn * 1000;
-    // Everyone working it puts their tool away (others saw them frozen mid-chop).
-    for (const pid of n.hitters) {
-      const pe = ch.players.get(pid)?.ent;
-      if (pe && pe.lastNode === n.id && GATHER_ACTS.has(pe.act)) pe.act = 'idle';
-    }
-    ch.broadcast({ t: 'node', id: n.id, alive: false, hp: 0, by: c.hero.id, respawnIn: t.respawn * 1000 });
-    for (const pid of n.hitters) {
-      const pc = ch.players.get(pid);
-      if (pc) this.grantGather(pc, t, n, pc === c);
-    }
-    n.hitters.clear();
-    return { broke: true, perfect };
-  }
-
-  grantGather(c, t, n, finisher) {
-    const lvl = levelFromXp(c.hero.skills[t.skill] || 0);
-    const loot = {};
-    for (const d of t.drops) {
-      let q = rint(d.min, d.max);
-      if (q && Math.random() < doubleChance(lvl)) q *= 2;
-      if (q) loot[d.id] = (loot[d.id] || 0) + q;
-    }
-    const rares = [];
-    for (const r of t.rare)
-      if (Math.random() < r.p * (finisher ? 1.5 : 1)) {
-        loot[r.id] = (loot[r.id] || 0) + 1;
-        rares.push(r.id);
-      }
-    for (const [id, q] of Object.entries(loot)) this.heroes.addItem(c.hero.id, id, q);
-    const xp = this.heroes.addXp(c.hero, t.skill, t.xp);
-    c.send({ t: 'loot', node: n.id, loot, xp, rare: rares });
-    for (const r of rares) this.announce(`${c.hero.name} found a ${ITEMS[r].name}!`);
-    c.pushInventory();
-    if (t.kind === 'tree') c.advanceTutorial('chop');
-  }
-
-  cast(c, nodeId, now) {
-    const n = c.ch.nodes.get(nodeId);
-    if (!n || NODE_TYPES[n.type].kind !== 'fish') fail('Not a fishing spot.');
-    if (c.battle) fail("You're in a battle!");
-    if (c.room) fail("You're inside a shop.");
-    if (c.craft) fail('Finish your craft first.');
-    const rod = ITEMS[c.hero.equip.rod];
-    if (!rod || this.heroes.count(c.hero.id, c.hero.equip.rod) < 1) fail('You need a fishing rod.');
-    const e = c.ent;
-    if (Math.hypot(e.x - n.x, e.z - n.z) > FISH_RANGE) fail('Get closer to the water.');
-    e.path = null;
-    e.rot = Math.atan2(n.x - e.x, n.z - e.z);
-    e.act = 'fish';
-    const window = 900 + rod.tier * 200;
-    e.fishing = { node: n.id, state: 'wait', biteAt: now + 1800 + Math.random() * 4200, window };
-    c.ch.broadcast({ t: 'cast', by: c.hero.id, node: n.id, rot: q2(e.rot) });
-    return { ok: true };
-  }
-
-  // Tap when it bites to hook the fish; then the reel fight starts.
-  reel(c, now) {
-    const f = c.ent.fishing;
-    if (!f || f.state === 'fight') return { ok: false };
-    c.ch.broadcast({ t: 'reel', by: c.hero.id });
-    const lost = (reason) => {
-      c.ent.fishing = null;
-      c.ent.act = 'idle';
-      c.send({ t: 'fishResult', ok: false, reason });
-      return { ok: false };
-    };
-    if (f.state === 'wait') return lost('Too early! The fish swam off.');
-    if (now > f.biteAt + f.window + 450) return lost('Too slow — it got away!');
-    f.state = 'fight';
-    f.fightAt = now;
-    const { d, behavior, seed } = f.fish;
-    return { ok: true, fight: true, bite: { fish: { d, behavior, seed }, gear: f.gear, rating: fightRating(d, f.gear) } };
-  }
-
-  // The client reports the ticks at which the reel button toggled; the
-  // server replays the exact same deterministic fight to decide the outcome.
-  land(c, toggles, endTick, now) {
-    const f = c.ent.fishing;
-    if (!f || f.state !== 'fight') {
-      // Always answer, so the client can never be left showing a dead fight.
-      c.send({ t: 'fishResult', ok: false, cancelled: true, reason: 'The line went slack.' });
-      return { ok: false };
-    }
-    c.ent.fishing = null;
-    c.ent.act = 'idle';
-    const end = Math.floor(Number(endTick));
-    const ok =
-      Array.isArray(toggles) &&
-      toggles.length <= FISH_MAX_TICKS &&
-      toggles.every((t, i) => Number.isInteger(t) && t >= 0 && t <= FISH_MAX_TICKS && (i === 0 || t > toggles[i - 1])) &&
-      Number.isInteger(end) &&
-      end > 0 &&
-      end <= FISH_MAX_TICKS;
-    // You can't finish a fight faster than it takes to play it.
-    const tooFast = (now - f.fightAt) < (end / 60) * 1000 * 0.85 - 400;
-    const result = ok && !tooFast ? replayFight(f.fish, f.gear, toggles, end) : null;
-    c.ch.broadcast({ t: 'landed', by: c.hero.id, ok: result?.done === 'caught', item: result?.done === 'caught' ? f.fish.id : null });
-    if (!result || result.done !== 'caught') {
-      c.send({ t: 'fishResult', ok: false, reason: result?.done === 'escaped' || !result ? 'It broke free!' : 'It slipped the hook!' });
-      return { ok: false };
-    }
-    const fish = f.fish;
-    const lvl = levelFromXp(c.hero.skills.fishing || 0);
-    const qty = Math.random() < doubleChance(lvl) && fish.id !== 'old_boot' && fish.id !== 'lake_king' ? 2 : 1;
-    this.heroes.addItem(c.hero.id, fish.id, qty);
-    const xp = this.heroes.addXp(c.hero, 'fishing', Math.round(FISH[fish.id].xp * (1 + fish.d / 200)));
-    c.send({ t: 'fishResult', ok: true, item: fish.id, qty, kg: fish.kg, xp });
-    const rarity = ITEMS[fish.id].rarity;
-    if (rarity === 'epic' || rarity === 'legendary') this.announce(`${c.hero.name} landed a ${fish.kg} kg ${ITEMS[fish.id].name}!`);
-    c.pushInventory();
-    return { ok: true };
-  }
-
-  // ── Crafting / NPC merchant / gear ─────────────────────────────────
-  npcSell(c, item, qty) {
-    qty = Number(qty);
-    if (!isItem(item) || !Number.isInteger(qty) || qty < 1) fail('Bad sale.');
-    const equipped = Object.values(c.hero.equip).includes(item);
-    if (equipped && this.heroes.count(c.hero.id, item) - qty < 1) fail("Keep one — it's equipped.");
-    const gold = Math.max(1, Math.floor(ITEMS[item].value * NPC_SELL_RATE)) * qty;
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      this.heroes.takeItem(c.hero.id, item, qty);
-      this.heroes.addGold(c.hero.id, gold);
-      this.db.exec('COMMIT');
-    } catch (e) {
-      this.db.exec('ROLLBACK');
-      throw e;
-    }
-    c.pushInventory();
-    return { gold };
-  }
-
-  equip(c, item) {
-    const it = ITEMS[item];
-    if (!it) fail('Unknown item.');
-    if (this.heroes.count(c.hero.id, item) < 1) fail("You don't have that.");
-    const slot = it.cat === 'tool' ? it.tool : it.slot;
-    if (!slot) fail("That can't be equipped.");
-    this.heroes.setEquip(c.hero, slot, item);
-    c.pushInventory();
-    this.tellAudience(c, { t: 'equip', id: c.hero.id, equip: c.hero.equip });
-    return { slot };
-  }
 }
 
 // ── Message handlers ───────────────────────────────────────────────────
-const num = (v) => (Number.isFinite(+v) ? +v : 0);
-
 const HANDLERS = {
   ping: (g, c, m) => c.send({ t: 'pong', c: m.c, s: Date.now() }),
 
-  move(g, c, m, now) {
-    if (c.battle || c.craft) return;
-    if ((m.v === 'room') !== !!c.room) return; // a stale move from the other view
-    if (now - (c.lastMove || 0) < 80) return; // pathfinding is the expensive bit; cap it
-    c.lastMove = now;
-    const x = num(m.x);
-    const z = num(m.z);
-    if (c.room) return c.room.move(c, x, z);
-    if (!c.ch.inBounds(x, z)) return;
-    const path = c.ch.nav.findPath(c.ent.x, c.ent.z, x, z);
-    c.cancelFishing();
-    if (path) {
-      c.ent.path = path;
-      c.ent.act = 'walk';
-    }
-  },
-
-  hit: (g, c, m, now) => g.hitNode(c, String(m.node), now),
-  cast: (g, c, m, now) => g.cast(c, String(m.node), now),
-  reel: (g, c, m, now) => g.reel(c, now),
-  land: (g, c, m, now) => g.land(c, m.toggles, m.end, now),
+  move: onMove,
+  ...GATHER_HANDLERS,
 
   engage(g, c, m) {
     if (c.room) fail("You're inside a shop.");
@@ -935,74 +637,14 @@ const HANDLERS = {
     c.ch.broadcast({ t: 'emote', id: c.hero.id, e });
   },
 
-  rpc(g, c, m) {
-    const fn = RPC[m.m];
-    if (!fn) fail('Unknown action.');
-    return fn(g, c, m.a || {});
-  },
+  rpc: (g, c, m) => dispatch(g, c, String(m.m), m.a),
 };
 
 const RUN_OK = new Set(['ping', 'move', 'engage', 'bact', 'chat', 'emote']);
-const RUN_RPC_OK = (name) =>
-  /^(dungeon|party|market)\./.test(name) ||
-  ['equip', 'avatar', 'profile', 'town.info', 'jobs.list', 'drink', 'craft.info', 'invite.create', 'tutorialSkip', 'shop.state', 'shop.ledger', 'shop.collect', 'shop.ack', 'shop.directory'].includes(name);
-
+// The hub's own RPCs: shops, the town hall, dungeons and parties. (Feature
+// modules register theirs in their own files: trade.js, travel.js, gear.js,
+// crafting.js, tutorial.js.)
 const RPC = {
-  craft: () => fail('Crafting is hands-on now — pick a recipe and head to its station!'),
-  'craft.info': (g, c) => g.crafting.info(c),
-  'craft.start': (g, c, a) => g.crafting.start(c, a),
-  'craft.finish': (g, c, a) => g.crafting.finish(c, a),
-  'craft.cancel': (g, c, a) => g.crafting.cancel(c, a),
-  'craft.quick': (g, c, a) => g.crafting.quick(c, a),
-  npcSell: (g, c, a) => g.npcSell(c, a.item, a.qty),
-  // Drink a healing item outside a battle (in a dungeon nothing heals on its own).
-  drink(g, c, a) {
-    const it = ITEMS[a.item];
-    if (!it?.heal) fail('Pick a healing item.');
-    if (c.battle) fail('Use it from the battle menu.');
-    if (c.ent.hp >= c.ent.maxHp) fail("You're already at full health.");
-    g.heroes.takeItem(c.hero.id, String(a.item), 1);
-    const heal = Math.min(c.ent.maxHp - c.ent.hp, Math.round(it.heal * (c.perks().has('mender') ? 1.4 : 1)));
-    c.ent.hp += heal;
-    c.pushInventory();
-    return { heal, hp: Math.round(c.ent.hp) };
-  },
-  travel: (g, c, a) => g.travel(c, String(a.to ?? '')),
-  'owner.teleport': (g, c, a) => g.ownerTeleport(c, a.x, a.z),
-  equip: (g, c, a) => g.equip(c, a.item),
-  avatar(g, c, a) {
-    g.heroes.setAvatar(c.hero, a.avatar);
-    g.tellAudience(c, { t: 'avatar', id: c.hero.id, avatar: c.hero.avatar });
-  },
-  profile(g, c, a) {
-    const h = g.heroes.load(Number(a.id));
-    if (!h) fail('No such hero.');
-    const on = g.online.get(h.id);
-    const shop = g.shops.info(h.id);
-    const party = g.parties.get(h.id);
-    const mine = g.parties.get(c.hero.id);
-    return { id: h.id, name: h.name, avatar: h.avatar, level: h.level, skills: h.skills, equip: h.equip, online: !!on, channel: on?.ch?.isRun ? null : (on?.ch?.id ?? null), dungeon: on?.ch?.isRun ? on.ch.def.name : null, shop: g.shops.slots(h.id).length, shopOpen: shop ? !!shop.open : false, inside: on?.room?.owner ?? null, inParty: !!party, sameParty: !!party && party === mine, canInvite: !!on && h.id !== c.hero.id && !party && (!mine || (mine.leader === c.hero.id && mine.members.length < 4)) };
-  },
-
-  // Market
-  'market.summary': (g) => g.market.summary(),
-  'market.book': (g, c, a) => g.market.book(a.item),
-  'market.mine': (g, c) => g.market.mine(c.hero.id),
-  'market.place'(g, c, a) {
-    const r = g.market.place(c.hero.id, a);
-    for (const id of r.notify) {
-      const o = g.online.get(id);
-      if (!o) continue;
-      o.pushInventory();
-      if (id !== c.hero.id) o.send({ t: 'toast', kind: 'good', text: `Your ${a.side === 'buy' ? 'sell' : 'buy'} order for ${ITEMS[a.item].name} was filled!` });
-    }
-    return { order: r.order, fills: r.fills, filledQty: r.filledQty };
-  },
-  'market.cancel'(g, c, a) {
-    g.market.cancel(c.hero.id, a.id);
-    c.pushInventory();
-  },
-
   // Player shops (see server/shop.js and shared/shop.js)
   'shop.enter': (g, c, a) => g.enterShop(c, a.owner),
   'shop.exit': (g, c) => g.exitShop(c, 'left'),
@@ -1015,7 +657,7 @@ const RPC = {
   'shop.stock'(g, c, a) {
     const s = g.shops.stock(c.hero.id, a);
     c.pushInventory();
-    c.advanceTutorial('stock');
+    emit(c, 'stock', { slot: s.slot, item: s.item, qty: s.qty });
     g.rooms.get(c.hero.id)?.shelf(s.slot, 'owner');
     return { s };
   },
@@ -1114,29 +756,6 @@ const RPC = {
   'party.kick': (g, c, a) => g.parties.kick(c, a.id),
   'party.promote': (g, c, a) => g.parties.promote(c, a.id),
 
-  // Bulletin board (server/jobs.js)
-  'jobs.list': (g, c) => ({ open: g.jobs.list(), mine: g.jobs.mine(c.hero.id), now: Date.now() }),
-  'jobs.post'(g, c, a) {
-    const j = g.jobs.post(c.hero.id, a);
-    c.pushInventory();
-    g.announce(`${c.hero.name} posted a job on the board: ${jobText(j)} at ${j.per} 🪙 each.`);
-    return j;
-  },
-  'jobs.deliver'(g, c, a) {
-    const r = g.jobs.deliver(c.hero.id, a.id, a.qty);
-    c.pushInventory();
-    const o = g.online.get(r.poster);
-    if (o) {
-      o.pushInventory();
-      o.send({ t: 'toast', kind: 'good', text: `${c.hero.name} delivered ${r.qty}× ${ITEMS[r.item].name} for your job${r.left ? ` (${r.left} still wanted)` : '. Job done!'}` });
-    }
-    return r;
-  },
-  'jobs.cancel'(g, c, a) {
-    const r = g.jobs.cancel(c.hero.id, a.id);
-    c.pushInventory();
-    return r;
-  },
   'channel.switch'(g, c, a) {
     const target = g.channels.find((ch) => ch.id === Number(a.id));
     if (!target) fail('No such channel.');
@@ -1149,8 +768,9 @@ const RPC = {
     c.ch.remove(c);
     target.add(c);
   },
-  tutorialSkip(g, c) {
-    g.heroes.setTutorial(c.hero, TUTORIAL.length);
-  },
 };
 
+// Allowed inside a dungeon run: everything about dungeons and parties, and
+// things that make sense from anywhere.
+const IN_RUN = new Set(['town.info', 'invite.create', 'shop.state', 'shop.ledger', 'shop.collect', 'shop.ack', 'shop.directory']);
+for (const [name, fn] of Object.entries(RPC)) register(name, fn, { inRun: IN_RUN.has(name) || /^(dungeon|party)\./.test(name) });

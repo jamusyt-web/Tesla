@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as assets from './assets.js';
-import { MODULE_PACKS, TEXTURES } from './manifest.js';
+import { MODULE_PACKS, TEXTURES } from './manifest/index.js';
 import { GATE } from '../../../shared/world.js';
 
 // Assembles Hearthvale's buildings from Kenney's modular Fantasy Town Kit.

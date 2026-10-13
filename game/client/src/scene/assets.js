@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { mergeVertices, mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { MODELS, PALETTES, MODULE_PACKS, TEXTURES } from './manifest.js';
+import { MODELS, PALETTES, MODULE_PACKS, TEXTURES } from './manifest/index.js';
 import { toon, outlineMat } from './toon.js';
 
 // Loads every model listed in manifest.js once, converts it to the game's

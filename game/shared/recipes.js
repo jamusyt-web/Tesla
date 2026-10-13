@@ -1,6 +1,8 @@
 // Crafting recipes. `lvl` (Crafting level) gates the recipe; crafting grants
 // Crafting XP. `station` is where it's made and `pattern` the hands-on steps
 // (shared/crafting.js).
+import { CONTENT } from './content/index.js';
+
 export const RECIPES = [
   // Refining — turning raw gathered goods into worth-more materials
   { id: 'oak_plank', out: 'oak_plank', qty: 1, in: { oak_log: 2 }, lvl: 1, xp: 4, station: 'workbench', pattern: 'saw' },
@@ -36,5 +38,7 @@ export const RECIPES = [
   { id: 'ghostlight_amulet', out: 'ghostlight_amulet', qty: 1, in: { gold_bar: 1, grave_dust: 6, moonbloom: 2 }, lvl: 6, xp: 80, station: 'grindstone', pattern: 'facet' },
   { id: 'amulet_sapphire', out: 'amulet_sapphire', qty: 1, in: { sapphire: 1, gold_bar: 2, goblin_coin: 3 }, lvl: 9, xp: 120, station: 'grindstone', pattern: 'facet' },
 ];
+
+RECIPES.push(...CONTENT.recipes);
 
 export const RECIPE_BY_ID = Object.fromEntries(RECIPES.map((r) => [r.id, r]));
