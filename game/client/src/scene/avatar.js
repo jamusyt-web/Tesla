@@ -3,7 +3,7 @@ import { mesh, toon, shade } from './toon.js';
 import { buildTool } from './tools.js';
 import { bakeSkinned, mergeRigid, skinnedCopies } from './merge.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { sanitizeAvatar } from '../../../shared/avatar.js';
+import { sanitizeAvatar, CLOAK_TINTS } from '../../../shared/avatar.js';
 
 const OL = 0.036;
 // Proportions: ~3 heads tall, 2.28 m overall. Not a chibi, still stylised.
@@ -457,7 +457,7 @@ export class Avatar {
       const nr = flip.attributes.normal;
       for (let i = 0; i < nr.count; i++) nr.setXYZ(i, -nr.getX(i), -nr.getY(i), -nr.getZ(i));
       const sheet = mergeGeometries([geo, flip]);
-      const cape = new THREE.Mesh(sheet, toon(shade(c.outfitColor, 0.75)));
+      const cape = new THREE.Mesh(sheet, toon(CLOAK_TINTS[c.cloakTint] ?? shade(c.outfitColor, 0.75)));
       const pivot = new THREE.Bone();
       pivot.position.set(0, 1.44, -0.3);
       cape.position.y = -0.65;

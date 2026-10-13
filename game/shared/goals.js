@@ -45,7 +45,13 @@ export function bearing(from, to) {
 // ── Where a raw good comes from, for this hero ──
 export function sourceOf(hero, item) {
   for (const [type, n] of Object.entries(NODE_TYPES)) if (n.drops?.[0]?.id === item && n.kind !== 'fish' && lvl(hero, n.skill) >= n.lvl) return { verb: { tree: 'chop', rock: 'mine', herb: 'pick' }[n.kind] ?? 'gather', name: n.name, target: { kind: 'node', type } };
-  for (const [type, n] of Object.entries(NODE_TYPES)) if (n.drops?.[0]?.id === item && n.kind !== 'fish') return { verb: 'gather', name: n.name, need: `${cap(n.skill)} ${n.lvl}`, target: { kind: 'node', type } };
+  for (const [type, n] of Object.entries(NODE_TYPES))
+    if (n.drops?.[0]?.id === item && n.kind !== 'fish') {
+      // Not yet: train on the best node of that skill you can work.
+      const t = Object.entries(NODE_TYPES).filter(([, m]) => m.skill === n.skill && m.kind !== 'fish' && m.lvl <= lvl(hero, n.skill)).sort((a, b) => b[1].lvl - a[1].lvl)[0];
+      const verb = { tree: 'chop', rock: 'mine', herb: 'pick' }[n.kind] ?? 'gather';
+      return t ? { verb, name: n.name, need: `${cap(n.skill)} ${n.lvl}`, train: { verb: { tree: 'chop', rock: 'mine', herb: 'pick' }[t[1].kind] ?? 'gather', name: t[1].name }, target: { kind: 'node', type: t[0] } } : { verb, name: n.name, need: `${cap(n.skill)} ${n.lvl}`, target: { kind: 'node', type } };
+    }
   const hunts = Object.entries(MONSTERS).filter(([, def]) => !def.boss && (def.drops ?? []).some((d) => d.id === item)).sort((a, b) => (a[1].lvl ?? 1) - (b[1].lvl ?? 1));
   const ok = hunts.find(([, def]) => (def.lvl ?? 1) <= lvl(hero, 'combat') + 2);
   if (ok) return { verb: 'hunt', name: ok[1].name, target: { kind: 'monster', type: ok[0] } };
@@ -96,6 +102,7 @@ export function planFor(hero, r) {
         const lack = m * Math.ceil(short / (sub.qty || 1)) - have(hero, raw);
         if (lack > 0) {
           const s = sourceOf(hero, raw);
+          if (s.train) return { text: `${name}: ${ITEMS[raw]?.name ?? raw} needs ${s.need} → ${s.train.verb} ${s.train.name} to train`, target: s.target };
           return { text: `${name}: ${short} ${ITEMS[id].name} → ${s.verb} ${lack} ${ITEMS[raw]?.name ?? raw}${s.need ? ` (${s.need})` : ''}`, target: s.target };
         }
       }
@@ -103,10 +110,23 @@ export function planFor(hero, r) {
       continue;
     }
     const s = sourceOf(hero, id);
+    if (s.train) return { text: `${name}: ${ITEMS[id]?.name ?? id} needs ${s.need} → ${s.train.verb} ${s.train.name} to train`, target: s.target };
     return { text: `${name}: ${s.verb} ${short} ${ITEMS[id]?.name ?? id}${s.need ? ` (${s.need})` : ''}`, target: s.target };
   }
   if (r.lvl > lvl(hero, 'crafting')) return { text: `${name}: train Crafting to ${r.lvl} (you're ${lvl(hero, 'crafting')})`, target: { kind: 'building', action: 'craft' } };
   return { text: `Make a ${name} at the ${STATIONS[r.station]?.label ?? r.station}`, target: { kind: 'station', station: r.station }, recipe: r.id };
+}
+
+// A craft (or use) step's next move: the recipe's plan, or null when the
+// step's own target is right (nothing missing).
+export function stepPlan(hero, step) {
+  const item = step?.match?.item;
+  if (!item || !['craft', 'use'].includes(step.ev)) return null;
+  if (step.ev === 'use' && have(hero, item) > 0) return null;
+  const r = RECIPES.find((x) => x.out === item && !x.town) ?? RECIPES.find((x) => x.out === item);
+  if (!r) return null;
+  const plan = planFor(hero, r);
+  return plan.recipe === r.id && step.ev === 'craft' ? { ...plan, target: step.target } : plan;
 }
 
 // ── The Compass ──
@@ -136,9 +156,13 @@ export function suggest(state, now = Date.now()) {
       continue;
     }
     const main = q.id === 'hv_intro' || pins.has(q.id);
-    const loc = step.target ? locate(step.target) : null;
+    // Making (or using) something you can't make yet: point at the first
+    // thing in the way (the ore to mine, the level to train) instead.
+    const plan = stepPlan(hero, step);
+    const target = plan?.target ?? step.target;
+    const loc = target ? locate(target) : null;
     const near = loc ? Math.max(0, 10 - dist(pos, loc) / 40) : 0;
-    add({ id: q.id, src: 'quest', text: `${def.title} ${q.step + 1}/${def.steps.length}: ${step.text}`, why: step.hint ?? '', progress, target: step.target, score: main ? SCORE.quest : SCORE.sideQuest - 10 + near });
+    add({ id: q.id, src: 'quest', text: `${def.title} ${q.step + 1}/${def.steps.length}: ${step.text}`, why: plan?.text ?? step.hint ?? '', progress, target, score: main ? SCORE.quest : SCORE.sideQuest - 10 + near, recipe: plan?.recipe ?? null });
   }
 
   // Ready to collect or hand in.

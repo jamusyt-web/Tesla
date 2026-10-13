@@ -151,6 +151,17 @@ export class Journal {
     return { reward, claimed: `${page}:${pct}` };
   }
 
+  // A shop's trophy wall: regions fully discovered, the best fish records,
+  // and a few titles. [lines]
+  trophies(heroId) {
+    const out = [];
+    for (const id of this.ids(heroId, 'unlock')) if (id.startsWith('plaque:')) out.push(`★ ${REGIONS.find((r) => r.id === id.slice(7))?.name ?? id.slice(7)}: every corner found`);
+    const fish = [...this.rows(heroId, 'fish').entries()].filter(([, r]) => r.best).sort((a, b) => (ITEMS[b[0]]?.value ?? 0) - (ITEMS[a[0]]?.value ?? 0)).slice(0, 3);
+    for (const [id, r] of fish) out.push(`🐟 ${ITEMS[id]?.name ?? id}: ${r.best} kg`);
+    for (const t of [...this.ids(heroId, 'title')].slice(0, 2)) out.push(`🎖 ${t}`);
+    return out.slice(0, 6);
+  }
+
   // Waystone fees into a region you've fully discovered are halved.
   discount(heroId, region) {
     return this.has(heroId, 'unlock', `discount:${region}`) ? 0.5 : 0;

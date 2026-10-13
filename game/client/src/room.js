@@ -8,6 +8,33 @@ import { ITEMS, RARITY } from '../../shared/items.js';
 import { ROOM, customersOf, roomNav } from '../../shared/shop.js';
 import { stepPath } from '../../shared/world.js';
 
+// The owner's trophy wall: a board on the back wall listing records and
+// regions found (one textured quad).
+function trophyBoard(lines) {
+  const cv = document.createElement('canvas');
+  cv.width = 512;
+  cv.height = 64 + lines.length * 52;
+  const x = cv.getContext('2d');
+  x.fillStyle = '#4a3420';
+  x.fillRect(0, 0, cv.width, cv.height);
+  x.strokeStyle = '#c9a24a';
+  x.lineWidth = 10;
+  x.strokeRect(5, 5, cv.width - 10, cv.height - 10);
+  x.fillStyle = '#f3d589';
+  x.font = 'bold 34px Georgia, serif';
+  x.textAlign = 'center';
+  x.fillText('Trophies', cv.width / 2, 48);
+  x.font = '28px Georgia, serif';
+  x.textAlign = 'left';
+  lines.forEach((l, i) => x.fillText(l, 28, 100 + i * 52, cv.width - 56));
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const w = 1.8;
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(w, (w * cv.height) / cv.width), new THREE.MeshBasicMaterial({ map: tex }));
+  board.position.set(ROOM.w / 2 - 1.6, 1.9, -ROOM.d / 2 + 0.02);
+  return board;
+}
+
 // What you see while inside a player shop: the interior, everyone in it,
 // NPC customers replaying the sales the server already made, price tags.
 // The town keeps running underneath; GameClient just renders this instead.
@@ -55,6 +82,7 @@ export class RoomView {
       return el;
     });
     for (let i = 0; i < ROOM.fixtures.length; i++) this.#refreshDisplay(i);
+    if (p.trophies?.length) this.scene.add(trophyBoard(p.trophies));
     this.#updateClerk();
     this.resize();
   }

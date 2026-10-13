@@ -11,7 +11,10 @@ export const AVATAR_OPTIONS = {
   pantsColor: ['#4a3b32', '#2f3e5c', '#6b5a45', '#33473a', '#555555'],
   hat: ['none', 'wizard', 'crown', 'beanie', 'straw', 'bandana', 'leaf'],
   back: ['none', 'cape', 'backpack', 'wings'],
+  // A cape in a region's colours: earned at 75% of that region's journal page.
+  cloakTint: ['none', 'meadow', 'autumn', 'snow', 'desert', 'crystal'],
 };
+export const CLOAK_TINTS = { meadow: '#4f8f3a', autumn: '#b5562a', snow: '#9fc4e0', desert: '#d6a24a', crystal: '#7a5cc9' };
 
 export const DEFAULT_AVATAR = {
   skin: '#f5c9a3',
@@ -24,6 +27,7 @@ export const DEFAULT_AVATAR = {
   pantsColor: '#4a3b32',
   hat: 'none',
   back: 'none',
+  cloakTint: 'none',
 };
 
 // Colours from the brighter first palette, mapped onto today's, so saved
@@ -52,6 +56,7 @@ export function randomAvatar(rng = Math.random) {
   const b = rng();
   a.back = b < 0.5 ? 'none' : b < 0.53 ? 'wings' : pick(['cape', 'backpack']);
   if (a.eyes === 'sparkle' && rng() > 0.2) a.eyes = 'round';
+  a.cloakTint = 'none'; // earned, never rolled
   return a;
 }
 

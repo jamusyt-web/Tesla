@@ -5,6 +5,9 @@
 //   npm run bots            # 6 bots against http://localhost:8787
 //   npm run bots -- 12 http://localhost:8787
 //   BOT_SECONDS=60 npm run bots   # stop after a minute and print what worked
+//   BOT_COMPASS=1 BOT_SECONDS=600 npm run bots -- 3
+//                           # new heroes who do what the goal card says, and
+//                           # report how far they got (Gate G2)
 //
 // With more than one town on the map, the bots start spread across the
 // towns and use each town's own services (its merchant, market, stall,
@@ -19,6 +22,7 @@ import { Heroes } from '../server/heroes.js';
 import { Auth } from '../server/auth.js';
 import { randomAvatar } from '../shared/avatar.js';
 import { setWorld, NODES, buildColliders, approachPoint, NODE_TYPES, BUILDINGS, REGIONS, doorPoint, NavGrid } from '../shared/world.js';
+import { runCompassBot } from './compass-bot.js';
 
 const COUNT = Number(process.argv[2] || 6);
 const URL_ = process.argv[3] || 'http://localhost:8787';
@@ -49,15 +53,17 @@ const note = (town, what, r) => {
 
 function account(i) {
   const username = `bot_${i}`;
+  const n = typeof i === 'number' ? i : Number(String(i).split('_').pop()) || 0;
   let row = db.prepare('SELECT id FROM accounts WHERE username = ?').get(username);
   if (!row) {
     const salt = crypto.randomBytes(16).toString('hex');
     const r = db.prepare('INSERT INTO accounts (username, pass_hash, salt, created_at) VALUES (?,?,?,?)').run(username, crypto.randomBytes(32).toString('hex'), salt, Date.now());
     row = { id: Number(r.lastInsertRowid) };
   }
-  if (!heroes.load(row.id)) heroes.create(row.id, `${NAMES[i % NAMES.length]}${i >= NAMES.length ? i : ''} (bot)`.slice(0, 16).replace(/[()]/g, '').trim(), randomAvatar());
+  const label = typeof i === 'number' ? `${NAMES[i % NAMES.length]}${i >= NAMES.length ? i : ''} (bot)` : `${NAMES[n % NAMES.length]} ${String(i).slice(1, 6)}`;
+  if (!heroes.load(row.id)) heroes.create(row.id, label.slice(0, 16).replace(/[()_]/g, '').trim(), randomAvatar());
   // Spread across the towns: start at a town's square.
-  const t = TOWNS[i % Math.max(1, TOWNS.length)];
+  const t = TOWNS[n % Math.max(1, TOWNS.length)];
   if (t && TOWNS.length > 1) heroes.savePos(row.id, t.x + 3, t.z + 9);
   return auth.issue(row.id).token;
 }
@@ -145,10 +151,27 @@ async function runBot(i) {
   }
 }
 
+// A Compass bot: a fresh hero each run (bot_c<run><i>), following the goal card.
+async function compassBot(i) {
+  const token = account(`c${Date.now() % 100000}_${i}`);
+  const ws = new WebSocket(`${URL_.replace(/^http/, 'ws')}/ws?token=${token}`);
+  await new Promise((r) => ws.on('open', r));
+  const r = await runCompassBot({ ws, name: `bot ${i}`, col, nav, until, log: console.log });
+  ws.close();
+  return r;
+}
+
 const runs = [];
+const COMPASS = !!process.env.BOT_COMPASS;
 for (let i = 0; i < COUNT; i++) {
-  runs.push(runBot(i).catch((e) => console.error('bot crashed', e.message)));
+  runs.push((COMPASS ? compassBot(i) : runBot(i)).catch((e) => console.error('bot crashed', e.message)));
   await sleep(400);
+}
+if (COMPASS) {
+  const res = await Promise.all(runs);
+  console.log('\nCompass bots:');
+  for (const r of res.filter(Boolean)) console.log(`  ${r.name}: level ${r.from} → ${r.level}, intro step ${r.intro}, quests done ${r.quests}, Compass empty ${r.compassEmpty}/${r.samples} samples, dead air ${r.deadPct}%\n    did ${JSON.stringify(r.acted)}\n    gave up on ${JSON.stringify(r.failed)}`);
+  process.exit(0);
 }
 if (SECONDS) {
   await Promise.all(runs);

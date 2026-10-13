@@ -41,10 +41,14 @@ test('a new hero: the intro leads, side chains and upgrades follow, places to fi
 
 test('the next upgrade walks the path back to a node you can work', () => {
   const hero = fresh();
-  const up = nextUpgrades(hero);
-  const pick = up.find((u) => u.slot === 'pick');
+  // Copper needs Mining 2: first, train on what you can mine.
+  const early = nextUpgrades(hero).find((u) => u.slot === 'pick');
+  assert.match(early.plan.text, /Copper Ore needs Mining 2 → mine Boulder to train/);
+  assert.deepEqual(early.plan.target, { kind: 'node', type: 'rock_stone' });
+  hero.skills.mining = xpForLevel(2);
+  const pick = nextUpgrades(hero).find((u) => u.slot === 'pick');
   assert.equal(pick.recipe.id, 'pick_copper');
-  assert.match(pick.plan.text, /Copper Pickaxe: 3 Copper Bar → gather 6 Copper Ore/);
+  assert.match(pick.plan.text, /Copper Pickaxe: 3 Copper Bar → mine 6 Copper Ore/);
   assert.deepEqual(pick.plan.target, { kind: 'node', type: 'rock_copper' });
   // With the ore: smelt. With the bars and the planks: train, then forge.
   Object.assign(hero.inv, { copper_ore: 6, oak_log: 9 });

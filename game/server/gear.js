@@ -77,6 +77,9 @@ register('drink', drink, { inRun: true });
 register(
   'avatar',
   (g, c, a) => {
+    // A cloak tint has to be earned (the journal, 75% of a region).
+    const tint = a.avatar?.cloakTint;
+    if (tint && tint !== 'none' && !g.journal?.has(c.hero.id, 'unlock', `cloak:${tint}`)) a = { ...a, avatar: { ...a.avatar, cloakTint: c.hero.avatar.cloakTint ?? 'none' } };
     g.heroes.setAvatar(c.hero, a.avatar);
     g.tellAudience(c, { t: 'avatar', id: c.hero.id, avatar: c.hero.avatar });
   },

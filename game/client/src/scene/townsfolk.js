@@ -11,7 +11,7 @@ const VILLAGERS = [
   { name: 'Witch Hazel', lines: ['Moonbloom glows at night, you know…', 'Bring me sunpetals, dearie.', 'Potions need slime gel. Ew.'] },
   { name: 'Sir Gareth', lines: ['The Wilds grow restless.', 'A golem roams the ruins up north!', 'Defend when the beast winds up.'] },
   { name: 'Little Pip', lines: ['I saw a golden koi!!', 'Wanna race to the fountain?', 'The dock is my favourite place.'] },
-  { name: 'Merchant Ola', lines: ['Buy low, sell high!', 'Check the order book before you sell.', 'Haggle with customers for a bonus.'] },
+  { name: 'Merchant Ola', lines: ['Buy low, sell high!', 'Check the order book before you sell.', 'The Order Board pays well for what the town needs.'] },
   { name: 'Granny Moss', lines: ['Back in my day trees were taller.', 'Perfect swings fell trees faster, dear.', 'Have a lovely day!'] },
 ];
 const PET_LINES = ['*happy noises*', '*wiggles*', '*looks at you expectantly*', '*sniff sniff*'];

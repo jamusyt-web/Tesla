@@ -106,6 +106,7 @@ export class ShopRoom {
       ...st,
       occ: [...this.occ.values()].filter((o) => o !== c).map((o) => o.roomInfo()),
       you: { x: q2(c.rent.x), z: q2(c.rent.z), rot: q2(c.rent.rot) },
+      trophies: this.game.journal?.trophies(this.owner) ?? [], // the owner's trophy wall
     };
     if (c.hero.id === this.owner) out.presence = 'inside';
     return out;

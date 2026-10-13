@@ -43,6 +43,13 @@ export function renderJournal(body, jr, act) {
     ),
     h('div.claims', ...PAGE_STEPS.map((s) => claimBtn(p.id, s, p.pct, claims, act, pageReward(region, s)))),
   );
+  // The 75% cloak: wear it.
+  if (claims.has(`${p.id}:75`)) {
+    const tint = region.biome ?? 'meadow';
+    const hud = this.hud;
+    const on = hud.myAvatar?.cloakTint === tint && hud.myAvatar?.back === 'cape';
+    body.append(h('button.btn.small' + (on ? '' : '.green'), { on: { click: () => this.rpc('avatar', { avatar: { ...hud.myAvatar, back: 'cape', cloakTint: on ? 'none' : tint } }).then(() => (hud.setAvatar({ ...hud.myAvatar, back: 'cape', cloakTint: on ? 'none' : tint }), act.rerender())) } }, on ? 'Take off the cloak' : `Wear the ${tint} cloak`));
+  }
   body.append(h('div.tabs.wrap', ...TABS.map(([k, l]) => h('button' + (pageTab === k ? '.on' : ''), { on: { click: () => ((pageTab = k), act.rerender()) } }, l))));
   const list = p.tabs[pageTab] ?? [];
   if (!list.length) body.append(h('div.empty', 'Nothing here in this region.'));

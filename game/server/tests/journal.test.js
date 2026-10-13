@@ -161,3 +161,22 @@ test("Ysolde's Atlas: the tinker gives page 1 after the intro; each page needs t
     done();
   }
 });
+
+test('the 75% cloak tint must be earned; the trophy wall lists records and regions', () => {
+  const { game, hero, call, done } = harness();
+  try {
+    const c = hero('Cape');
+    call(c, 'avatar', { avatar: { ...c.hero.avatar, back: 'cape', cloakTint: 'meadow' } });
+    assert.equal(c.hero.avatar.cloakTint, 'none', 'not earned yet');
+    game.journal.note(c.id, 'unlock', 'cloak:meadow');
+    call(c, 'avatar', { avatar: { ...c.hero.avatar, back: 'cape', cloakTint: 'meadow' } });
+    assert.equal(c.hero.avatar.cloakTint, 'meadow');
+    game.journal.note(c.id, 'fish', 'pike', { best: 6.2 });
+    game.journal.note(c.id, 'unlock', 'plaque:hearthvale');
+    const t = game.journal.trophies(c.id);
+    assert.ok(t.some((l) => /Hearthvale: every corner found/.test(l)));
+    assert.ok(t.some((l) => /Pike: 6.2 kg/.test(l)));
+  } finally {
+    done();
+  }
+});
