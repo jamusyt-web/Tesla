@@ -1784,8 +1784,11 @@ export class GameClient {
         }
       }
     }
+    const camPos = this.camera.position;
     for (const pv of this.players.values()) {
       if (pv.isMe) continue;
+      // Far heroes lose their ink lines, then aren't drawn at all.
+      pv.av.root.visible = !pv.hidden && pv.av.setDetail(pv.av.root.position.distanceTo(camPos));
       const s = pv.body.sample();
       if (s) {
         pv.x = s.x;
@@ -1826,7 +1829,7 @@ export class GameClient {
       this.dungeon.update(dt, this.t, this.sock.serverNow() - (this.run?.state.startedAt ?? 0), me?.local);
     } else {
       this.town.update(dt, this.t, this.camera);
-      this.folk.update(dt);
+      this.folk.update(dt, this.cam.target);
     }
     fadeOccluders(this, dt);
     this.fx.update(dt);

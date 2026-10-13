@@ -13,7 +13,8 @@ export class Particles {
   constructor(scene, max = 900, round = false) {
     this.max = max;
     const geo = round ? new THREE.IcosahedronGeometry(0.5, 1) : new THREE.BoxGeometry(1, 1, 1);
-    const mat = round ? new THREE.MeshLambertMaterial({ color: '#ffffff' }) : new THREE.MeshBasicMaterial({ vertexColors: false });
+    // Unshaded, both kinds: one shader for every particle.
+    const mat = new THREE.MeshBasicMaterial({ vertexColors: false });
     this.mesh = new THREE.InstancedMesh(geo, mat, max);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(max * 3), 3);

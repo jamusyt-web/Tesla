@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import { mesh, toon, shade, outlineMat } from './toon.js';
+import { mesh, toon, shade } from './toon.js';
 import { buildTool } from './tools.js';
+import { bakeSkinned, mergeRigid, skinnedCopies } from './merge.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { sanitizeAvatar } from '../../../shared/avatar.js';
 
 const OL = 0.036;
@@ -14,9 +16,29 @@ const cyl = (rt, rb, h, s = 14) => new THREE.CylinderGeometry(rt, rb, h, s);
 const ease = (t) => 1 - Math.pow(1 - t, 3);
 const clamp01 = (t) => Math.max(0, Math.min(1, t));
 
+// A tool or weapon, merged into a mesh or two (built once per item). Heroes
+// wear skinned copies of it on their hand or back bone.
+const toolProtos = new Map();
+function toolProto(id) {
+  let proto = toolProtos.get(id);
+  if (!proto) {
+    const raw = buildTool(id);
+    const tip = raw.userData.tip;
+    raw.userData = {};
+    proto = mergeRigid(raw);
+    proto.userData.tipAt = tip ? tip.position.clone() : null; // where a rod's line leaves it
+    proto.traverse((o) => o.geometry && (o.geometry.userData.shared = true));
+    toolProtos.set(id, proto);
+  }
+  return proto;
+}
+const isHull = (o) => o.isMesh && o.material.side === THREE.BackSide;
+
 // A full-body stylised hero built from primitives. Every slot (hair, outfit, hat,
 // back) is swappable, and tools/weapons attach to a hand socket so tool skins
-// show up automatically.
+// show up automatically. Once built, the body is baked into one skinned mesh
+// and one ink shell (scene/merge.js): the moving parts are bones, so a hero
+// costs a few draw calls instead of about sixty.
 export class Avatar {
   constructor(cfg, { equip = {}, shadowBlob = true, layer = 0 } = {}) {
     this.layer = layer;
@@ -45,7 +67,9 @@ export class Avatar {
     this.cfg = sanitizeAvatar(cfg);
     const c = this.cfg;
     if (this.rig) this.body.remove(this.rig);
-    const rig = new THREE.Group();
+    for (const m of this.baked ?? []) (this.body.remove(m), m.geometry.dispose());
+    this.tail = null;
+    const rig = new THREE.Bone();
     this.rig = rig;
     this.body.add(rig);
     this.mats = [];
@@ -59,7 +83,7 @@ export class Avatar {
 
     // ── Legs
     this.legs = [-1, 1].map((s) => {
-      const pivot = new THREE.Group();
+      const pivot = new THREE.Bone();
       pivot.position.set(0.14 * s, HIP, 0);
       const leg = M(cyl(0.1, 0.085, 0.62), pants);
       leg.position.y = -0.33;
@@ -72,7 +96,7 @@ export class Avatar {
     });
 
     // ── Torso
-    const torso = new THREE.Group();
+    const torso = new THREE.Bone();
     torso.position.y = HIP;
     rig.add(torso);
     this.torso = torso;
@@ -142,7 +166,7 @@ export class Avatar {
 
     // ── Arms
     this.arms = [-1, 1].map((s) => {
-      const pivot = new THREE.Group();
+      const pivot = new THREE.Bone();
       pivot.position.set(0.38 * s, 1.4, 0);
       const sleeve = M(cyl(0.085, robe ? 0.13 : 0.09, 0.56, 10), shirt);
       sleeve.position.y = -0.27;
@@ -153,14 +177,14 @@ export class Avatar {
       rig.add(pivot);
       return pivot;
     });
-    this.socket = new THREE.Group();
+    this.socket = new THREE.Bone(); // tools in hand ride this bone
     this.socket.position.set(0, -0.6, 0.02);
     this.socket.scale.setScalar(1.15); // tools in proportion to the longer body
     this.socket.rotation.x = 2.09; // tool juts forward-down from the fist
     this.arms[1].add(this.socket);
 
     // ── Head
-    const head = new THREE.Group();
+    const head = new THREE.Bone();
     head.position.y = HEAD_Y;
     head.scale.setScalar(HEAD_S);
     rig.add(head);
@@ -183,15 +207,32 @@ export class Avatar {
     this.#buildBack(rig, c);
 
     // Sword rests on the back when hands are busy or idle.
-    this.backSlot = new THREE.Group();
+    this.backSlot = new THREE.Bone();
     this.backSlot.position.set(0.18, 1.2, -0.33);
     this.backSlot.rotation.set(0, 0, 2.6);
     rig.add(this.backSlot);
+    // Bake the body before the tools go on (they come and go).
+    const { meshes, hull, skeleton, bones } = bakeSkinned(rig, this.body);
+    this.baked = [...meshes, hull].filter(Boolean);
+    this.mats = meshes.map((m) => m.material);
+    this.skeleton = skeleton;
+    this.bone = { socket: bones.indexOf(this.socket), back: bones.indexOf(this.backSlot) };
+    this.backTool = [];
+    this.heldTool = [];
     this.setEquip(this.equip);
-    rig.traverse((o) => {
-      if (o.isMesh && o.material !== outlineMat(OL) && o.material.side !== THREE.BackSide) o.castShadow = true;
-    });
-    this.#markLayer(rig);
+    this.inkOn = true;
+    this.#markLayer(this.body);
+  }
+
+  // How much of a hero to draw at distance d (metres): no ink lines past
+  // 25 m, nothing past 60 m. Returns whether it should be drawn at all.
+  setDetail(d) {
+    const ink = d < 25;
+    if (ink !== this.inkOn) {
+      this.inkOn = ink;
+      this.root.traverse((o) => isHull(o) && (o.visible = ink));
+    }
+    return d < 60;
   }
 
   #markLayer(obj) {
@@ -321,10 +362,12 @@ export class Avatar {
       const tie = M(sph(0.1, 8, 8));
       tie.position.set(0, 0.2, -0.55);
       const tail = M(new THREE.CapsuleGeometry(0.12, 0.45, 4, 8));
-      tail.position.set(0, -0.15, -0.66);
-      tail.rotation.x = 0.35;
-      head.add(tie, tail);
-      this.tail = tail;
+      const sway = new THREE.Bone(); // it sways, so it gets a bone of its own
+      sway.position.set(0, -0.15, -0.66);
+      sway.rotation.x = 0.35;
+      sway.add(tail);
+      head.add(tie, sway);
+      this.tail = sway;
     }
   }
 
@@ -403,9 +446,15 @@ export class Avatar {
       const pos = geo.attributes.position;
       for (let i = 0; i < pos.count; i++) pos.setZ(i, -Math.pow(pos.getX(i), 2) * 0.6);
       geo.computeVertexNormals();
-      const cape = new THREE.Mesh(geo, toon(shade(c.outfitColor, 0.75), { side: THREE.DoubleSide }));
-      cape.castShadow = true;
-      const pivot = new THREE.Group();
+      // Both faces as one sheet (front and a flipped copy), so it bakes into the body.
+      const flip = geo.clone();
+      const ix = flip.index.array;
+      for (let i = 0; i < ix.length; i += 3) [ix[i + 1], ix[i + 2]] = [ix[i + 2], ix[i + 1]];
+      const nr = flip.attributes.normal;
+      for (let i = 0; i < nr.count; i++) nr.setXYZ(i, -nr.getX(i), -nr.getY(i), -nr.getZ(i));
+      const sheet = mergeGeometries([geo, flip]);
+      const cape = new THREE.Mesh(sheet, toon(shade(c.outfitColor, 0.75)));
+      const pivot = new THREE.Bone();
       pivot.position.set(0, 1.44, -0.3);
       cape.position.y = -0.65;
       pivot.add(cape);
@@ -422,7 +471,8 @@ export class Avatar {
       roll.position.set(0, 1.46, -0.36);
       rig.add(pack, flap, roll);
     } else if (c.back === 'wings') {
-      const mat = new THREE.MeshToonMaterial({ color: '#cfefff', transparent: true, opacity: 0.8, emissive: '#7fd0ff', emissiveIntensity: 0.25, side: THREE.DoubleSide });
+      // Glassy and lit from within: unshaded, so it needs no shader of its own.
+      const mat = new THREE.MeshBasicMaterial({ color: '#d4f1ff', transparent: true, opacity: 0.78, side: THREE.DoubleSide });
       this.wings = [-1, 1].map((s) => {
         const w = new THREE.Mesh(sph(0.35, 12, 8), mat);
         w.scale.set(1, 0.6, 0.08);
@@ -438,9 +488,7 @@ export class Avatar {
 
   setEquip(equip) {
     this.equip = { ...equip };
-    this.backSlot.clear();
-    if (equip.weapon) this.backSlot.add(buildTool(equip.weapon));
-    this.#markLayer(this.backSlot);
+    this.backTool = this.#wear(this.backTool, equip.weapon, this.bone.back);
     if (this.heldKind) this.hold(this.heldKind, true);
   }
 
@@ -451,12 +499,33 @@ export class Avatar {
     this.socket.clear();
     this.held = null;
     const id = kind ? this.equip[kind] : null;
+    this.heldTool = this.#wear(this.heldTool, id, this.bone.socket);
     if (id) {
-      this.held = buildTool(id);
+      // (game.js reads held.userData.tip for the fishing line)
+      this.held = new THREE.Object3D();
+      const at = toolProto(id).userData.tipAt;
+      if (at) {
+        const tip = new THREE.Object3D();
+        tip.position.copy(at);
+        this.held.add(tip);
+        this.held.userData.tip = tip;
+      }
       this.socket.add(this.held);
-      this.#markLayer(this.held);
     }
-    this.backSlot.visible = kind !== 'weapon';
+    for (const m of this.backTool) m.visible = kind !== 'weapon' && (!isHull(m) || this.inkOn !== false);
+  }
+
+  // Swap the meshes of a worn tool: old ones off, item `id`'s on (riding `bone`).
+  #wear(old, id, bone) {
+    for (const m of old) this.body.remove(m);
+    if (!id) return [];
+    const list = skinnedCopies(toolProto(id), this.skeleton, bone, this.mats[0]);
+    for (const m of list) {
+      this.body.add(m);
+      if (this.layer) m.layers.set(this.layer);
+      if (isHull(m) && this.inkOn === false) m.visible = false;
+    }
+    return list;
   }
 
   play(name, dur) {
@@ -616,7 +685,7 @@ export class Avatar {
 
   dispose() {
     this.root.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
+      if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
     });
   }
 }

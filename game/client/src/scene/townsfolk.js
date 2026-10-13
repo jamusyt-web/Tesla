@@ -27,6 +27,9 @@ function blob(size) {
   return m;
 }
 
+const ANIMATED = 6; // walkers animated at once
+const MAX_WALKERS = 20; // in the whole world
+
 class Walker {
   constructor(slot, variant, route, speed, seed, info) {
     const made = assets.make(slot, { variant, unique: false, castShadow: false });
@@ -97,7 +100,7 @@ class Walker {
     let dr = ((rot - this.obj.rotation.y + Math.PI) % (Math.PI * 2)) - Math.PI;
     if (dr < -Math.PI) dr += Math.PI * 2;
     this.obj.rotation.y += dr * Math.min(1, dt * 8);
-    this.mixer?.update(dt);
+    if (this.animate !== false) this.mixer?.update(dt);
   }
 }
 
@@ -135,6 +138,7 @@ export class Townsfolk {
         const route = plan(seq);
         if (!route) continue;
         const w = new Walker('npc_villager', i, route, 1.5 + r() * 0.4, 100 + i, { ...VILLAGERS[i], kind: 'villager' });
+        if (this.walkers.length >= MAX_WALKERS) break;
         this.walkers.push(w);
         scene.add(w.obj);
       }
@@ -154,6 +158,7 @@ export class Townsfolk {
         const route = seq.length === 3 && plan(seq);
         if (!route) continue;
         const w = new Walker('npc_pet', i, route, 1.1 + r() * 0.5, 300 + i, { name: null, lines: PET_LINES, kind: 'pet' });
+        if (this.walkers.length >= MAX_WALKERS) break;
         this.walkers.push(w);
         scene.add(w.obj);
       }
@@ -184,6 +189,7 @@ export class Townsfolk {
         else legs.push([seq[j], ...path]);
       }
       if (!ok) continue;
+      if (this.walkers.length >= MAX_WALKERS) break;
       const w = new Walker(slot, 0, legs, 1.2, seedBase + i, { name: null, lines, kind: 'pet' });
       this.walkers.push(w);
       scene.add(w.obj);
@@ -194,8 +200,16 @@ export class Townsfolk {
     return this.walkers.map((w) => w.obj);
   }
 
-  update(dt) {
+  // Everyone keeps walking their rounds, but only the nearest few (to
+  // `focus`, where the camera looks) are animated; the rest hold a pose.
+  update(dt, focus = null) {
     const now = Date.now();
+    if (focus && (this.rank = (this.rank ?? 0) - dt) <= 0) {
+      this.rank = 0.5;
+      const d = (w) => (w.obj.position.x - focus.x) ** 2 + (w.obj.position.z - focus.z) ** 2;
+      const near = [...this.walkers].sort((a, b) => d(a) - d(b)).slice(0, ANIMATED);
+      for (const w of this.walkers) w.animate = near.includes(w);
+    }
     for (const w of this.walkers) w.update(dt, now);
   }
 }

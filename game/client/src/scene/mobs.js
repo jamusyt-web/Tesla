@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mesh, toon, shade } from './toon.js';
 import { MONSTERS } from '../../../shared/monsters.js';
 import * as assets from './assets.js';
+import { bakeSkinned, bakeNodes } from './merge.js';
 
 const OL = 0.036;
 const sph = (r, a = 16, b = 12) => new THREE.SphereGeometry(r, a, b);
@@ -24,7 +25,7 @@ export class Mob {
     this.type = type;
     this.def = MONSTERS[type];
     this.root = new THREE.Group();
-    this.body = new THREE.Group();
+    this.body = new THREE.Bone(); // code-drawn monsters bend at bones (see #bake)
     this.root.add(this.body);
     this.t = Math.random() * 10;
     this.oneShot = null;
@@ -37,11 +38,31 @@ export class Mob {
     this.blob = blob;
     this.modelled = assets.has(`mob_${type}`); // false: drawn in code until its model group loads
     if (this.modelled) this.#fromModel(`mob_${type}`);
-    else if (this[type]) this[type]();
-    else this.slime(); // unknown type without a model: a tinted blob
+    else {
+      if (this[type]) this[type]();
+      else this.slime(); // unknown type without a model: a tinted blob
+      this.#bake();
+    }
     // Monsters move, and the shadow map is only redrawn now and then, so they
     // never cast into it: the blob under them is their shadow.
     this.root.traverse((o) => o.isMesh && (o.castShadow = false));
+  }
+
+  // A code-drawn monster is many small parts: bake them into one skinned mesh
+  // (plus one for a glow, and one ink shell), so it costs a few draw calls.
+  #bake() {
+    const { meshes } = bakeSkinned(this.body, this.root);
+    this.mats = meshes.map((m) => m.material);
+  }
+  // A part that moves on its own (a wagging tail, a spinning core) gets a bone.
+  static boned(obj) {
+    const bone = new THREE.Bone();
+    bone.position.copy(obj.position);
+    bone.rotation.copy(obj.rotation);
+    obj.position.set(0, 0, 0);
+    obj.rotation.set(0, 0, 0);
+    bone.add(obj);
+    return bone;
   }
 
   #fromModel(slot) {
@@ -50,6 +71,9 @@ export class Mob {
     made.object.traverse((o) => {
       if (o.isMesh && o.material.side !== THREE.BackSide) this.mats.push(...[].concat(o.material));
     });
+    // Animals whose parts are animated one by one: one mesh and one ink shell.
+    const baked = bakeNodes(made.object, this.body);
+    if (baked) this.mats = baked.meshes.map((m) => m.material);
     this.height = made.size.y + 0.4;
     this.blob.scale.setScalar(Math.max(made.size.x, made.size.z) * 0.8);
     if (made.mixer) {
@@ -102,7 +126,7 @@ export class Mob {
     torso.rotation.x = Math.PI / 2;
     torso.position.y = 0.85;
     this.body.add(torso);
-    const head = new THREE.Group();
+    const head = new THREE.Bone();
     head.position.set(0, 1.25, 0.75);
     this.body.add(head);
     this.headG = head;
@@ -123,7 +147,7 @@ export class Mob {
     }
     eyes(head, 0.08, 0.3, 0.15, 0.07, '#e8b23a');
     for (const [x, z] of [[-0.22, 0.45], [0.22, 0.45], [-0.22, -0.45], [0.22, -0.45]]) {
-      const pivot = new THREE.Group();
+      const pivot = new THREE.Bone();
       pivot.position.set(x, 0.7, z);
       const leg = mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.6, 8), null, { outline: OL, mat: fur });
       leg.position.y = -0.32;
@@ -134,8 +158,8 @@ export class Mob {
     const tail = mesh(new THREE.ConeGeometry(0.14, 0.6, 8), null, { outline: OL, mat: fur });
     tail.position.set(0, 1.05, -0.8);
     tail.rotation.x = -2.2;
-    this.body.add(tail);
-    this.tail = tail;
+    this.tail = Mob.boned(tail);
+    this.body.add(this.tail);
     this.height = 1.9;
   }
 
@@ -143,7 +167,7 @@ export class Mob {
     const skin = this.m(this.def.color);
     const cloth = this.m('#8a5a33');
     for (const s of [-1, 1]) {
-      const pivot = new THREE.Group();
+      const pivot = new THREE.Bone();
       pivot.position.set(0.15 * s, 0.5, 0);
       const leg = mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.45, 8), null, { outline: OL, mat: cloth });
       leg.position.y = -0.24;
@@ -154,7 +178,7 @@ export class Mob {
     const torso = mesh(new THREE.CylinderGeometry(0.3, 0.36, 0.6, 12), null, { outline: OL, mat: cloth });
     torso.position.y = 0.8;
     this.body.add(torso);
-    const head = new THREE.Group();
+    const head = new THREE.Bone();
     head.position.y = 1.45;
     this.body.add(head);
     this.headG = head;
@@ -171,7 +195,7 @@ export class Mob {
     nose.position.set(0, -0.05, 0.45);
     head.add(nose);
     eyes(head, 0.08, 0.36, 0.16, 0.08, '#d23');
-    const arm = new THREE.Group();
+    const arm = new THREE.Bone();
     arm.position.set(0.4, 1.05, 0);
     const a = mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.45, 8), null, { outline: OL, mat: skin });
     a.position.y = -0.2;
@@ -195,7 +219,7 @@ export class Mob {
       return b;
     };
     for (const s of [-1, 1]) {
-      const pivot = new THREE.Group();
+      const pivot = new THREE.Bone();
       pivot.position.set(0.45 * s, 1.0, 0);
       const leg = mesh(new THREE.BoxGeometry(0.5, 1.0, 0.55), null, { outline: OL, mat: stone });
       leg.position.y = -0.5;
@@ -207,9 +231,9 @@ export class Mob {
     chunk(1.65, 0.25, 1.15, 0, 2.35, 0, moss);
     const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.22), core);
     c.position.set(0, 1.8, 0.58);
-    this.body.add(c);
-    this.core = c;
-    const head = new THREE.Group();
+    this.core = Mob.boned(c);
+    this.body.add(this.core);
+    const head = new THREE.Bone();
     head.position.set(0, 2.75, 0.1);
     this.body.add(head);
     this.headG = head;
@@ -219,7 +243,7 @@ export class Mob {
       const e = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.05), core);
       e.position.set(0.18 * s, 0.05, 0.36);
       head.add(e);
-      const arm = new THREE.Group();
+      const arm = new THREE.Bone();
       arm.position.set(1.0 * s, 2.2, 0);
       const up = mesh(new THREE.BoxGeometry(0.45, 1.3, 0.5), null, { outline: OL, mat: stone });
       up.position.y = -0.6;

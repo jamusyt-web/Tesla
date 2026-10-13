@@ -26,6 +26,7 @@ export function outlineMat(thickness = 0.03, color = '#1e140e') {
   const key = thickness + color;
   if (outlineMats.has(key)) return outlineMats.get(key);
   const m = new THREE.MeshBasicMaterial({ color, side: THREE.BackSide });
+  m.userData.thick = thickness; // (for merging: the hull can be pushed out ahead of time)
   m.onBeforeCompile = (s) => {
     s.uniforms.thick = { value: thickness };
     s.vertexShader = 'uniform float thick;\n' + s.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed = position + normal * thick;');
