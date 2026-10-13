@@ -79,6 +79,7 @@ export class Heroes {
       title: r.title ?? null,
       perks: parseJson(r.perks), // level-40 choices: { skill: 'a' | 'b' }
       buffs: parseJson(r.buffs), // shared/buffs.js
+      rested: r.rested ?? 0, // Hearth Rest: xp left in the pool (server/digest.js)
       x: r.x ?? SPAWN.x,
       z: r.z ?? SPAWN.z,
     };
@@ -151,16 +152,28 @@ export class Heroes {
   }
 
   // Returns { leveled: bool, level } for UI feedback.
+  // xpBonus (set by the game) adds Festive and Hearth Rest on top.
   addXp(hero, skill, amount) {
+    const bonus = Math.max(0, Math.round(this.xpBonus?.(hero, skill, amount) ?? 0));
+    amount += bonus;
     const before = levelFromXp(hero.skills[skill] || 0);
     hero.skills[skill] = (hero.skills[skill] || 0) + amount;
     this.q.skills.run(JSON.stringify(hero.skills), hero.id);
     const after = levelFromXp(hero.skills[skill]);
     const prevHero = hero.level;
     hero.level = heroLevel(hero.skills);
-    const xp = { skill, amount, leveled: after > before, level: after, heroLeveled: hero.level > prevHero, heroLevel: hero.level };
+    const xp = { skill, amount, bonus, leveled: after > before, level: after, heroLeveled: hero.level > prevHero, heroLevel: hero.level };
     this.onXp?.(hero, xp); // (the game turns it into an 'xp' event for whoever is online)
     return xp;
+  }
+
+  // Hearth Rest: take up to half of an xp grant from the pool (SPEC §5.6).
+  restTake(hero, amount) {
+    const n = Math.min(hero.rested || 0, Math.round(amount * 0.5));
+    if (n <= 0) return 0;
+    hero.rested -= n;
+    this.setField(hero.id, 'rested', hero.rested);
+    return n;
   }
 
   // Keep a hero's buffs (they survive logging out).

@@ -1,7 +1,7 @@
 import './map.js'; // loads the world map first: everything below reads it
 import { ITEMS, WORN } from '../shared/items.js';
 import { effectsOf, perkNames } from '../shared/perks.js';
-import { useBuffs } from '../shared/buffs.js';
+import { useBuffs, applyBoon, BOONS } from '../shared/buffs.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
 import { levelFromXp } from '../shared/skills.js';
 import { heroStats } from '../shared/monsters.js';
@@ -34,6 +34,9 @@ import './gear.js'; // these register their RPCs
 import './perf.js';
 import { TUTORIAL } from './tutorial.js';
 import { Quests } from './quests.js';
+import { Orders } from './orders.js';
+import { Almanac } from './almanac.js';
+import { Notices } from './notices.js';
 import * as rep from './rep.js';
 
 export { TUTORIAL };
@@ -116,7 +119,17 @@ class Client {
     this.fxChanged();
     this.game.heroes.saveBuffs(this.hero);
     this.send({ t: 'buffs', buffs: r.buffs });
-    for (const id of r.ended) this.send({ t: 'toast', text: `Your ${ITEMS[id]?.name ?? 'buff'} wore off.` });
+    for (const id of r.ended) this.send({ t: 'toast', text: `Your ${ITEMS[id]?.name ?? BOONS[id]?.name ?? 'buff'} wore off.` });
+  }
+  // A blessing from the world (Festive, a shrine's blessing): the boon slot.
+  giveBoon(id) {
+    const b = applyBoon(this.hero.buffs, id);
+    if (!b) return;
+    this.hero.buffs = b;
+    this.fxChanged();
+    this.game.heroes.saveBuffs(this.hero);
+    this.send({ t: 'buffs', buffs: b });
+    this.syncSpeed();
   }
   // Walk speed out of battle (a charm or a travel buff).
   syncSpeed() {
@@ -164,6 +177,14 @@ export class Game {
     this.merchant = new Merchant(db, this.heroes);
     rep.useDb(db);
     this.quests = new Quests(this);
+    this.orders = new Orders(this);
+    this.almanac = new Almanac(this);
+    this.notices = new Notices(this);
+    // Festive and Hearth Rest add to every xp grant.
+    this.heroes.xpBonus = (hero, skill, amount) => {
+      const c = this.online.get(hero.id);
+      return Math.round(amount * (c?.effects().xpPct || 0)) + this.heroes.restTake(hero, amount);
+    };
     // Every xp grant, as an event for whoever earned it (quests, level-up unlocks).
     this.heroes.onXp = (hero, xp) => {
       const c = this.online.get(hero.id);
@@ -394,6 +415,7 @@ export class Game {
     if (away) c.send({ t: 'awaySales', ...away });
     pushStorage(this, c); // goods waiting in storage, per town
     this.quests.ensure(c); // a new hero's first quest, and any chain that has opened up
+    this.almanac.ensure(c); // today's dailies and this week's errand
     this.shops.prune(accountId);
     ws.on('message', (buf) => this.onMessage(c, buf));
     ws.on('close', () => this.disconnect(c));

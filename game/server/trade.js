@@ -87,6 +87,7 @@ register('market.place', (g, c, a) => {
   for (const id of r.notify) {
     const o = g.online.get(id);
     if (id !== c.hero.id) emit(o ?? null, 'marketFill', { id, item: a.item, side: a.side === 'buy' ? 'sell' : 'buy', town });
+    if (!o && id !== c.hero.id) g.notices?.add(id, 'fill', { item: a.item, side: a.side === 'buy' ? 'sell' : 'buy', town }, null);
     if (!o) continue;
     o.pushInventory();
     if (id === c.hero.id) continue;
@@ -135,6 +136,7 @@ register('jobs.deliver', (g, c, a) => {
   }
   emit(c, 'deliver', { job: r.job, item: r.item, qty: r.qty, paid: r.paid, town: r.town });
   emit(o ?? null, 'jobDelivered', { job: r.job, poster: r.poster, item: r.item, qty: r.qty, left: r.left });
+  if (!o) g.notices?.add(r.poster, 'job', { item: r.item, qty: r.qty, left: r.left, by: c.hero.name, town: r.town }, `${c.hero.name} delivered ${r.qty}× ${ITEMS[r.item].name} for your job${r.left ? ` (${r.left} still wanted)` : '. Job done!'}`);
   return r;
 });
 register('jobs.cancel', (g, c, a) => {
@@ -149,6 +151,7 @@ export function expireJobs(g, now = Date.now()) {
     for (const r of g.jobs.expire(now)) {
       const o = g.online.get(r.poster);
       emit(o ?? null, 'jobExpired', { poster: r.poster, item: r.item, left: r.left, refund: r.refund });
+      if (!o) g.notices?.add(r.poster, 'jobExpired', { item: r.item, left: r.left, refund: r.refund }, `Your job for ${ITEMS[r.item]?.name ?? r.item} ran out${r.refund ? `: ${r.refund} 🪙 back` : ''}.`);
       if (!o) continue;
       o.pushInventory();
       o.send({ t: 'toast', kind: 'gold', text: `Your job for ${ITEMS[r.item]?.name ?? r.item} ran out${r.refund ? `: ${r.refund} 🪙 back` : ''}.` });
