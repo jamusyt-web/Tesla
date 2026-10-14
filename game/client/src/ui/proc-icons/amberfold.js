@@ -81,6 +81,21 @@ function lumps(color) {
   return g;
 }
 
+// A haunch of venison: a meaty drumstick with its bone.
+function haunch() {
+  const g = new THREE.Group();
+  const meat = new THREE.SphereGeometry(0.42, 12, 10);
+  meat.scale(1, 1.25, 1);
+  g.add(inked(meat, '#b5523a'));
+  const bone = inked(new THREE.CylinderGeometry(0.08, 0.08, 0.6, 8), '#f3e6cf');
+  bone.position.y = -0.7;
+  const knob = inked(new THREE.SphereGeometry(0.13, 10, 8), '#f3e6cf');
+  knob.position.y = -1.0;
+  g.add(bone, knob);
+  g.rotation.z = -0.7;
+  return g;
+}
+
 // A coil of rope.
 function rope() {
   const g = new THREE.Group();
@@ -96,6 +111,7 @@ function rope() {
 
 export default () => ({
   steel_bar: () => ingot('#9aa6b4'),
+  venison: haunch,
   coal: () => lumps('#3a3634'),
   amber_sap: () => drop('#f0a020', '#d97a10'),
   heartwood_sap: () => drop('#9a5a2a', '#6a3a1a'),

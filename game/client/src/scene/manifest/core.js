@@ -284,7 +284,6 @@ export const MODELS = {
   'icon:maple_log': { url: SUR('tree-log-small'), height: 1, pose: [0, 100, 0], remap: [{ to: '#b5652e', ref: 0.55 }] },
   'icon:maple_plank': { url: SUR('resource-planks'), height: 1, pose: [0, 30, 0], remap: [{ to: '#d9894a', ref: 0.55 }] },
   'icon:hearthcap': { url: NK('mushroom_red'), height: 1, recolor: { colorRed: '#d9542f', colorWhite: '#f6e7c8' } },
-  'icon:venison': { url: FOOD('fish'), height: 1, pose: [0, 20, 0], remap: [{ to: '#a8483a', ref: 0.45 }] },
   'icon:rivercarp': { url: SUR('fish'), height: 1, pose: [0, 70, 0], remap: [{ to: '#9a8a5a', ref: 0.62 }] },
   'icon:amber_trout': { url: SUR('fish-large'), height: 1, pose: [0, 70, 0], remap: [{ band: 'metal', to: '#d9a441', ref: 0.47 }] },
   'icon:leaf_eel': { url: FOOD('fish'), height: 1, pose: [0, 20, 0], remap: [{ to: '#7a9a3a', ref: 0.45 }] },
