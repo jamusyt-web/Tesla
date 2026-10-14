@@ -4,7 +4,7 @@
 // 30-minute rest (shrines), or never (people to talk to).
 import { ITEMS } from '../shared/items.js';
 import { NODE_TYPES } from '../shared/nodes.js';
-import { LANDMARKS, NODES, REGIONS, mulberry32 } from '../shared/world.js';
+import { LANDMARKS, NODES, REGIONS, BUILDINGS, doorPoint, mulberry32 } from '../shared/world.js';
 import { weekIndex } from '../shared/dungeon.js';
 import { regionAt, townAt } from '../shared/places.js';
 import { LANDMARK_INFO, LANDMARK_RANGE, cacheLoot, glimmers, atlasDrop, atlasPage, ATLAS, ATLAS_END, discoverables } from '../shared/journal.js';
@@ -15,6 +15,7 @@ import { needTown } from './towns.js';
 import * as rep from './rep.js';
 
 const CURIO_REP = 30;
+const HALL_RANGE = 12; // metres from the Town Hall's door
 
 // The raw goods a region grows (cache loot draws from these).
 const MATS = new Map();
@@ -96,7 +97,8 @@ export class Landmarks {
       // Ysolde's Atlas: the next page, if you hold the one before.
       const pages = new Set(ATLAS.map((_, i) => i + 1).filter((n) => H.count(c.hero.id, atlasPage(n)) > 0));
       const n = atlasDrop(lm.id, pages);
-      const canStart = n !== 1 || c.questsDone?.has('hv_intro');
+      // (Page 1 waits for hv_intro's Crypt clear: its step 10, the road west, needn't be done.)
+      const canStart = n !== 1 || c.questsDone?.has('hv_intro') || (c.quests?.get('hv_intro|0')?.step ?? 0) >= 9;
       if (n && canStart) {
         H.addItem(c.hero.id, atlasPage(n), 1, 'atlas');
         out.page = { n, riddle: ATLAS[n - 1].riddle };
@@ -123,12 +125,15 @@ export class Landmarks {
   // reputation) and deliver any letters addressed to it (a quest step).
   returnCurios(c) {
     const town = needTown(this.game, c);
+    // Curios can be handed in from anywhere in town; a letter at the hall's door.
+    const hall = BUILDINGS.find((b) => b.action === 'townhall' && townAt(b.x, b.z)?.id === town);
+    const atHall = !hall || Math.hypot(c.ent.x - doorPoint(hall)[0], c.ent.z - doorPoint(hall)[1]) <= HALL_RANGE;
     const H = this.game.heroes;
     const bag = H.inventory(c.hero.id);
     const mine = (tag) => Object.keys(bag).filter((id) => bag[id] > 0 && ITEMS[id]?.tag === tag && (ITEMS[id].town ?? 'hearthvale') === town);
     const back = mine('curio');
-    const letters = mine('letter');
-    if (!back.length && !letters.length) fail('You have nothing for this town hall.');
+    const letters = atHall ? mine('letter') : [];
+    if (!back.length && !letters.length) fail(mine('letter').length ? 'Take the letter to the Town Hall door.' : 'You have nothing for this town hall.');
     tx(this.game.db, () => {
       for (const id of [...back, ...letters]) H.takeItem(c.hero.id, id, bag[id], { kind: ITEMS[id].tag });
       if (back.length) rep.add(c.hero.id, town, CURIO_REP * back.length);

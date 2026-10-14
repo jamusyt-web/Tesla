@@ -8,7 +8,7 @@ import { RECIPE_BY_ID, RECIPES } from '../../../shared/recipes.js';
 import { spotsOf, stationPos, inYard } from '../../../shared/stations.js';
 import { STATIONS } from '../../../shared/crafting.js';
 import { ITEMS } from '../../../shared/items.js';
-import { BUILDINGS, GATE, PROPS, STONES, LANDMARKS, NODE_TYPES, FISH_RANGE, doorPoint, stoneById, stoneFront, STONE_RANGE, ENTRANCES, entranceFront } from '../../../shared/world.js';
+import { BUILDINGS, GATES, PROPS, STONES, LANDMARKS, NODE_TYPES, FISH_RANGE, doorPoint, stoneById, stoneFront, STONE_RANGE, ENTRANCES, entranceFront } from '../../../shared/world.js';
 import { ENTRANCE_RANGE, word } from '../../../shared/dungeon.js';
 import { passageAt, passageOpen, passageNeeds } from '../../../shared/travel.js';
 import { LANDMARK_INFO, LANDMARK_RANGE } from '../../../shared/journal.js';
@@ -137,8 +137,15 @@ export function resumeCraft(g, you) {
 export function goBuilding(g, id) {
   if (g.battle) return;
   if (g.dungeon) return g.underground();
-  if (id === 'gate') return g.walkTo(GATE.x, GATE.z - 6, true);
+  // A gate: walk to just outside it (away from the middle of the town it guards).
+  const gate = GATES.find((x) => x.id === id);
+  if (gate) {
+    const t = townAt(gate.x, gate.z) ?? { x: 0, z: 0 };
+    const d = Math.hypot(gate.x - t.x, gate.z - t.z) || 1;
+    return g.walkTo(gate.x + ((gate.x - t.x) / d) * 6, gate.z + ((gate.z - t.z) / d) * 6, true);
+  }
   const b = BUILDINGS.find((x) => x.id === id);
+  if (!b) return;
   const [dx, dz] = doorPoint(b);
   const L = g.me.local;
   const open = () => (b.action === 'shop' ? g.enterShop(g.myId) : g.hud.openBuilding(b.action));

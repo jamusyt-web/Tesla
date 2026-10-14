@@ -3,8 +3,9 @@ import { Avatar, setAvatarDetail } from './scene/avatar.js';
 import { createRenderer, setupPasses, renderFrame, warm, warmModels, updateCamera, fadeOccluders, markShadows } from './scene/render.js';
 import { ensureGroup, onGroup, groupReady } from './scene/assets.js';
 
-const BIOME_NEAR = 140; // metres from a region's edge
+const BIOME_NEAR = 35; // metres from a biome's land (shared/places.js biomesNear)
 import { GROUPS, BIOME_GROUPS, KIT_GROUPS } from './scene/manifest/index.js';
+import { biomesNear } from '../../shared/places.js';
 import { PROC_BUILDERS } from './scene/procprops.js';
 import { Mood } from './scene/mood.js';
 import { Mob } from './scene/mobs.js';
@@ -196,20 +197,20 @@ export class GameClient {
     for (const id of ['mobs:hearthvale', 'kit:crypt']) ensureGroup(id);
   }
   // Load a biome's models (and its town's monsters) once the camera comes
-  // within BIOME_NEAR m of one of its regions; when they arrive, rebuild the
-  // squares there so the real models replace the stand-ins.
+  // within BIOME_NEAR m of its land; when they arrive, rebuild the squares
+  // there so the real models replace the stand-ins.
   #nearBiomes(dt) {
     if ((this.biomeCheck = (this.biomeCheck ?? 0) - dt) > 0) return;
     this.biomeCheck = 1;
     const { x, z } = this.cam.target;
-    for (const r of REGIONS) {
-      const ids = BIOME_GROUPS[r.biome];
-      if (!ids || ids.every((id) => groupReady(id)) || Math.hypot(x - r.x, z - r.z) - r.r > BIOME_NEAR) continue;
+    for (const b of biomesNear(x, z, BIOME_NEAR)) {
+      const ids = BIOME_GROUPS[b];
+      if (!ids) continue;
       for (const id of ids)
         if (!groupReady(id))
           ensureGroup(id).then(() => {
             if (!this.running || id.startsWith('mobs:')) return;
-            for (const q of REGIONS) if (q.biome === r.biome) this.town.rebuildChunksAround(q.x, q.z, q.r);
+            for (const q of REGIONS) if (q.biome === b) this.town.rebuildChunksAround(q.x, q.z, q.r);
           });
     }
   }

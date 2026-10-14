@@ -4,6 +4,7 @@ import WebSocket from 'ws';
 import { openDb } from '../db.js';
 import { createServer } from '../app.js';
 import '../map.js';
+import { scheduled } from '../nodestates.js';
 import { NODES, NODE_TYPES, approachPoint, buildColliders, NavGrid } from '../../shared/world.js';
 
 let srv;
@@ -102,7 +103,10 @@ test('players see each other join, move, chat and leave in real time', async () 
 test('gathering is validated by the server and shared between players', async () => {
   const a = await player('Cam');
   const b = await player('Dee');
-  const oak = NODES.find((n) => n.type === 'tree_oak');
+  // An oak that isn't rich or ancient for the next few minutes (those need more skill).
+  const ch = { nodes: new Map(NODES.map((n) => [n.id, n])) };
+  const busy = new Set([0, 60_000, 120_000].flatMap((dt) => [...scheduled(ch, Date.now() + dt).keys()]));
+  const oak = NODES.find((n) => n.type === 'tree_oak' && !busy.has(n.id));
   // Too far away: rejected.
   const far = await a.rpc('hit', { node: oak.id });
   assert.equal(far.ok, false);

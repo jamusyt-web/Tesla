@@ -39,11 +39,12 @@ export function use(g, c, a) {
   if (!it?.heal && !it?.buff) fail(it ? `You can't use ${it.name} like that.` : 'Pick something to use.');
   if (it.heal) {
     if (c.battle) fail('Use it from the battle menu.');
-    if (c.ent.hp >= c.ent.maxHp) fail("You're already at full health.");
+    // (A meal with a buff can be eaten at full health, for the buff.)
+    if (c.ent.hp >= c.ent.maxHp && !it.buff) fail("You're already at full health.");
   }
   g.heroes.takeItem(c.hero.id, id, 1, { kind: 'use' });
   const out = {};
-  if (it.heal) {
+  if (it.heal && c.ent.hp < c.ent.maxHp) {
     const heal = Math.min(c.ent.maxHp - c.ent.hp, Math.round(it.heal * (1 + (c.effects().mender || 0))));
     c.ent.hp += heal;
     Object.assign(out, { heal, hp: Math.round(c.ent.hp) });

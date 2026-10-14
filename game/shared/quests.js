@@ -5,7 +5,7 @@
 // QUESTS[id] = { id, town, title, requires: [questId], after?: [questId, step],
 //   min?: { combat?, hero?, skills? }, repeat: null | 'daily' | 'weekly',
 //   give?: { item: n },                          // handed over when it starts (letters)
-//   steps: [{ ev, match, n, text, hint, target, reward? }],
+//   steps: [{ ev, match, n, text, hint, target, reward?, give? }],   // a step's give: handed over as it begins
 //   reward: { gold, items?, xp?: { skill: n }, rep?: { town: n }, title? } }
 //
 // A step's event (ev) is one the game raises (server/events.js): gather fish

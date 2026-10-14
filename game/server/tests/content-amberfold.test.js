@@ -117,25 +117,27 @@ test('the Mill Pond: rivercarp in the shallows, Grandfather Carp only in deep wa
   assert.equal(FISH_TABLES.amberfold.lvl, 12);
 });
 
-test('af_intro: finishing hv_intro hands you a letter; the Amberfold hall takes it', () => {
+test('af_intro: at the Westmarch Stones you get a letter; the steps run end to end', () => {
   const { game, hero, done } = harness();
   try {
     const c = hero('Wren');
     assert.ok(QUESTS.af_intro.requires.includes('hv_intro'));
     game.quests.skipTo(c, 'hv_intro', 9);
+    c.hero.stones = [...(c.hero.stones ?? []), 'stone_westmarch'];
     emit(c, 'attune', { id: 'stone_westmarch' });
     assert.ok(c.questsDone.has('hv_intro'));
-    assert.equal(c.quests.get('af_intro|0')?.step, 0, 'af_intro starts');
+    assert.equal(c.quests.get('af_intro|0')?.step, 1, 'af_intro starts, and its first step (the Stones) is already done');
     assert.equal(game.heroes.count(c.id, 'letter_amberfold'), 1, 'with the letter');
     // (Handing it in at the town hall itself is in world-content.test.js.)
-    assert.throws(() => game.landmarks.returnCurios(c), /nothing for this town hall/, "Hearthvale's hall won't take it");
-    emit(c, 'deliver', { item: 'letter_amberfold', qty: 1, town: T });
-    assert.equal(c.quests.get('af_intro|0').step, 1, 'delivered: on to the waystone');
+    assert.throws(() => game.landmarks.returnCurios(c), /nothing for this town hall|Town Hall door/, "Hearthvale's hall won't take it");
+    emit(c, 'deliver', { kind: 'letter', item: 'letter_amberfold', qty: 1, town: T });
+    assert.equal(c.quests.get('af_intro|0').step, 2, 'delivered: on to the waystone');
+    assert.ok(c.quests.has('af_woods|0'), 'the Turning Woods opens on the way');
     emit(c, 'attune', { id: 'stone_amberfold' });
     for (let i = 0; i < 5; i++) emit(c, 'sell', { item: 'coal', qty: 1, town: T });
-    assert.equal(c.quests.get('af_intro|0').step, 3);
+    assert.equal(c.quests.get('af_intro|0').step, 4);
     emit(c, 'craft', { out: 'carp_chowder', item: 'carp_chowder', qty: 1, station: 'cookpot' });
-    assert.equal(c.quests.get('af_intro|0').step, 3, 'the cookpot is not the Smokehouse');
+    assert.equal(c.quests.get('af_intro|0').step, 4, 'the cookpot is not the Smokehouse');
     emit(c, 'craft', { out: 'venison_skewer', item: 'venison_skewer', qty: 1, station: 'smokehouse' });
     emit(c, 'order', { town: T, key: 'af_maple' });
     const gold = game.heroes.gold(c.id);
@@ -144,6 +146,35 @@ test('af_intro: finishing hv_intro hands you a letter; the Amberfold hall takes 
     assert.equal(game.heroes.gold(c.id) - gold, 120 + 400);
     assert.ok(c.quests.has('af_mill|0') && c.quests.has('af_woods|0'), 'side chains open');
     assert.ok(!c.quests.has('af_warren|0'), 'the Warren chain waits for Combat 12');
+  } finally {
+    done();
+  }
+});
+
+test('a hero who finished hv_intro before Amberfold: af_intro waits at the Stones, no letter, travel still works', () => {
+  const { game, hero, done } = harness();
+  try {
+    const c = hero('Old');
+    game.db.prepare("UPDATE quest_progress SET state = 'done' WHERE account_id = ? AND quest = 'hv_intro'").run(c.id);
+    game.quests.load(c);
+    game.quests.ensure(c);
+    assert.equal(c.quests.get('af_intro|0')?.step, 0);
+    assert.equal(game.heroes.count(c.id, 'letter_amberfold'), 0, 'no letter in Hearthvale');
+  } finally {
+    done();
+  }
+});
+
+test('a meal with a buff can be eaten at full health; the Great Mill and the Elder Oak count when found', () => {
+  const { game, hero, call, done } = harness();
+  try {
+    const c = hero('Pip');
+    game.heroes.addItem(c.id, 'hearthcap_pie', 1);
+    c.ent.hp = c.ent.maxHp;
+    const r = call(c, 'use', { item: 'hearthcap_pie' });
+    assert.ok(r.ok, r.err);
+    assert.equal(r.data.buff.slot, 'meal');
+    for (const id of ['lm_great_mill', 'lm_elder_oak']) assert.ok(PACK.quests.some((q) => q.steps.some((st) => st.ev === 'discover' && st.match.id === id)), id);
   } finally {
     done();
   }

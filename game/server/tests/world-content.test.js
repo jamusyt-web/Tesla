@@ -23,6 +23,8 @@ import { GROUPS, MODELS } from '../../client/src/scene/manifest/index.js';
 import { fightRows } from '../../scripts/sim/fight.mjs';
 import { hoursToLevel } from '../../scripts/sim/pace.mjs';
 import { harness } from './harness.js';
+import { emit } from '../events.js';
+import { biomesNear } from '../../shared/places.js';
 
 const TOWNS = ['hearthvale', ...PACK_IDS];
 const inside = (r, e) => Math.hypot(e.x - r.x, e.z - r.z) < r.r;
@@ -131,19 +133,25 @@ test('the Amberfold Town Hall takes the letter (and only there)', () => {
   try {
     const c = hero('Robin');
     game.quests.skipTo(c, 'hv_intro', 9);
-    game.quests.start(c, 'af_intro');
+    c.hero.stones = [...(c.hero.stones ?? []), 'stone_westmarch'];
+    emit(c, 'attune', { id: 'stone_westmarch' });
     assert.equal(game.heroes.count(c.id, 'letter_amberfold'), 1);
-    Object.assign(c.ent, { x: 16, z: 17.5 }); // Hearthvale's hall
+    Object.assign(c.ent, { x: 16, z: 11 }); // Hearthvale's hall door
     assert.throws(() => game.landmarks.returnCurios(c), /nothing for this town hall/);
-    Object.assign(c.ent, { x: -524, z: -48 }); // Amberfold's
+    Object.assign(c.ent, { x: -560, z: -80 }); // in Amberfold, but not at its hall
+    assert.throws(() => game.landmarks.returnCurios(c), /Town Hall door/);
+    Object.assign(c.ent, { x: -524, z: -49 }); // Amberfold's hall door
     assert.deepEqual(game.landmarks.returnCurios(c).letters, ['letter_amberfold']);
-    assert.equal(c.quests.get('af_intro|0').step, 1);
+    assert.equal(c.quests.get('af_intro|0').step, 2);
   } finally {
     done();
   }
 });
 
-test("Amberfold's models stay out of the first load", () => {
+test("Amberfold's models stay out of the first load, and load only near its land", () => {
+  assert.ok(!biomesNear(0, 8, 35).has('autumn'), "not from Hearthvale's square");
+  assert.ok(!biomesNear(-30, 0, 35).has('autumn'), 'not from Whisperwood');
+  assert.ok(biomesNear(-92, -4, 35).has('autumn'), 'at the West Gate');
   const core = new Set(GROUPS.core.flatMap((s) => [].concat(MODELS[s].url)));
   for (const id of ['biome:autumn', 'mobs:amberfold', 'kit:cave']) assert.ok(GROUPS[id]?.length, id);
   // The files Phase 3 brought are only ever loaded with those groups.

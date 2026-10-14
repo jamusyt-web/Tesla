@@ -122,7 +122,7 @@ This step grows the world from one island to five towns, each with its own biome
 
 - **Branch:** commit and push to `claude/intelligent-brahmagupta-dqjx6n`. Don't open pull requests unless the owner asks. Commit after each finished piece of work so nothing is lost; the cloud container is temporary.
 - **Commit messages:** end each one with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` plus your session's `Claude-Session:` link. Never put model names anywhere else in a commit.
-- **Tests:** `cd game && npm test` must stay green (201 tests today). One fishing test occasionally fails on random rolls when the whole suite runs at once; rerun it before assuming a real failure.
+- **Tests:** `cd game && npm test` must stay green (203 tests today). One fishing test occasionally fails on random rolls when the whole suite runs at once; rerun it before assuming a real failure.
 - **Play-testing:**
   - Build with `cd game && npx vite build`.
   - Start a server with `OPEN_SIGNUP=1 PORT=8790 DATA_DIR=<a temp dir> node --no-warnings server/index.js`.

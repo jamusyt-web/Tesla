@@ -1,7 +1,7 @@
 // Where a point is: its region, the town it belongs to (where you can trade,
 // craft and use a town's services) and its biome (the look and mood).
 // They look only at the entries near the point (world.js keeps an index).
-import { MAP, BUILDINGS, REGIONS, around } from './world.js';
+import { MAP, BUILDINGS, REGIONS, LANDS, around } from './world.js';
 import { biome } from './biomes.js';
 
 // The smallest entry of `list` whose circle holds (x, z) and passes `ok`.
@@ -71,5 +71,14 @@ export function groundAt(x, z) {
     const p = paletteOf(e.biome);
     for (const k of KEYS) for (let c = 0; c < 3; c++) out[k][c] += (p[k][c] - out[k][c]) * w;
   }
+  return out;
+}
+
+// The biomes whose land comes within `reach` m of (x, z): each land circle
+// counts as the biome at its middle. The client loads a biome's models when
+// it's this near (so a big wild region whose edge pokes into a town doesn't).
+export function biomesNear(x, z, reach) {
+  const out = new Set();
+  for (const l of LANDS) if (Math.hypot(x - l.x, z - l.z) - l.r <= reach) out.add(biomeAt(l.x, l.z));
   return out;
 }

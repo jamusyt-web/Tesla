@@ -136,7 +136,8 @@ export default [
     id: 'hv_deeper',
     town: T,
     title: 'Deeper Still',
-    requires: ['hv_intro'],
+    requires: [],
+    after: ['hv_intro', 9], // (once the Crypt is cleared, not after the road west)
     steps: [
       { ev: 'dungeon', match: { kind: 'hollow_crypt', tier: 2 }, text: 'Clear the Hollow Crypt at Tier 2', hint: 'Pick Tier 2 at the crypt door.', target: { kind: 'entrance', dungeon: 'hollow_crypt' } },
       { ev: 'dungeon', match: { kind: 'hollow_crypt', tier: 3 }, text: 'Clear it at Tier 3', hint: 'A full party of four helps.', target: { kind: 'entrance', dungeon: 'hollow_crypt' } },

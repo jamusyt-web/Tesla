@@ -14,6 +14,10 @@ import { register } from './rpc.js';
 import * as rep from './rep.js';
 
 // The events a quest step can wait for.
+// Quests some other quest opens after (`after: [id, step]`): moving one of
+// them on a step can start another, so it checks straight away.
+const opensChains = (id) => id === 'hv_intro' || Object.values(QUESTS).some((q) => q.after?.[0] === id);
+
 export const QUEST_EVENTS = ['gather', 'fish', 'kill', 'craft', 'stock', 'sell', 'supply', 'trade', 'deliver', 'travel', 'attune', 'discover', 'landmark', 'dungeon', 'order', 'big', 'passage', 'use'];
 const key = (id, period) => `${id}|${period}`;
 
@@ -135,10 +139,13 @@ export class Quests {
     // The step is done: its own reward, then the next step (or the end).
     const last = row.step >= def.steps.length - 1;
     const rewards = [step.reward, last ? def.reward : null].filter(Boolean);
+    // A step can hand something over as it begins (the letter to carry).
+    const give = last ? null : def.steps[row.step + 1].give;
     tx(this.db, () => {
       if (last) this.q.done.run(def.steps.length, now, c.hero.id, row.quest, row.period);
       else this.q.save.run(row.step + 1, 0, c.hero.id, row.quest, row.period);
       for (const r of rewards) this.grant(c, r, def);
+      for (const [item, n] of Object.entries(give ?? {})) this.game.heroes.addItem(c.hero.id, item, n);
     });
     const doneStep = row.step;
     if (last) {
@@ -150,7 +157,7 @@ export class Quests {
     c.pushInventory();
     emit(c, last ? 'questDone' : 'questStep', { id: row.quest, period: row.period, step: doneStep, repeat: def.repeat ?? null });
     if (!last) this.#catchUp(c, row, def, now);
-    if (last || def.id === 'hv_intro') this.ensure(c, now); // the next chains open up
+    if (last || opensChains(def.id)) this.ensure(c, now); // the next chains open up
   }
 
   // A step about something that only happens once (attuning a stone,
@@ -163,11 +170,15 @@ export class Quests {
   }
   #already(c, step) {
     const m = step?.match ?? {};
+    const keys = Object.keys(m);
     if (step?.ev === 'attune' && m.id) return c.hero.stones?.includes(m.id) ? stepNeed(step) : 0;
-    if (step?.ev === 'discover' && !Object.keys(m).length) return this.game.journal?.ids(c.hero.id, 'place').size ?? 0;
-    if (step?.ev === 'landmark' && m.kind && Object.keys(m).length === 1) {
-      const used = this.db.prepare('SELECT landmark FROM landmark_uses WHERE account_id = ?').all(c.hero.id).map((r) => r.landmark);
-      return used.some((id) => LANDMARKS.find((l) => l.id === id)?.kind === m.kind) ? stepNeed(step) : 0;
+    if (step?.ev === 'discover' && !keys.length) return this.game.journal?.ids(c.hero.id, 'place').size ?? 0;
+    if (step?.ev === 'discover' && m.id && keys.length === 1) return this.game.journal?.ids(c.hero.id, 'place').has(m.id) ? stepNeed(step) : 0;
+    // A landmark already used that fits (by id, kind and region).
+    if (step?.ev === 'landmark' && keys.length && keys.every((k) => ['id', 'kind', 'region'].includes(k))) {
+      const used = this.db.prepare('SELECT landmark FROM landmark_uses WHERE account_id = ?').all(c.hero.id).map((r) => LANDMARKS.find((l) => l.id === r.landmark)).filter(Boolean);
+      const fits = (l) => (!m.id || l.id === m.id) && (!m.kind || l.kind === m.kind) && (!m.region || regionAt(l.x, l.z)?.id === m.region);
+      return used.some(fits) ? stepNeed(step) : 0;
     }
     return 0;
   }
