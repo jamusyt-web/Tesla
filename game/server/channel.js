@@ -8,6 +8,7 @@ import { world } from './static.js';
 import { emit, listening } from './events.js';
 import { tickNodeStates, stateOf, regrow, seedVariants } from './nodestates.js';
 import { initGroves, tickGroves } from './groves.js';
+import { tickWorldEvents, activeEvents } from './worldevents.js';
 
 const SNAP_EVERY = 2; // 10 Hz snapshots
 const MOB_SPEED = 2.2;
@@ -198,6 +199,7 @@ export class Channel {
       nodes: [...this.nodes.values()].filter((n) => !n.alive || n.hp < NODE_TYPES[n.type].hp || stateOf(n)).map((n) => ({ id: n.id, hp: n.hp, alive: n.alive, respawnIn: n.alive || n.g === 'gone' ? 0 : Math.max(0, n.respawnAt - Date.now()), ...(stateOf(n) ? { st: stateOf(n) } : {}), ...(n.g ? { g: n.g } : {}) })),
       mobs: this.nearMobs(c),
       battles: [...this.battles.values()].map((b) => b.publicState()),
+      events: activeEvents(this),
     };
   }
 
@@ -210,7 +212,7 @@ export class Channel {
   }
 
   mobInfo(m) {
-    return { id: m.id, type: m.type, x: q2(m.x), z: q2(m.z), rot: q2(m.rot), state: m.state };
+    return { id: m.id, type: m.type, x: q2(m.x), z: q2(m.z), rot: q2(m.rot), state: m.state, ...(m.def?.name ? { d: { name: m.def.name } } : {}) }; // (an event's monster has its own name)
   }
   #mobRow(m) {
     return [m.id, q2(m.x), q2(m.z), q2(m.rot), m.state];
@@ -234,6 +236,7 @@ export class Channel {
     this.tickNo++;
     if (this.sleeps && this.tickNo % 10 === 1) this.#wake();
     if (!this.isRun && this.tickNo % 20 === 0) tickNodeStates(this, now);
+    if (!this.isRun && this.tickNo % 20 === 10) tickWorldEvents(this, now);
     const attune = this.tickNo % 10 === 0; // twice a second is plenty
     const pos = this.tickNo % 20 === 0 && listening('pos'); // once a second, for whoever tracks where heroes go
     for (const c of this.players.values()) {

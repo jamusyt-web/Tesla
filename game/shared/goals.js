@@ -23,7 +23,7 @@ import { LANDMARKS } from './world.js';
 import { levelFromXp } from './skills.js';
 import { questDef, stepNeed } from './quests.js';
 
-export const SCORE = { elite: 95, quest: 90, ready: 88, readyAway: 60, pinned: 85, sideQuest: 78, unlock: 75, golden: 74, ancient: 72, almanac: 70, weekly: 68, upgrade: 65, order: 62, elder: 60, rich: 58, journal: 55, landmark: 50, sturdy: 40, landmarkNew: 80, fallback: 10 };
+export const SCORE = { elite: 95, quest: 90, ready: 88, readyAway: 60, pinned: 85, sideQuest: 78, event: 77, eventFar: 54, unlock: 75, golden: 74, ancient: 72, almanac: 70, weekly: 68, upgrade: 65, order: 62, elder: 60, rich: 58, journal: 55, landmark: 50, sturdy: 40, landmarkNew: 80, fallback: 10 };
 // How much more a rich (1) or ancient (2) node asks of you (server/nodestates.js STATE_FX).
 export const STATE_GATE = Object.fromEntries(Object.entries(STATE_FX).map(([st, f]) => [st, f.gate]));
 // How each special node shows on the Compass: its source, why, and how far (m) it's worth the walk.
@@ -191,6 +191,13 @@ export function suggest(state, now = Date.now()) {
     if (!t || !S || lvl(hero, t.skill) < t.lvl + (STATE_GATE[n.st] ?? 0)) continue;
     if (dist(pos, n) > S.range) continue;
     add({ id: `node:${n.id}`, src: S.src, text: `${variantName(n.type, n.st)}, ${bearing(pos, n)}`, why: S.why, target: { kind: 'nodeId', id: n.id }, score: SCORE[S.src] });
+  }
+
+  // World events happening now (shared/worldevents.js): near ones are worth a detour.
+  for (const e of state.events ?? []) {
+    const d = dist(pos, e);
+    if (d > 600) continue;
+    add({ id: `event:${e.id}`, src: 'event', text: `${e.name}, ${bearing(pos, e)}`, why: 'Happening now', target: { kind: 'point', x: e.x, z: e.z }, score: d < 250 ? SCORE.event : SCORE.eventFar });
   }
 
   // The next upgrade, per slot (the best two).

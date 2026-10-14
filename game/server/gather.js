@@ -171,7 +171,9 @@ export function cast(g, c, nodeId, now) {
   e.rot = Math.atan2(n.x - e.x, n.z - e.z);
   e.act = 'fish';
   const window = 900 + rod.tier * 200 + (c.effects().biteWindow || 0);
-  e.fishing = { node: n.id, state: 'wait', biteAt: now + 1800 + Math.random() * 4200, window };
+  // A fish frenzy (a world event at this lake): they bite much sooner.
+  const wait = frenzyAt(c.ch, n, now) ? 600 + Math.random() * 1200 : 1800 + Math.random() * 4200;
+  e.fishing = { node: n.id, state: 'wait', biteAt: now + wait, window };
   c.ch.broadcast({ t: 'cast', by: c.hero.id, node: n.id, rot: q2(e.rot) });
   return { ok: true };
 }
@@ -257,6 +259,14 @@ export function spotTable(n) {
   return lake?.fish ?? 'mirror';
 }
 
+// Is the lake under this spot in a fish frenzy (server/worldevents.js)?
+const FRENZY_LUCK = 0.8;
+function frenzyAt(ch, n, now) {
+  if (!ch?.frenzy?.size) return false;
+  const lake = LAKES.find((l) => Math.hypot(n.x - l.x, n.z - l.z) < l.r + 4);
+  return !!lake && (ch.frenzy.get(lake.id) ?? 0) > now;
+}
+
 // What bites now, for this hero at this spot (the channel calls this when
 // the float dips): the fish and the fight gear.
 export function biteFor(c, n, deep, now = Date.now()) {
@@ -267,7 +277,7 @@ export function biteFor(c, n, deep, now = Date.now()) {
   const ctx = {
     now,
     weather: weatherAt(biomeAt(n.x, n.z), now)?.kind ?? null,
-    luck: (E.luck || 0) + (isNight(now) ? E.nightAngler || 0 : 0),
+    luck: (E.luck || 0) + (isNight(now) ? E.nightAngler || 0 : 0) + (frenzyAt(c.ch, n, now) ? FRENZY_LUCK : 0),
     rareWeight: E.rareWeight || 0,
     kgSkew: (E.kgSkew || 0) + (E.recordSkew || 0),
   };

@@ -63,6 +63,17 @@ export const ALMANAC_PANELS = {
         return;
       }
       if (tab === 'today') {
+        // Happening now: the world events on this channel, nearest first.
+        const p = this.hud.game?.myPos?.() ?? { x: 0, z: 0 };
+        const evs = [...(this.hud.game?.events?.values() ?? [])].filter((e) => e.until > Date.now()).sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
+        if (evs.length) {
+          c.body.append(h('div.section-title', 'Happening now'));
+          for (const e of evs) {
+            const mins = Math.max(1, Math.round((e.until - Date.now()) / 60_000));
+            const d = Math.round(Math.hypot(e.x - p.x, e.z - p.z));
+            c.body.append(h('div.rowcard', h('div.ic', e.icon), h('div.grow', h('div.t', e.name), h('div.s', `${e.text} · ${d} m away · ${mins} min left`)), h('button.btn.small.green', { on: { click: () => go({ kind: 'point', x: e.x, z: e.z }) } }, glyph('compass'), 'Go')));
+          }
+        }
         if (!alm) return c.body.append(h('div.empty', 'Opening the Almanac…'));
         const t = alm.today;
         c.body.append(

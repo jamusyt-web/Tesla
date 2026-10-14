@@ -5,6 +5,7 @@
 import { REGIONS, NODE_TYPES } from '../shared/world.js';
 import { STATE_FX } from '../shared/wilds.js';
 import { force } from './nodestates.js';
+import { startHere } from './worldevents.js';
 import { tradeOf, setOverrides, overrides } from '../shared/economy.js';
 import { today, DAY_MS } from './telemetry.js';
 import { engageReport } from './engage.js';
@@ -91,4 +92,11 @@ register('owner.wild', (g, c, a) => {
   if (!best) fail('Stand next to a tree, rock or herb.');
   force(c.ch, best.n, st);
   return { id: best.n.id, st };
+});
+// A world event of `kind` (shared/worldevents.js) starts where the owner stands.
+register('owner.event', (g, c, a) => {
+  admin(g, c);
+  const e = startHere(c.ch, c, String(a?.kind ?? ''));
+  if (!e) fail('No such event here (a grove, a lake or a camp may be needed nearby).');
+  return { id: e.id, kind: e.kind };
 });

@@ -10,6 +10,9 @@ import { mulberry32, NODES, REGIONS, buildColliders, isWalkable } from '../../sh
 import '../map.js';
 import { regrow, spend, seedVariants, tickNodeStates, stateOf } from '../nodestates.js';
 import { initGroves, fell, tickGroves, groveFill } from '../groves.js';
+import { eventsAt, eventText, SLOT_MS } from '../../shared/worldevents.js';
+import { startHere, finish, activeEvents } from '../worldevents.js';
+import { MONSTERS } from '../../shared/monsters.js';
 import { grantGather } from '../gather.js';
 import { harness } from './harness.js';
 
@@ -91,6 +94,57 @@ test("the Deepwood is on the map: groves of trees, herbs and rocks, a glade ston
   const col = buildColliders();
   const oak = NODES.find((n) => n.grove === 'dw_oaks' && n.type === 'tree_oak');
   assert.ok(isWalkable(oak.x, oak.z, col), 'you brush through a grove tree');
+});
+
+test('world events: the same everywhere, often, varied, and each one points at something real', () => {
+  const day = 86_400_000;
+  const t0 = 20_000 * day;
+  const seen = {};
+  let slots = 0;
+  for (let s = 0; s < 6 * 24; s++) {
+    const now = t0 + s * SLOT_MS + 5 * 60_000;
+    const a = eventsAt(now);
+    assert.deepEqual(eventsAt(now), a, 'deterministic');
+    if (a.length) slots++;
+    for (const e of a) {
+      seen[e.kind] = (seen[e.kind] ?? 0) + 1;
+      assert.ok(REGIONS.some((r) => r.id === e.region), e.region);
+      assert.ok(Number.isFinite(e.x) && Number.isFinite(e.z) && e.end > e.start);
+      if (e.kind === 'growth') assert.ok(NODES.some((n) => n.grove === e.target));
+      if (e.kind === 'stampede') assert.ok(MONSTERS[e.monster]);
+      assert.ok(eventText(e).length > 10);
+    }
+  }
+  assert.ok(slots > 6 * 24 * 0.8, `something is on almost always (${slots} of ${6 * 24})`);
+  for (const k of ['growth', 'golden', 'frenzy', 'stampede', 'goblin']) assert.ok(seen[k] > 0, `${k} happens`);
+});
+
+test('an event on a channel: a stampede charges out and leaves; a growing rain fills a grove; a frenzy speeds bites', () => {
+  const { game, hero, done } = harness();
+  try {
+    const c = hero('Fen');
+    const ch = c.ch;
+    Object.assign(c.ent, { x: 0, z: -50 }); // the Wilds
+    const before = ch.mobs.size;
+    const e = startHere(ch, c, 'stampede');
+    assert.equal(ch.mobs.size, before + 5);
+    const mob = [...ch.mobs.values()].find((m) => m.once);
+    assert.match(ch.monsterDef(mob).name, /^Stampeding /);
+    assert.ok(c.sent.some((m) => m.t === 'wev' && m.id === e.id));
+    finish(ch, e.id, ch.wev.get(e.id));
+    assert.equal(ch.mobs.size, before, 'gone when it ends');
+    // A growing rain: every empty slot of the grove sprouts.
+    Object.assign(c.ent, { x: -180, z: -85 });
+    const g = startHere(ch, c, 'growth');
+    assert.ok(ch.groves.get(g.target).every((s) => s.g !== 'gone'));
+    // A frenzy: bites in under 2 s.
+    Object.assign(c.ent, { x: -575, z: -82 });
+    const f = startHere(ch, c, 'frenzy');
+    assert.equal(f.target, 'mill_pond');
+    assert.ok(activeEvents(ch).some((x) => x.kind === 'frenzy'));
+  } finally {
+    done();
+  }
 });
 
 test('felling a golden tree: more logs, the sure rare, the keepsake, and a journal find', () => {

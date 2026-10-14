@@ -635,6 +635,7 @@ export class GameClient {
       s.on('nh', (m) => this.onNodeHit(m)),
       s.on('node', (m) => this.onNode(m)),
       s.on('nst', (m) => this.onNodeState(m)), // a node turned rich, ancient or another variant (or back)
+      s.on('wev', (m) => this.onWorldEvent(m)), // a world event starts (or ends)
       s.on('find', (m) => this.hud.worldMap?.pin({ id: `find:${m.id}`, x: m.x, z: m.z, name: m.name, icon: m.st === 5 ? '✨' : '🔮', until: Date.now() + 10 * 60_000 })), // a golden or ancient node, shown on the map
       s.on('buffs', (m) => (this.hud.me.buffs = m.buffs || {})),
       s.on('loot', (m) => this.onLoot(m)),
@@ -750,6 +751,8 @@ export class GameClient {
       else n.g = null;
     }
     this.channel = m.channel;
+    this.events = new Map();
+    for (const e of m.events ?? []) this.onWorldEvent(e);
     this.town.setAttuned(m.you.stones ?? []);
     this.hud.onWelcome(m);
     resumeCraft(this, m.you);
@@ -1140,6 +1143,20 @@ export class GameClient {
       pv.av.hold(view.type.kind === 'tree' ? 'axe' : view.type.kind === 'rock' ? 'pick' : null);
       pv.av.play(view.type.kind === 'herb' ? 'pick' : 'swing');
     }
+  }
+
+  // World events (shared/worldevents.js): kept for the goal card and the
+  // Book's Today tab, and pinned on the map until they end.
+  onWorldEvent(m) {
+    this.events ??= new Map();
+    if (m.done) {
+      this.events.delete(m.id);
+      this.hud.worldMap?.unpin(`ev:${m.id}`);
+      return;
+    }
+    const until = Date.now() + (m.end - this.sock.serverNow());
+    this.events.set(m.id, { ...m, until });
+    this.hud.worldMap?.pin({ id: `ev:${m.id}`, x: m.x, z: m.z, name: m.name, icon: m.icon, until });
   }
 
   onNodeState(m) {

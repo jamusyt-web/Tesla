@@ -286,10 +286,13 @@ export class WorldMap {
     x.globalAlpha = 1;
   }
 
-  // Live pins: golden finds and world events happening now, with their names.
+  // Live pins: golden finds and world events happening now. Each icon sits on
+  // a pale disc; a name is written under it only where it doesn't run into
+  // another name (zoom in to read the crowded ones).
   #livePins(x) {
     const now = Date.now();
-    x.font = `${Math.max(12, Math.min(22, 7 * this.s))}px sans-serif`;
+    const size = Math.max(14, Math.min(22, 7 * this.s));
+    const names = [];
     x.textAlign = 'center';
     x.textBaseline = 'middle';
     for (const [id, p] of this.live) {
@@ -298,14 +301,24 @@ export class WorldMap {
         continue;
       }
       const [sx, sy] = this.#toScreen(p.x, p.z);
+      x.beginPath();
+      x.arc(sx, sy, size * 0.7, 0, Math.PI * 2);
+      x.fillStyle = 'rgba(255, 250, 240, 0.85)';
+      x.fill();
+      x.font = `${size}px sans-serif`;
       x.fillText(p.icon ?? '✨', sx, sy);
       x.save();
       x.font = `600 ${Math.max(12, Math.min(15, 5 * this.s))}px Nunito, sans-serif`;
-      x.lineWidth = 3;
-      x.strokeStyle = 'rgba(255, 250, 240, 0.9)';
-      x.fillStyle = '#3d2a14';
-      x.strokeText(p.name, sx, sy + 16);
-      x.fillText(p.name, sx, sy + 16);
+      const w = x.measureText(p.name).width;
+      const box = { l: sx - w / 2 - 4, r: sx + w / 2 + 4, t: sy + size * 0.7, b: sy + size * 0.7 + 18 };
+      if (!names.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t)) {
+        names.push(box);
+        x.lineWidth = 3;
+        x.strokeStyle = 'rgba(255, 250, 240, 0.9)';
+        x.fillStyle = '#3d2a14';
+        x.strokeText(p.name, sx, box.t + 9);
+        x.fillText(p.name, sx, box.t + 9);
+      }
       x.restore();
     }
   }

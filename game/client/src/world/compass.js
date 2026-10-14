@@ -234,6 +234,7 @@ export class Compass {
       unexplored: this.unexplored(),
       unlocks: this.unlocks,
       nodeStates: [...g.town.nodes.entries()].filter(([, v]) => v.st && v.alive).map(([id, v]) => ({ id, type: v.node.type, st: v.st, x: v.node.x, z: v.node.z })),
+      events: [...(g.events?.values() ?? [])].filter((e) => e.until > Date.now()),
       records: this.records,
       party: (g.hud.party?.members ?? []).filter((m) => m.id !== g.myId && m.x != null).map((m) => ({ name: m.name, x: m.x, z: m.z, place: m.region })),
       locate: (t) => this.locate(t),
