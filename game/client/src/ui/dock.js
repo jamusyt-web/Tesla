@@ -7,7 +7,7 @@ import { glyph } from './glyphs.js';
 
 export class Dock {
   constructor(hud) {
-    const dockBtn = (ic, label, fn, badge) => h('button', { 'aria-label': label, on: { click: () => (sfx.tap(), fn()) } }, glyph(ic), h('span', label), badge);
+    const dockBtn = (ic, label, fn, badge) => h('button', { 'aria-label': label, 'data-k': ic, on: { click: () => (sfx.tap(), fn()) } }, glyph(ic), h('span', label), badge);
     this.shopBadge = h('i.badge.hidden', '0');
     this.town = h(
       'div.dock',

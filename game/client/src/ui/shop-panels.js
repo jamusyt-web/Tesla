@@ -114,7 +114,7 @@ export const SHOP_PANELS = {
       upd();
       const vs = s.price / it.value;
       c.body.append(
-        h('div.row', h('div', iconEl(s.item, '64px')), h('div.grow', h('div', { style: { fontWeight: 700 } }, h('span', { style: { background: '#2a2018', color: RARITY[it.rarity].color, padding: '1px 6px', borderRadius: '3px' } }, RARITY[it.rarity].label)), h('div.muted', `${fmt(s.qty)} in stock · ${s.price} 🪙 each`), h('div.muted', vs <= 1.05 ? 'A fair price.' : vs <= 1.3 ? 'A little above its usual value.' : 'Pricey!'))),
+        h('div.row', h('div', iconEl(s.item, '64px')), h('div.grow', h('div', { style: { fontWeight: 700 } }, h('span', { style: { background: RARITY[it.rarity].color, color: '#fff', padding: '1px 6px', borderRadius: '3px' } }, RARITY[it.rarity].label)), h('div.muted', `${fmt(s.qty)} in stock · ${s.price} 🪙 each`), h('div.muted', vs <= 1.05 ? 'A fair price.' : vs <= 1.3 ? 'A little above its usual value.' : 'Pricey!'))),
         h('div.row.wrap', { style: { marginTop: '10px' } }, h('label.qty', 'Qty ', qty), h('span', 'Total '), total),
         h('button.btn.green', {
           style: { marginTop: '10px' },
@@ -154,7 +154,7 @@ export const SHOP_PANELS = {
           c.body.append(
             h(
               'div.rowcard',
-              h('img', { src: portrait(s.avatar), style: { width: '48px', height: '48px', borderRadius: '10px', background: '#3a2c22' } }),
+              h('img', { src: portrait(s.avatar), style: { width: '48px', height: '48px', borderRadius: '10px', background: '#cdeefa' } }),
               h('div.grow', h('div.t', s.name, mine ? ' (yours)' : ''), h('div.s', `${s.online ? '🟢' : '⚪'} ${s.heroName}${townCount() > 1 ? ` · ${townName(s.town)}` : ''} · ${s.displays} displays${s.visitors ? ` · ${s.visitors} inside` : ''}${s.open ? '' : ' · closed'}`), f ? h('div.s', `Featuring ${f.name} · ${fmt(s.featured.price)} 🪙`) : null),
               s.open || mine ? h('button.btn.green.small', { on: { click: () => (this.close(), this.hud.game?.enterShop(s.owner)) } }, mine ? 'Go in' : 'Visit') : h('span.muted', 'Closed'),
             ),

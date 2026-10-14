@@ -72,9 +72,9 @@ export class Hud {
     this.mm = h('canvas', { width: 256, height: 256 });
     const minimap = h('div.minimap', { title: 'World map (M)', on: { click: () => this.toggleMap() } }, this.mm);
     const muteIcon = () => this.muteBtn.replaceChildren(glyph(sfx.muted ? 'mute' : 'sound', '20px'));
-    this.muteBtn = h('button.pill', { 'aria-label': 'Sound on/off', style: { padding: '8px 10px', color: 'var(--gold)' }, on: { click: () => (sfx.toggle(), muteIcon()) } });
+    this.muteBtn = h('button.pill', { 'aria-label': 'Sound on/off', style: { padding: '8px 10px', color: 'var(--gold-dark)' }, on: { click: () => (sfx.toggle(), muteIcon()) } });
     muteIcon();
-    const mapBtn = h('button.pill', { 'aria-label': 'World map', title: 'World map (M)', style: { padding: '8px 10px', color: 'var(--gold)' }, on: { click: () => (sfx.tap(), this.toggleMap()) } }, glyph('map', '20px'));
+    const mapBtn = h('button.pill', { 'aria-label': 'World map', title: 'World map (M)', style: { padding: '8px 10px', color: 'var(--blue-dark)' }, on: { click: () => (sfx.tap(), this.toggleMap()) } }, glyph('map', '20px'));
     const col = (...k) => h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-start' } }, ...k);
     this.onlinePill = online;
     const topbar = h('div.topbar', chip, col(gold, online, this.runChip), h('div.spacer'), col(this.muteBtn, mapBtn), minimap);

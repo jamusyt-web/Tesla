@@ -46,7 +46,7 @@ export const HERO_PANELS = {
         clear(c.body);
         this.title(c, p.name);
         c.body.append(
-          h('div', { style: { textAlign: 'center' } }, h('img', { src: portrait(p.avatar, { full: true }), style: { width: '140px', height: '175px', background: 'radial-gradient(circle at 50% 35%, #4a3a2c, #1e1814)', borderRadius: '6px', border: '1px solid #8a6a3a' } })),
+          h('div', { style: { textAlign: 'center' } }, h('img', { src: portrait(p.avatar, { full: true }), style: { width: '140px', height: '175px', background: '#cdeefa', borderRadius: '6px', border: '1px solid #8a6a3a' } })),
           h('div', { style: { textAlign: 'center', margin: '6px 0 10px' } }, h('b', `Level ${p.level}`), h('div.muted', p.online ? (p.dungeon ? `Online · in ${p.dungeon}` : `Online · Channel ${p.channel}`) : 'Offline', p.sameParty ? ' · in your party' : '')),
           ...SKILL_IDS.map((k) => h('div.kv', h('span', `${SKILLS[k].icon} ${SKILLS[k].name}`), h('b', `Lv ${levelFromXp(p.skills[k] || 0)}`))),
           h(
@@ -76,7 +76,7 @@ function itemDetail(id, isEq) {
   const q = qtyInput(Math.max(1, sellable), Math.max(1, sellable));
   const box = h(
     'div.detail',
-    h('div.row', h('div', { style: { fontSize: '40px' } }, iconEl(id, '56px')), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '18px' } }, it.name), h('div', { style: { fontWeight: 700, fontSize: '13px' } }, h('span', { style: { background: '#2a2018', color: RARITY[it.rarity].color, padding: '1px 6px', borderRadius: '3px' } }, RARITY[it.rarity].label), ' · ' + CATEGORIES[it.cat]), h('div.muted', itemDesc(it)))),
+    h('div.row', h('div', { style: { fontSize: '40px' } }, iconEl(id, '56px')), h('div', { style: { flex: 1 } }, h('div', { style: { fontWeight: 700, fontSize: '18px' } }, it.name), h('div', { style: { fontWeight: 700, fontSize: '13px' } }, h('span', { style: { background: RARITY[it.rarity].color, color: '#fff', padding: '1px 8px', borderRadius: '999px' } }, RARITY[it.rarity].label), ' · ' + CATEGORIES[it.cat]), h('div.muted', itemDesc(it)))),
     h('div.kv', h('span', 'You own'), h('b', fmt(have))),
     h('div.kv', h('span', 'Base value'), h('b.gold', `${it.value} 🪙`)),
     h('div.kv', h('span', 'Merchant pays'), npcEl),
@@ -112,7 +112,7 @@ function heroTab(body) {
     h(
       'div.row',
       { style: { alignItems: 'flex-start', flexWrap: 'wrap' } },
-      h('img', { src: portrait(this.hud.myAvatar, { full: true }), style: { width: '130px', height: '162px', background: 'radial-gradient(circle at 50% 35%, #4a3a2c, #1e1814)', borderRadius: '6px', border: '1px solid #8a6a3a' } }),
+      h('img', { src: portrait(this.hud.myAvatar, { full: true }), style: { width: '130px', height: '162px', background: '#cdeefa', borderRadius: '6px', border: '1px solid #8a6a3a' } }),
       h(
         'div',
         { style: { flex: 1, minWidth: '200px' } },

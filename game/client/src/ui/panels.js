@@ -138,7 +138,7 @@ export class Panels {
       const lvl = levelFromXp(this.me.skills.crafting || 0);
       c.body.append(
         h('div.muted', { style: { marginBottom: '8px' } }, `Crafting level ${lvl}. Pick a recipe, walk to its station and make it yourself — good timing gives bonus materials or Fine and Masterwork gear.`),
-        h('div.tabs', { style: { flexWrap: 'wrap' } }, ...Object.entries(STATIONS).filter(([k]) => stationsOf(k).length).map(([k, st]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), (pick = null), render()) } }, `${st.icon} ${st.label}`))),
+        h('div.tabs', ...Object.entries(STATIONS).filter(([k]) => stationsOf(k).length).map(([k, st]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), (pick = null), render()) } }, `${st.icon} ${st.label}`))),
       );
       for (const r of RECIPES.filter((x) => x.station === tab)) {
         const out = ITEMS[r.out];
@@ -213,7 +213,7 @@ export class Panels {
       clear(c.body);
       if (this.hud.me.admin)
         c.body.append(h('div.rowcard', h('div.grow', h('div.t', 'Server owner'), h('div.s', 'Change the world map: place, move and remove anything.')), h('button.btn.small', { on: { click: () => (location.href = '/?editor') } }, 'Edit the world')));
-      c.body.append(h('div.tabs', { style: { flexWrap: 'wrap' } }, ...tabs.map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => (k === 'jobs' ? this.open('jobs') : ((tab = k), render())) } }, l))));
+      c.body.append(h('div.tabs', ...tabs.map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => (k === 'jobs' ? this.open('jobs') : ((tab = k), render())) } }, l))));
       if (!info) return c.body.append(h('div.empty', 'Loading…'));
       if (tab === 'online') {
         c.body.append(h('div.muted', { style: { marginBottom: '8px' } }, `${info.online.length} of ${info.heroes} heroes online`));
