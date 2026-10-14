@@ -7,6 +7,10 @@ Your own models go in `custom/` and are not listed.
 
 Castle Kit (2.0) Created/distributed by Kenney (www.kenney.nl) Creation date: 27-03-2024 13:37 ------------------------------ License: (Creative Commons Zero, CC0) http://creativecommons.org/publicdomain/zero/1.0/ You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement) ------------------------------ • Website : www.kenney.nl • Donate : www.kenney.nl/donate • Patreon : patreon.com/kenney Follow on social media for updates: • Twitter: twitter.com/KenneyNL • Instagram: instagram.com/kenney_nl • Mastodon: mastodon.gamedev.place/@kenney
 
+## cave (Modular Cave Kit)
+
+Modular Cave Kit (1.0) Created/distributed by Kenney (www.kenney.nl) Creation date: 10-07-2026 09:02 ------------------------------ License: (Creative Commons Zero, CC0) http://creativecommons.org/publicdomain/zero/1.0/ You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement) ------------------------------ • Website : www.kenney.nl • Donate : www.kenney.nl/donate • Patreon : patreon.com/kenney Follow on social media for updates: • Twitter: twitter.com/KenneyNL • BlueSky: kenney.bsky.social • Instagram: instagram.com/kenney_nl
+
 ## cube-pets
 
 Cube Pets (2.0) Created/distributed by Kenney (www.kenney.nl) Creation date: 26-03-2026 11:16 ------------------------------ License: (Creative Commons Zero, CC0) http://creativecommons.org/publicdomain/zero/1.0/ You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement) ------------------------------ • Website : www.kenney.nl • Donate : www.kenney.nl/donate • Patreon : patreon.com/kenney Follow on social media for updates: • Twitter: twitter.com/KenneyNL • BlueSky: kenney.bsky.social • Instagram: instagram.com/kenney_nl

@@ -29,10 +29,10 @@ export function stampTownKit(t, x, z, opts = {}) {
     plazas: [{ id: `${t}_plaza`, ...at(0, 0), r: 11.2 }],
     stones: [{ id: `stone_${t}`, name: `${name} Square`, ...at(6.2, 5.2), rot: -1.76 }],
     buildings: [
-      { id: `${t}_market`, label: 'Market', icon: '⚖️', glyph: 'scales', action: 'market', ...at(18, -6), w: 11, d: 8, face: 'w', style: 'market', ...kit },
-      { id: `${t}_workshop`, label: 'Workshop', icon: '🔨', glyph: 'anvil', action: 'craft', ...at(-17, -6), w: 9, d: 7, face: 'e', style: 'workshop', ...kit },
-      { id: `${t}_shop`, label: 'Shops', icon: '🏪', glyph: 'shop', action: 'shop', ...at(-15, 16), w: 9, d: 7, face: 'n', style: 'shop', ...kit },
-      { id: `${t}_townhall`, label: 'Town Hall', icon: '🏛️', glyph: 'castle', action: 'townhall', ...at(16, 17.5), w: 11, d: 10, face: 'n', style: 'townhall', ...kit },
+      { id: `${t}_market`, label: 'Market', icon: '⚖️', glyph: 'scales', action: 'market', ...at(18, -6), w: 11, d: 8, face: 'w', style: 'market', color: '#f2d38a', roof: '#3f7fbf', ...kit },
+      { id: `${t}_workshop`, label: 'Workshop', icon: '🔨', glyph: 'anvil', action: 'craft', ...at(-17, -6), w: 9, d: 7, face: 'e', style: 'workshop', color: '#d98b5f', roof: '#8a4b3a', ...kit },
+      { id: `${t}_shop`, label: 'Shops', icon: '🏪', glyph: 'shop', action: 'shop', ...at(-15, 16), w: 9, d: 7, face: 'n', style: 'shop', color: '#f6c6a6', roof: '#c4534a', ...kit },
+      { id: `${t}_townhall`, label: 'Town Hall', icon: '🏛️', glyph: 'castle', action: 'townhall', ...at(16, 17.5), w: 11, d: 10, face: 'n', style: 'townhall', color: '#efe6d2', roof: '#5b7f4a', ...kit },
     ],
     props: [
       ...STATION_SET.map(([kind, slot, dx, dz, r]) => ({ id: `${t}_${kind}`, slot, ...at(dx, dz), rot: 0, r, station: kind })),

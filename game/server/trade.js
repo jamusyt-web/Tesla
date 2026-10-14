@@ -134,7 +134,7 @@ register('jobs.deliver', (g, c, a) => {
     if (r.stored) pushStorage(g, o);
     o.send({ t: 'toast', kind: 'good', text: `${c.hero.name} delivered ${r.qty}× ${ITEMS[r.item].name} for your job${r.stored ? ` (waiting in storage in ${townName(r.town)})` : ''}${r.left ? ` (${r.left} still wanted)` : '. Job done!'}` });
   }
-  emit(c, 'deliver', { job: r.job, item: r.item, qty: r.qty, paid: r.paid, town: r.town });
+  emit(c, 'deliver', { kind: 'job', job: r.job, item: r.item, qty: r.qty, paid: r.paid, town: r.town });
   emit(o ?? null, 'jobDelivered', { job: r.job, poster: r.poster, item: r.item, qty: r.qty, left: r.left });
   if (!o) g.notices?.add(r.poster, 'job', { item: r.item, qty: r.qty, left: r.left, by: c.hero.name, town: r.town }, `${c.hero.name} delivered ${r.qty}× ${ITEMS[r.item].name} for your job${r.left ? ` (${r.left} still wanted)` : '. Job done!'}`);
   return r;

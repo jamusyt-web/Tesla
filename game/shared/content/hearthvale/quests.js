@@ -113,7 +113,7 @@ export default [
       { ev: 'sell', match: {}, n: 10, text: 'Sell 10 goods to the Market merchant', hint: 'Market → Sell: he buys almost anything.', target: { kind: 'building', action: 'market' } },
       { ev: 'stock', match: {}, n: 3, text: 'Stock 3 more things in your shop', hint: 'Townsfolk drop by and buy at fair prices, even while you are away.', target: { kind: 'building', action: 'shop' } },
       { ev: 'trade', match: {}, text: 'Buy or sell on the player market', hint: 'Market → an item → place an order. It fills when a price meets yours.', target: { kind: 'building', action: 'market' } },
-      { ev: 'deliver', match: {}, text: 'Deliver a job from the bulletin board', hint: 'Other heroes post jobs and pay for the goods.', target: { kind: 'board' } },
+      { ev: 'deliver', match: { kind: 'job' }, text: 'Deliver a job from the bulletin board', hint: 'Other heroes post jobs and pay for the goods.', target: { kind: 'board' } },
     ],
     reward: { gold: 250, rep: { [T]: 60 } },
   },

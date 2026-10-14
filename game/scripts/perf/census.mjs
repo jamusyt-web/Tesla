@@ -5,8 +5,9 @@
 //   npm run perf:census -- --map stress the five-town stress map (maps/fixtures/stress.json)
 //   options: --no-build (use the last build), --out <file.json>, --quick (fewer spots)
 //
-// At each spot (Hearthvale's spawn, Whisperwood and the Wilds; on the stress
-// map every town square and every road's middle too) it measures three
+// At each spot (Hearthvale's spawn, Whisperwood and the Wilds; on today's map
+// Amberfold's square, yard, wood, Elder Oak and Warren door and the Westmarch
+// road's middle; on the stress map every town square and road middle) it measures three
 // framings: the default camera, zoomed all the way out, and a crowd of 9
 // heroes. It reports draw calls and triangles (main pass, shadow pass,
 // heroes), textures, shader programs, update and frame times, the longest
@@ -188,7 +189,9 @@ async function uncrowd() {
 // ── Running it ───────────────────────────────────────────────────────────
 function spots(map) {
   const out = [['spawn', 0, 8], ['whisperwood', -48, 6], ['wilds', 0, -60]];
-  if (map !== 'stress' || QUICK) return out;
+  if (QUICK) return out;
+  // Gate G3's places in Amberfold and on the Westmarch road.
+  if (map !== 'stress') return [...out, ['amberfold_square', -534, -50], ['amberfold_yard', -557, -76], ['amberwood', -620, -95], ['westmarch_mid', -300, 0], ['elder_oak', -598, -28], ['warren_door', -603, -10]];
   for (const [id, x, z] of [['amberfold', -540, -54], ['rimeholt', -520, -654], ['sandmere', 560, -554], ['starfall', 40, -1134], ['fourways', 0, -630]]) out.push([id, x, z]);
   for (const [id, x, z] of [['road_westmarch', -270, -4], ['road_thornback', -470, -320], ['road_midmarch_w', -260, -688], ['road_midmarch_e', 250, -620], ['road_skystair', 40, -900], ['road_causeway', 5, -250]]) out.push([id, x, z]);
   return out;

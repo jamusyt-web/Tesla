@@ -20,10 +20,10 @@
       {"id":"amberwood","name":"Amberwood","tier":2,"kind":"wild","x":-540,"z":-80,"r":150,"biome":"autumn","stone":"stone_amberfold"}
     ],
     "buildings": [
-      {"id":"amberfold_market","label":"Amber Market","icon":"⚖️","glyph":"scales","action":"market","x":-522,"z":-66,"w":11,"d":8,"face":"w","style":"market","palette":"roof_yellow"},
-      {"id":"amberfold_workshop","label":"Workshop","icon":"🔨","glyph":"anvil","action":"craft","x":-557,"z":-66,"w":9,"d":7,"face":"e","style":"workshop","palette":"roof_orange"},
-      {"id":"amberfold_shop","label":"Shops","icon":"🏪","glyph":"shop","action":"shop","x":-555,"z":-44,"w":9,"d":7,"face":"n","style":"shop","palette":"roof_orange"},
-      {"id":"amberfold_townhall","label":"Town Hall","icon":"🏛️","glyph":"castle","action":"townhall","x":-524,"z":-42.5,"w":11,"d":10,"face":"n","style":"townhall","palette":"roof_yellow"},
+      {"id":"amberfold_market","label":"Amber Market","icon":"⚖️","glyph":"scales","action":"market","x":-522,"z":-66,"w":11,"d":8,"face":"w","style":"market","color":"#f2d38a","roof":"#3f7fbf","palette":"roof_yellow"},
+      {"id":"amberfold_workshop","label":"Workshop","icon":"🔨","glyph":"anvil","action":"craft","x":-557,"z":-66,"w":9,"d":7,"face":"e","style":"workshop","color":"#d98b5f","roof":"#8a4b3a","palette":"roof_orange"},
+      {"id":"amberfold_shop","label":"Shops","icon":"🏪","glyph":"shop","action":"shop","x":-555,"z":-44,"w":9,"d":7,"face":"n","style":"shop","color":"#f6c6a6","roof":"#c4534a","palette":"roof_orange"},
+      {"id":"amberfold_townhall","label":"Town Hall","icon":"🏛️","glyph":"castle","action":"townhall","x":-524,"z":-42.5,"w":11,"d":10,"face":"n","style":"townhall","color":"#efe6d2","roof":"#5b7f4a","palette":"roof_yellow"},
       {"id":"af_cottage1","x":-570,"z":-56,"w":6,"d":5,"face":"e","deco":true,"palette":"roof_orange","color":"#f1e1b6","roof":"#b4553f"},
       {"id":"af_cottage2","x":-542,"z":-30,"w":6,"d":5,"face":"n","deco":true,"palette":"roof_yellow","color":"#f1e1b6","roof":"#b4553f"},
       {"id":"af_cottage3","x":-538,"z":-92,"w":6,"d":5,"face":"s","deco":true,"palette":"roof_orange","color":"#f1e1b6","roof":"#b4553f"},

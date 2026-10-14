@@ -133,7 +133,7 @@ export class Landmarks {
       for (const id of [...back, ...letters]) H.takeItem(c.hero.id, id, bag[id], { kind: ITEMS[id].tag });
       if (back.length) rep.add(c.hero.id, town, CURIO_REP * back.length);
     });
-    for (const id of letters) emit(c, 'deliver', { item: id, qty: 1, town });
+    for (const id of letters) emit(c, 'deliver', { kind: 'letter', item: id, qty: 1, town });
     c.pushInventory();
     return { items: back, letters, rep: CURIO_REP * back.length };
   }

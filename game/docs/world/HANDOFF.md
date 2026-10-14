@@ -59,7 +59,7 @@ Within each phase, packages own disjoint files (the spec lists them), so indepen
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   Claude-Session: <this session's link>
   ``` Never put model names in commits.
-- `npm test` must stay green, at 183 tests today (`cd game && npm test`). A fishing test occasionally fails on random rolls when everything runs at once.
+- `npm test` must stay green, at 201 tests today (`cd game && npm test`). A fishing test occasionally fails on random rolls when everything runs at once.
 - To play-test, run `cd game && npx vite build`, then `OPEN_SIGNUP=1 PORT=8790 DATA_DIR=<tmp> node --no-warnings server/index.js`, then drive headless Chromium with the launch args `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`.
   - The first account on a fresh data dir is the server owner and can use `owner.teleport`.
   - Stop the server with `pkill -f "^node --no-warnings server/index.js"`. Never use a pattern that matches your own shell.
@@ -67,7 +67,7 @@ Within each phase, packages own disjoint files (the spec lists them), so indepen
 
 ## Where we are
 
-- **Phases 0, 1 and 2 are done**, with gates G1 and G2 passed in tests, bots and the census. The owner's real-phone fps report is still to come.
+- **Phases 0, 1, 2 and 3 are done**, with gates G1 and G2 passed in tests, bots and the census, and G3 passed except the owner's phone fps and the friends' playtest. The owner's real-phone fps report is still to come.
 - **Since Phase 2, at the owner's request:**
   - crafting is played by real finger motions (tap, hold, saw, carve, stir); see `shared/crafting.js`;
   - the UI was restyled bright and cosy. The rules are in the root `CLAUDE.md` under "The feel we're going for". New Amberfold screens must use the same tokens and components.
@@ -79,7 +79,20 @@ Within each phase, packages own disjoint files (the spec lists them), so indepen
 
   This keeps the goal card full in Amberfold too.
 
+## Phase 3 is built (October 2026)
+
+Amberfold and the Westmarch are in the game. How they were made is the pattern for Phase 4:
+- **Content** is a folder, `shared/content/amberfold/` (one file per kind, `index.js` gathers them), listed in `PACKS` in `shared/content/index.js`. Quests and orders come in through the pack too.
+- **The map** is written by `scripts/world/amberfold.mjs` into `maps/patches/020_amberfold.json` (the town kit stamp, then lands, roads, lakes, nodes scattered with rejection rules, camps, landmarks, skyline). Run it again after changing it; `check()` throws on map problems and prints lints.
+- **The look** is `shared/biomes/autumn.js` (colours, fog, weather, cover rules) plus model groups in `client/src/scene/manifest/` (`autumn.js`, `mobs-amberfold.js`, `kit-cave.js`) registered in `manifest/index.js` with `BIOME_GROUPS`, so they load only near the biome. Code-drawn pieces (the Smokehouse, the Warren's door) are in `client/src/scene/proc/amberfold.js`.
+- **Checks:** `server/tests/content-amberfold.test.js` and `world-content.test.js`; `node scripts/sim/fight.mjs` prints the fight curve against the real tables.
+- **Gate G3** still needs the owner's phone fps in Amberfold square and the 2-hour playtest with friends.
+
+A lesson from Phase 3: the spec's first-draft autumn fog (22–80 m, the colour of the ground) hid everything past 25 m on a phone. Keep each biome's fog light and different from its ground, and look at it at phone size.
+
 ## Next step
+
+**Phase 4, the rest of the world** (SPEC §10). The Phase 3 notes below stay for reference.
 
 **Phase 3, the vertical slice: Amberfold and the Westmarch** (the "Phase 3: The vertical slice" heading in SPEC.md §10). Do the packages in this order:
 1. **W1c**: the Hearthvale west gate and letters, and `hv_intro` step 10 leading on to `af_intro`.

@@ -45,7 +45,7 @@ The owner's goals, the test for every change (full wording in `game/docs/world/G
 
 The game is playable. See `game/README.md` for the full list. It has:
 - invite-only accounts (players make invite codes in **Town → Invites**) and a character creator;
-- a 3D island town (Hearthvale) with tap-to-move;
+- a 3D island town (Hearthvale) with tap-to-move, and since Phase 3 a second town, **Amberfold** (autumn), down the Westmarch road from Hearthvale's West Gate;
 - gathering with rhythm swings, and fishing with a reel fight;
 - **hands-on crafting by real motions** (`shared/crafting.js`, `client/src/ui/craftgame.js`):
   - each step is a tap on a glowing spot, a hold-and-release, a saw, a carve along a line, or a stir;
@@ -60,7 +60,7 @@ The game is playable. See `game/README.md` for the full list. It has:
 - a world editor for the server owner;
 - the guidance spine from Phase 2:
   - the goal card (Compass) and the round context button;
-  - quests (the 9-step `hv_intro` plus eight side chains);
+  - quests (the 10-step `hv_intro` plus eight side chains);
   - the Book (Quests, Today, Journal), dailies and the weekly Grand Errand;
   - town orders and the Big Order, reputation;
   - the journal with fog and landmarks;
@@ -109,14 +109,20 @@ This step grows the world from one island to five towns, each with its own biome
     - a real-phone fps report (the gates' "owner's phone" line);
     - how crafting and the new UI feel under a real thumb;
     - whether the Railway server is up.
-  - **Next: Phase 3**, Amberfold and the Westmarch: packages W1a (content), W1b (world and art), W1c (Hearthvale gate and letters) and I3 (integration and balance). Gate G3 includes a 2-hour playtest with friends.
+  - **Phase 3** (Amberfold and the Westmarch: W1c, W1a, W1b, I3) is built (October 2026):
+    - W1c: the West Gate (`maps/patches/015_hearthvale_gates.json`), letters that the town hall takes, and `hv_intro` step 10;
+    - W1a: the content pack `shared/content/amberfold/` (36 items, 3 nodes, 9 monsters, 18 recipes, the Thornroot Warren, 9 quests, 19 orders, trade and customers);
+    - W1b: the map patch `020_amberfold` (from `scripts/world/amberfold.mjs`), the autumn biome, Kenney fall trees, pumpkins, windmill and cave kit, lazy model groups (`biome:autumn`, `mobs:amberfold`, `kit:cave`);
+    - I3: `server/tests/world-content.test.js` (density rules, sources and uses, quest targets, the fight curve), `scripts/sim/fight.mjs`, `gold.mjs`, `pace.mjs`, the census at Amberfold's six spots.
+  - **Gate G3, still owed:** the owner's phone fps in Amberfold square, and the 2-hour playtest with friends (`af_intro`, orders and the Warren).
+  - **Next: Phase 4**, the rest of the world (Rimeholt, Sandmere, Starfall, Fourways and the Hollowmere Causeway). Copy Amberfold's pattern: a content pack folder, a world script writing a patch, a biome file, lazy model groups.
   - When you finish a package, update this list.
 
 ## How to work here
 
 - **Branch:** commit and push to `claude/intelligent-brahmagupta-dqjx6n`. Don't open pull requests unless the owner asks. Commit after each finished piece of work so nothing is lost; the cloud container is temporary.
 - **Commit messages:** end each one with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` plus your session's `Claude-Session:` link. Never put model names anywhere else in a commit.
-- **Tests:** `cd game && npm test` must stay green (183 tests today). One fishing test occasionally fails on random rolls when the whole suite runs at once; rerun it before assuming a real failure.
+- **Tests:** `cd game && npm test` must stay green (201 tests today). One fishing test occasionally fails on random rolls when the whole suite runs at once; rerun it before assuming a real failure.
 - **Play-testing:**
   - Build with `cd game && npx vite build`.
   - Start a server with `OPEN_SIGNUP=1 PORT=8790 DATA_DIR=<a temp dir> node --no-warnings server/index.js`.

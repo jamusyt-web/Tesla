@@ -57,7 +57,7 @@ A monster that appears before its model has loaded is drawn as its code version 
 The pictures in the bag, market and workshop are rendered from 3D models, once, when first shown.
 
 - **Using a model:** give an item a model through a slot named `icon:<itemId>`, e.g. `'icon:oak_log'`. Turn it for its portrait with `pose: [x, y, z]` (degrees).
-- **Built in code:** a few icons that no pack has are built in `client/src/ui/proc-icons.js`: fishing rods, the leather vest, the amulet, the acorn and the metal bars.
+- **Built in code:** a few icons that no pack has are built in `client/src/ui/proc-icons.js` (fishing rods, the leather vest, the amulet, the acorn and the metal bars) and, for each town, `client/src/ui/proc-icons/<town>.js` (Amberfold: steel, coal, amber, honeycomb, antlers, rope, charms).
 - **Fallback:** an item with neither shows its emoji.
 
 To make your own icon, add an `icon:<itemId>` slot pointing at your .glb. A manifest slot always wins over the code-built icon.
@@ -80,6 +80,17 @@ Dungeon runs are built from Kenney's **Modular Dungeon Kit** (`client/public/mod
 - **Dressing** uses the `dg_*` slots (brazier, altar, chests, coffins, pillars, urns, banners, rubble, traps, lanterns), mostly from the Graveyard Kit and Mini Dungeon. The generator in `shared/dungeon.js` decides where each goes; the manifest decides what it looks like.
 - **Monsters:** `mob_thrall` (graveyard zombie), `mob_crypt_skeleton`, `mob_crypt_wisp` (the ghost, tinted blue) and `mob_pale_count` (the vampire, the boss).
 - **The crypt door** in the overworld is `crypt_base` + `crypt_roof` + `crypt_door` (Graveyard Kit `crypt-large`), with `dg_fire` braziers and `crypt_grave` gravestones, built in `client/src/scene/town.js`.
+- **Other kinds, other kits.** A dungeon kind names its kit (`DUNGEONS[kind].kit`). The Thornroot Warren uses Kenney's **Modular Cave Kit** (`client/public/models/cave/`, slots `cave:*` in `client/src/scene/manifest/kit-cave.js`): its `template-*` pieces have the same sizes and pivots as the crypt's. A kind can also swap the crypt's dressing for its own (`dressing: { dg_coffin: 'wr_log', … }`), and its door can have its own look (`ENTRANCE_LOOKS[kit]` in `client/src/scene/procprops.js`; the Warren's is a root-covered cave mouth in `client/src/scene/proc/amberfold.js`).
+
+### Each town's own models (loaded when you get near)
+
+Only `manifest/core.js` loads before the first frame. Each new place brings its own groups, registered in `client/src/scene/manifest/index.js`:
+
+- `biome:autumn` (`manifest/autumn.js`): Amberfold's gatherables (Amber Maple, Coal Seam, Hearthcap), its ground cover (fall trees, pumpkins, red bushes) and its big props (the Great Mill's windmill, the Elder Oak, hay, log stacks, a standing-stone ring). It loads once you come within 140 m of an autumn region, and the squares there are rebuilt with the real models.
+- `mobs:amberfold` (`manifest/mobs-amberfold.js`): its monsters, cube-pets and characters recoloured with `remap`.
+- `kit:cave`: the cave kit, loaded when a cave run starts.
+
+Ground cover in a biome comes from its `cover` rules (`shared/biomes/<id>.js`), scattered per chunk on the phone at half density; `wild: true` keeps a rule out of towns.
 
 ## Re-importing asset packs
 
