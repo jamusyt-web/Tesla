@@ -21,10 +21,10 @@ function trophyBoard(lines) {
   x.lineWidth = 10;
   x.strokeRect(5, 5, cv.width - 10, cv.height - 10);
   x.fillStyle = '#f3d589';
-  x.font = 'bold 34px Georgia, serif';
+  x.font = 'bold 34px Fredoka, sans-serif';
   x.textAlign = 'center';
   x.fillText('Trophies', cv.width / 2, 48);
-  x.font = '28px Georgia, serif';
+  x.font = '28px Fredoka, sans-serif';
   x.textAlign = 'left';
   lines.forEach((l, i) => x.fillText(l, 28, 100 + i * 52, cv.width - 56));
   const tex = new THREE.CanvasTexture(cv);

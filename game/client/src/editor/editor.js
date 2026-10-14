@@ -1083,7 +1083,7 @@ class Editor {
       x.stroke();
       x.setLineDash([]);
       const [px, py] = at(this.map.spawn.x, this.map.spawn.z);
-      text('★ spawn', px, py, '700 12px "Alegreya Sans", sans-serif', '#ffe9a8');
+      text('★ spawn', px, py, '700 12px Nunito, sans-serif', '#ffe9a8');
     };
     let drag = null;
     canvas.addEventListener('pointerdown', (e) => {

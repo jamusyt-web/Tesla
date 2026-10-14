@@ -150,7 +150,7 @@ function marketItem(c, st, back) {
     const pts = b.history;
     if (pts.length < 2) {
       x.fillStyle = '#8a785e';
-      x.font = '700 20px "Alegreya Sans", sans-serif';
+      x.font = '700 20px Nunito, sans-serif';
       x.textAlign = 'center';
       x.fillText(pts.length ? `Last trade: ${pts[0].price} 🪙` : 'No price history yet', W / 2, H / 2 + 8);
       return;
@@ -175,7 +175,7 @@ function marketItem(c, st, back) {
     });
     x.stroke();
     x.fillStyle = '#6b5a46';
-    x.font = '700 17px "Alegreya Sans", sans-serif';
+    x.font = '700 17px Nunito, sans-serif';
     x.fillText(`${Math.round(hi)} 🪙`, 8, 20);
     x.fillText(`${Math.round(lo)} 🪙`, 8, H - 4);
   };

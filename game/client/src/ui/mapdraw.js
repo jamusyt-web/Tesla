@@ -108,18 +108,18 @@ export function paintWorld(x, v, mark = {}) {
     for (const r of REGIONS) {
       const size = Math.round(Math.max(15, Math.min(28, r.r * s * 0.2)));
       const [sx, sy] = toScreen(r.x, r.z - r.r);
-      text(r.name.toUpperCase(), sx, sy - size - 10, `700 ${size}px Cinzel, Georgia, serif`, '#f1dfb4');
-      text(tierLabel(r.tier), sx, sy - 10, '700 12px "Alegreya Sans", sans-serif', '#e8c983');
+      text(r.name, sx, sy - size - 10, `700 ${size}px Fredoka, sans-serif`, '#f1dfb4');
+      text(tierLabel(r.tier), sx, sy - 10, '700 12px Nunito, sans-serif', '#e8c983');
     }
     if (s > 2.2) {
       for (const z of ZONES) {
         const [sx, sy] = toScreen(z.x, z.z);
-        text(z.label, sx, sy, 'italic 600 14px "Alegreya Sans", sans-serif', '#fff6e0', 'rgba(40, 28, 16, 0.75)');
+        text(z.label, sx, sy, 'italic 600 14px Nunito, sans-serif', '#fff6e0', 'rgba(40, 28, 16, 0.75)');
       }
       for (const b of BUILDINGS) {
         if (b.deco) continue;
         const [sx, sy] = toScreen(b.x, b.z + b.d / 2 + 2.5);
-        text(b.label, sx, sy, '700 12px "Alegreya Sans", sans-serif', '#fff6e0', 'rgba(40, 28, 16, 0.8)');
+        text(b.label, sx, sy, '700 12px Nunito, sans-serif', '#fff6e0', 'rgba(40, 28, 16, 0.8)');
       }
     }
     if (s > 3) {
@@ -127,7 +127,7 @@ export function paintWorld(x, v, mark = {}) {
         const m = MONSTERS[sp.monster];
         if (!m) continue;
         const [sx, sy] = toScreen(sp.x, sp.z);
-        text(`${m.name} · Lv ${m.lvl}`, sx, sy, '700 11px "Alegreya Sans", sans-serif', '#ffb4a0', 'rgba(40, 10, 6, 0.85)');
+        text(`${m.name} · Lv ${m.lvl}`, sx, sy, '700 11px Nunito, sans-serif', '#ffb4a0', 'rgba(40, 10, 6, 0.85)');
       }
     }
 
@@ -161,7 +161,7 @@ export function paintWorld(x, v, mark = {}) {
         x.stroke();
       }
       x.restore();
-      if (on || s > 2.2) text(on ? st.name : '?', sx, sy + 19, '700 12px "Alegreya Sans", sans-serif', on ? '#dff8ff' : '#c8c8c8', 'rgba(10, 20, 28, 0.9)');
+      if (on || s > 2.2) text(on ? st.name : '?', sx, sy + 19, '700 12px Nunito, sans-serif', on ? '#dff8ff' : '#c8c8c8', 'rgba(10, 20, 28, 0.9)');
     }
     // Dungeon entrances: a dark tombstone with a red glow.
     for (const e of ENTRANCES) {
@@ -186,7 +186,7 @@ export function paintWorld(x, v, mark = {}) {
       x.fillRect(-1.2, -6, 2.4, 9);
       x.fillRect(-4, -3.5, 8, 2.4);
       x.restore();
-      text(DUNGEONS[e.kind]?.name ?? 'Crypt', sx, sy + 20, '700 12px "Alegreya Sans", sans-serif', '#ffd8de', 'rgba(30, 10, 20, 0.9)');
+      text(DUNGEONS[e.kind]?.name ?? 'Crypt', sx, sy + 20, '700 12px Nunito, sans-serif', '#ffd8de', 'rgba(30, 10, 20, 0.9)');
     }
   return text;
 }

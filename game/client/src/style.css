@@ -77,7 +77,7 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .btn.plain { --c: var(--cream-2); --cd: #d6c8ae; color: var(--ink); }
 .btn.small { padding: 7px 14px; font-size: 14px; }
 .btn.big { padding: 14px 28px; font-size: 19px; }
-.btn.block { width: 100%; }
+.btn.block { width: 100%; white-space: normal; text-align: center; line-height: 1.2; }
 
 /* ── Auth / splash: a clear sky over green hills ─────────── */
 .splash {
@@ -334,6 +334,8 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .stat { background: var(--cream); border-radius: 16px; padding: 10px 8px; text-align: center; }
 .stat b { display: block; font-family: var(--font-display); font-weight: 600; font-size: 22px; }
 .stat span { font-size: 13px; color: var(--ink-soft); font-weight: 800; }
+.panel-body input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), .panel-body select { font: inherit; font-weight: 700; font-size: 15px; padding: 8px 12px; border-radius: 12px; border: 2px solid var(--cream-2); background: #fff; color: var(--ink); outline: none; }
+.panel-body input:focus, .panel-body select:focus { border-color: var(--blue); }
 .qty { display: flex; align-items: center; gap: 6px; }
 .qty input { width: 84px; text-align: center; padding: 9px; border-radius: 12px; border: 2px solid var(--cream-2); background: #fff; font-size: 16px; font-weight: 800; }
 .search { width: 100%; padding: 11px 16px; border-radius: 999px; border: 2px solid var(--cream-2); font-size: 15px; font-weight: 700; margin-bottom: 12px; background: #fff; outline: none; }
@@ -388,8 +390,8 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .actions .btn .e { font-size: 26px; color: var(--c); }
 .waiting { border-radius: 999px; padding: 7px 14px; font-weight: 800; font-size: 14px; }
 .result { text-align: center; }
-.result .big { font-family: var(--font-display); font-size: 46px; font-weight: 700; color: #fff; text-shadow: 0 4px 0 #e0962a, 0 0 24px rgba(245, 184, 61, 0.5); }
-.result.lose .big { color: #fff; text-shadow: 0 4px 0 #8a7d6d; }
+.result .big { font-family: var(--font-display); font-size: 48px; font-weight: 700; color: var(--gold); text-shadow: 0 4px 0 var(--gold-dark); }
+.result.lose .big { color: #a8987e; text-shadow: 0 4px 0 #7f7263; }
 .loot-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 12px 0; }
 .loot-row .slot { width: 70px; animation: pop var(--enter) backwards; }
 .confetti { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 40; }
@@ -712,7 +714,7 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .goal .gitem { display: flex; gap: 6px; align-items: center; font-size: 14px; padding: 5px 2px; cursor: pointer; color: var(--bone); font-weight: 700; }
 .goal .gitem:hover { color: var(--gold-ink); }
 .ctxbtn.far { background: var(--blue); box-shadow: 0 5px 0 var(--blue-dark), 0 10px 20px rgba(30, 70, 110, 0.3); font-size: 13px; max-width: 52vw; }
-.ctxbtn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctxbtn span:not(.g) { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.15; text-align: left; }
 .unlock { position: absolute; left: 50%; top: calc(120px + var(--safe-top)); transform: translateX(-50%); width: min(380px, 92vw); z-index: 40; background: var(--paper); border-radius: 24px; padding: 14px 16px; color: var(--ink); box-shadow: 0 0 0 3px var(--gold), var(--shadow); animation: ctxin 0.25s ease-out; }
 .unlock .uhead { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-display); font-weight: 700; color: var(--ink); font-size: 20px; margin-bottom: 6px; }
 .unlock .uhead .close { font-size: 16px; }
@@ -721,8 +723,9 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .chip { display: inline-block; font-size: 12px; font-weight: 900; padding: 2px 9px; border-radius: 999px; background: #fff1cc; color: var(--gold-ink); }
 .unlock .chip { color: var(--gold-ink); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 12px; }
-.chips .chip { font-size: 13px; padding: 6px 12px; background: var(--cream); color: var(--ink-soft); cursor: pointer; transition: background 0.15s; }
-.chips .chip.on, .chip.on { background: var(--green); color: #fff; }
+.chips .chip, .filters .chip, .creator .chip { font-size: 14px; padding: 8px 14px; background: var(--cream); color: var(--ink-soft); cursor: pointer; transition: background 0.15s; }
+.creator .chip { background: var(--cream-2); color: var(--ink); text-transform: capitalize; }
+.chips .chip.on, .filters .chip.on, .creator .chip.on, .chip.on { background: var(--green); color: #fff; }
 .qcard { border-radius: 20px; padding: 12px 14px; margin: 10px 0; background: var(--cream); }
 .qcard .qtitle { font-family: var(--font-display); font-weight: 600; font-size: 18px; margin-bottom: 6px; }
 .qstep { display: flex; gap: 10px; align-items: center; padding: 5px 0; font-size: 15px; font-weight: 700; }
@@ -741,7 +744,7 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .pring span { width: 44px; height: 44px; border-radius: 50%; background: var(--paper); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; }
 .claims { display: flex; gap: 6px; margin: 8px 0; }
 .claim { flex: 1; border-radius: 14px; padding: 6px 4px; font-weight: 900; background: var(--cream-2); color: var(--ink-soft); display: flex; flex-direction: column; align-items: center; }
-.claim small { font-size: 10px; font-weight: 700; line-height: 1.1; text-align: center; }
+.claim small { font-size: 11px; font-weight: 700; line-height: 1.1; text-align: center; }
 .claim.can { background: var(--gold); color: #4a3208; animation: ctxin 0.6s ease-in-out infinite alternate; }
 .claim.done { background: var(--green); color: #fff; }
 .bigorder { border-radius: 20px; padding: 12px 14px; margin: 6px 0 12px; background: #fff1cc; box-shadow: inset 0 0 0 3px var(--gold); }
@@ -754,7 +757,9 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .rowcard.atlas { box-shadow: inset 0 0 0 3px var(--gold); }
 b.red { color: var(--red-dark); }
 @media (max-width: 600px) {
-  .ctxbtn { bottom: calc(144px + var(--safe-bottom)); max-width: 58vw; min-height: 50px; font-size: 14px; }
-  .ctxbtn.far { max-width: 58vw; }
+  .ctxbtn { bottom: calc(144px + var(--safe-bottom)); max-width: 46vw; min-height: 50px; font-size: 14px; }
+  .ctxbtn.far { max-width: 46vw; }
+  .chat .log { max-width: 50vw; }
+  .fishcall { bottom: calc(250px + var(--safe-bottom)); }
   .quest.goal { font-size: 14px; max-width: 64vw; }
 }
