@@ -126,7 +126,18 @@ export async function warm(g) {
     for (const m of mats) m.transparent = false;
     await g.renderer.compileAsync?.(g.scene, g.camera);
     await done;
+    finishPrograms(g);
   } catch {}
+}
+
+// Without parallel shader compiling (KHR_parallel_shader_compile: most
+// phones have it, some don't), a shader really finishes compiling the first
+// time it's used, which can stall a frame for half a second mid-walk (the
+// Town Hall fading, a waystone's ring). Finish every program now instead,
+// while the loading screen is still up.
+export function finishPrograms(g) {
+  if (g.renderer.extensions.has?.('KHR_parallel_shader_compile')) return;
+  for (const p of g.renderer.info.programs ?? []) p.getUniforms?.();
 }
 
 // Compile the shaders a group of models needs before any of them is seen:

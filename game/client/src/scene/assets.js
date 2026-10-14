@@ -199,7 +199,9 @@ export async function loadAssets(onProgress = () => {}, ids = ['core']) {
   // Read the scenery textures' pixels now, while nothing is being drawn: far
   // chunks bake them into vertex colours, and a read in mid-game waits on the GPU.
   for (const t of [...imageKeys.values(), ...textures.values()]) pixelsOf(t);
+  coreLoaded = true;
 }
+let coreLoaded = false;
 
 // Load a group of models once; later calls get the same promise.
 export function ensureGroup(id, onProgress = () => {}) {
@@ -249,6 +251,9 @@ async function loadGroup(slots, onProgress) {
     ),
   );
   await shareTextures();
+  // A group loaded mid-game: read its textures' pixels in a worker first
+  // (a read on the main thread waits on the GPU: up to a second on a phone).
+  if (coreLoaded) await Promise.all([...imageKeys.values(), ...textures.values()].map(pixelsOffThread));
   for (const [slot, def] of defs) {
     if (ready.has(slot)) continue;
     const variants = [].concat(def.url).map((u) => gltfs.get(u)).filter(Boolean);
@@ -391,6 +396,37 @@ function pixelsOf(tex) {
   pixelCache.set(tex, px);
   return px;
 }
+// The same, off the main thread (into the same cache), for groups that load
+// while the game is running. Falls back to reading here if workers can't.
+let pixWorker = null;
+let pixSeq = 0;
+const pixWaiting = new Map();
+const PIX_WORKER = `onmessage = (e) => {
+  const { id, bmp } = e.data;
+  const cv = new OffscreenCanvas(bmp.width, bmp.height);
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(bmp, 0, 0);
+  const d = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+  bmp.close();
+  postMessage({ id, w: cv.width, h: cv.height, data: d }, [d.buffer]);
+};`;
+async function pixelsOffThread(tex) {
+  if (pixelCache.has(tex) || !tex?.image?.width) return;
+  try {
+    pixWorker ??= new Worker(URL.createObjectURL(new Blob([PIX_WORKER], { type: 'text/javascript' })));
+    pixWorker.onmessage ??= (e) => (pixWaiting.get(e.data.id)?.(e.data), pixWaiting.delete(e.data.id));
+    const bmp = await createImageBitmap(tex.image);
+    const px = await new Promise((resolve) => {
+      const id = ++pixSeq;
+      pixWaiting.set(id, resolve);
+      pixWorker.postMessage({ id, bmp }, [bmp]);
+    });
+    pixelCache.set(tex, { w: px.w, h: px.h, data: px.data });
+  } catch {
+    pixelsOf(tex);
+  }
+}
+
 export function texel(tex, u, v, out) {
   const px = pixelsOf(tex);
   const x = Math.min(px.w - 1, Math.max(0, Math.floor((u - Math.floor(u)) * px.w)));
