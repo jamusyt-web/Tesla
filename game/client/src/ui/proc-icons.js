@@ -15,7 +15,7 @@ const FACE_CAMERA = 0.9;
 
 // A toon mesh with an ink hull built from smoothed normals, so faceted
 // shapes get an unbroken outline.
-function inked(geo, color, { thick = INK, emissive = null } = {}) {
+export function inked(geo, color, { thick = INK, emissive = null } = {}) {
   const m = new THREE.Mesh(geo, toon(color, emissive ? { emissive, emissiveIntensity: 0.25 } : {}));
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', geo.attributes.position.clone());
@@ -35,7 +35,7 @@ function strand(a, b, r, color) {
   return m;
 }
 
-function rod(skin) {
+export function rod(skin) {
   const g = new THREE.Group();
   const pole = inked(new THREE.CylinderGeometry(0.02, 0.05, 1.7, 8), skin.handle);
   pole.position.y = 0.85;
@@ -67,7 +67,7 @@ function rod(skin) {
 }
 
 // A vest silhouette, extruded and bevelled into a chunky toon shape.
-function vest() {
+export function vest(cloth = '#9a6238', trim = '#7a4a2a') {
   const half = (side) => {
     const s = new THREE.Shape();
     const x = (v) => v * side;
@@ -86,7 +86,7 @@ function vest() {
   for (const side of [-1, 1]) {
     const geo = new THREE.ExtrudeGeometry(half(side), opts);
     geo.translate(0, 0, -0.11);
-    g.add(inked(geo, '#9a6238'));
+    g.add(inked(geo, cloth));
   }
   // Stitched trim and buttons down the front.
   for (const [y, c] of [[-0.18, '#e9c27a'], [-0.42, '#e9c27a']]) {
@@ -94,16 +94,15 @@ function vest() {
     b.position.set(0.11, y, 0.2);
     g.add(b);
   }
-  const hem = inked(new THREE.BoxGeometry(1.3, 0.08, 0.38), '#7a4a2a');
+  const hem = inked(new THREE.BoxGeometry(1.3, 0.08, 0.38), trim);
   hem.position.y = -0.72;
   g.add(hem);
   g.rotation.set(0.25, FACE_CAMERA, 0);
   return g;
 }
 
-function amulet() {
+export function amulet(gold = '#f2c14e', stone = null) {
   const g = new THREE.Group();
-  const gold = '#f2c14e';
   // An open loop of chain whose gap sits at the bottom, where the pendant hangs.
   const chain = inked(new THREE.TorusGeometry(0.55, 0.03, 8, 40, Math.PI * 1.55), gold, { thick: 0.012 });
   chain.rotation.z = -Math.PI * 0.275;
@@ -118,14 +117,14 @@ function amulet() {
   setting.position.y = -0.5;
   g.add(chain, setting, bail);
   g.rotation.y = FACE_CAMERA;
-  const gem = assets.make('icon:sapphire', { outline: true, castShadow: false });
+  const gem = !stone && assets.make('icon:sapphire', { outline: true, castShadow: false });
   if (gem) {
     const o = gem.object;
     o.scale.setScalar(0.32);
     o.position.set(0, -0.66, 0.02);
     g.add(o);
   } else {
-    const s = inked(new THREE.OctahedronGeometry(0.17), '#4f7bff', { emissive: '#3f6bff' });
+    const s = inked(new THREE.OctahedronGeometry(0.17), stone ?? '#4f7bff', { emissive: stone ?? '#3f6bff' });
     s.position.y = -0.5;
     g.add(s);
   }
@@ -150,7 +149,7 @@ function acorn() {
 }
 
 // A trapezoid ingot: wide base, narrower bevelled top.
-function ingot(color, glow = null) {
+export function ingot(color, glow = null) {
   const [bx, bz, tx, tz, h] = [1.0, 0.5, 0.78, 0.32, 0.3];
   const v = [
     [-bx / 2, 0, -bz / 2], [bx / 2, 0, -bz / 2], [bx / 2, 0, bz / 2], [-bx / 2, 0, bz / 2],
@@ -180,8 +179,8 @@ export const PROC_ICONS = {
   rod_basic: () => rod(ITEMS.rod_basic.skin),
   rod_fine: () => rod(ITEMS.rod_fine.skin),
   rod_master: () => rod(ITEMS.rod_master.skin),
-  armor_leather: vest,
-  amulet_sapphire: amulet,
+  armor_leather: () => vest(),
+  amulet_sapphire: () => amulet(),
   golden_acorn: acorn,
   copper_bar: () => ingot('#e07b39'),
   iron_bar: () => ingot('#c9d3df'),
@@ -191,6 +190,11 @@ export const PROC_ICONS = {
 // A town's own item icons, drawn in code ({ itemId: () => Object3D }), for
 // items no model pack has. Each item gets one builder.
 export function registerIcons(town, map) {
+  map = typeof map === 'function' ? map() : map;
   for (const id of Object.keys(map)) if (PROC_ICONS[id]) throw new Error(`${town}: icon for "${id}" is defined twice.`);
   Object.assign(PROC_ICONS, map);
 }
+
+// Each town's own icons (client/src/ui/proc-icons/<town>.js).
+import AMBERFOLD from './proc-icons/amberfold.js';
+registerIcons('amberfold', AMBERFOLD);

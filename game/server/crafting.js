@@ -3,6 +3,8 @@ import { ITEMS } from '../shared/items.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
 import { levelFromXp } from '../shared/skills.js';
 import { buildSpec, replayCraft, unpackInputs, finalizeCraft, scoreOf, isFlawless, outcomeOf, batchCap, isStackable, recipeTier, CRAFT_TICK, CRAFT_MAX_TICKS, STATIONS } from '../shared/crafting.js';
+import * as rep from './rep.js';
+import { REP_RANKS } from '../shared/rep.js';
 import { spotsOf, inYard, nearestStation, YARD_RANGE } from '../shared/stations.js';
 import { townAt } from '../shared/places.js';
 import { REGIONS } from '../shared/world.js';
@@ -91,6 +93,7 @@ export class Crafting {
     if (lvl < r.lvl) fail(`Requires Crafting level ${r.lvl}.`);
     // A town's own recipes are made only in its yard.
     if (r.town && townAt(c.ent.x, c.ent.z)?.id !== r.town) fail(`${ITEMS[r.out]?.name ?? 'That'} can only be made in ${REGIONS.find((t) => t.id === r.town)?.name ?? r.town}.`);
+    if (r.rep && r.town && rep.rankOf(c.hero.id, r.town) < r.rep) fail(`${ITEMS[r.out]?.name ?? 'That'} needs ${REP_RANKS[r.rep - 1]?.name ?? `rank ${r.rep}`} standing in ${REGIONS.find((t) => t.id === r.town)?.name ?? r.town}: fill its orders.`);
     if (c.craft) fail("You're already crafting.");
     if (c.battle) fail("You're in a battle!");
     if (c.room) fail("You're inside a shop.");
@@ -232,7 +235,7 @@ export class Crafting {
     if (!quiet && c.ch) c.ch.broadcast({ t: 'crafted', by: c.hero.id, station, item: out.item, qty: out.qty, grade: out.grade, mw: out.mw });
     if (out.mw) this.game.announce(`🔨 ${c.hero.name} forged a ${ITEMS[out.item].name}!`);
     if (!quiet) c.pushInventory();
-    emit(c, 'craft', { recipe: r.id, out: r.out, item: out.item, qty: out.qty, grade: out.grade, via });
+    emit(c, 'craft', { recipe: r.id, out: r.out, item: out.item, qty: out.qty, grade: out.grade, via, station: r.station });
     return result;
   }
 
@@ -262,6 +265,7 @@ export class Crafting {
     if (lvl < r.lvl) fail(`Requires Crafting level ${r.lvl}.`);
     if ((this.q.masteryOne.get(c.hero.id, r.id)?.n || 0) < QUICK_UNLOCK) fail(`Make it by hand ${QUICK_UNLOCK} times (grade B or better) to unlock Quick.`);
     if (r.town && townAt(c.ent.x, c.ent.z)?.id !== r.town) fail(`${ITEMS[r.out]?.name ?? 'That'} can only be made in ${REGIONS.find((t) => t.id === r.town)?.name ?? r.town}.`);
+    if (r.rep && r.town && rep.rankOf(c.hero.id, r.town) < r.rep) fail(`${ITEMS[r.out]?.name ?? 'That'} needs ${REP_RANKS[r.rep - 1]?.name ?? `rank ${r.rep}`} standing in ${REGIONS.find((t) => t.id === r.town)?.name ?? r.town}: fill its orders.`);
     const st = nearestStation(r.station, c.ent.x, c.ent.z);
     if (!inYard(c.ent.x, c.ent.z) || !st || Math.hypot(st.x - c.ent.x, st.z - c.ent.z) > YARD_RANGE) fail(`Quick crafting works near a ${STATIONS[r.station]?.label ?? r.station}.`);
     times = Math.max(1, Math.min(50, Number(times) || 1));
@@ -274,7 +278,7 @@ export class Crafting {
     });
     const xp = H.addXp(c.hero, 'crafting', Math.round(r.xp * times * 0.5));
     c.pushInventory();
-    emit(c, 'craft', { recipe: r.id, out: r.out, item: r.out, qty: r.qty * times, grade: null, via: 'quick' });
+    emit(c, 'craft', { recipe: r.id, out: r.out, item: r.out, qty: r.qty * times, grade: null, via: 'quick', station: r.station });
     return { item: r.out, qty: r.qty * times, fee, xp };
   }
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { RECIPES, RECIPE_BY_ID } from '../../shared/recipes.js';
 import { ITEMS } from '../../shared/items.js';
 import { bot } from './craft-bot.js';
-import { buildSpec, replayCraft, finalizeCraft, scoreOf, gradeOf, isFlawless, outcomeOf, isStackable, batchCap, newCraft, input, advance, packInputs, unpackInputs, STEP_TEXT, READY, STAGE_W, STAGE_H, MAX_INPUTS, CRAFT_MAX_TICKS } from '../../shared/crafting.js';
+import { buildSpec, replayCraft, finalizeCraft, scoreOf, gradeOf, isFlawless, outcomeOf, isStackable, batchCap, newCraft, input, advance, packInputs, unpackInputs, STEP_TEXT, READY, STAGE_W, STAGE_H, MAX_INPUTS, CRAFT_MAX_TICKS, MAX_STEPS } from '../../shared/crafting.js';
 
 test('the server replay of recorded inputs matches live play, for every recipe', () => {
   for (const r of RECIPES)
@@ -95,7 +95,7 @@ test('skill matters: a steady hand makes Fine gear far more often than a shaky o
 test('every recipe is a short run of real motions', () => {
   for (const r of RECIPES) {
     const spec = buildSpec(r, { lvl: r.lvl, seed: 2 });
-    assert.ok(spec.steps.length >= 2 && spec.steps.length <= 11, `${r.id}: ${spec.steps.length} steps`);
+    assert.ok(spec.steps.length >= 2 && spec.steps.length <= MAX_STEPS, `${r.id}: ${spec.steps.length} steps`);
     for (const st of spec.steps) assert.ok(STEP_TEXT[st.skin], `${r.id}: words for ${st.skin}`);
   }
   const kinds = (id) => buildSpec(RECIPE_BY_ID[id], { lvl: 10, seed: 1 }).steps.map((st) => st.k);

@@ -15,7 +15,7 @@ const tables = (p) => [[ITEMS, p.items], [DUNGEONS, p.dungeons], [CHESTS, p.ches
 export function installPack(p) {
   for (const [table, add] of tables(p)) Object.assign(table, add ?? {});
   for (const r of p.recipes ?? []) if (!RECIPE_BY_ID[r.id]) (RECIPES.push(r), (RECIPE_BY_ID[r.id] = r));
-  for (const k of ['trade', 'supplies', 'customers']) if (p[k]) CONTENT[k][p.id] = p[k];
+  for (const k of ['trade', 'supplies', 'customers', 'orders']) if (p[k]) CONTENT[k][p.id] = p[k];
 }
 export function uninstallPack(p) {
   for (const [table, add] of tables(p)) for (const id of Object.keys(add ?? {})) delete table[id];
@@ -24,5 +24,5 @@ export function uninstallPack(p) {
     const i = RECIPES.indexOf(r);
     if (i >= 0) RECIPES.splice(i, 1);
   }
-  for (const k of ['trade', 'supplies', 'customers']) delete CONTENT[k][p.id];
+  for (const k of ['trade', 'supplies', 'customers', 'orders']) delete CONTENT[k][p.id];
 }

@@ -87,6 +87,7 @@ function itemDetail(id, isEq) {
       isEq ? h('span.chip.on', 'Equipped') : null,
       id === 'hearth_charm' && have > 0 ? h('button.btn.green.small', { on: { click: () => (this.close(), this.hud.game?.travelHome()) } }, 'Go home') : null,
       it.buff && have > 0 ? h('button.btn.green.small', { on: { click: () => this.rpc('use', { item: id }, `${it.name}: ${fxText(it.buff.fx)}`) } }, 'Use') : null,
+      it.reveal && have > 0 ? h('button.btn.green.small', { on: { click: () => this.sock.rpc('use', { item: id }).then((r) => this.hud.toast(r.places?.length ? `This week's glimmering caches: ${r.places.slice(0, 3).join(', ')}.` : 'The map is too smudged to read.', 'gold')).catch((e) => this.hud.toast(e.message, 'err')) } }, 'Read') : null,
       sellable > 0 ? h('div.qty', q) : null,
       sellable > 0 ? h('button.btn.small', { on: { click: () => npcSell.call(this, id, +q.value) } }, 'Sell to merchant') : null,
       h('button.btn.blue.small', { on: { click: () => this.open('market', { item: id }) } }, 'Market'),

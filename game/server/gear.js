@@ -4,6 +4,10 @@
 import { ITEMS } from '../shared/items.js';
 import { levelFromXp } from '../shared/skills.js';
 import { applyBuff } from '../shared/buffs.js';
+import { glimmers } from '../shared/journal.js';
+import { weekIndex } from '../shared/dungeon.js';
+import { LANDMARKS } from '../shared/world.js';
+import { regionAt } from '../shared/places.js';
 import { fail } from './db.js';
 import { emit } from './events.js';
 import { register } from './rpc.js';
@@ -31,6 +35,7 @@ export function equip(g, c, item) {
 export function use(g, c, a) {
   const id = String(a.item ?? '');
   const it = ITEMS[id];
+  if (it?.reveal === 'glimmer') return readMap(g, c, id);
   if (!it?.heal && !it?.buff) fail(it ? `You can't use ${it.name} like that.` : 'Pick something to use.');
   if (it.heal) {
     if (c.battle) fail('Use it from the battle menu.');
@@ -55,6 +60,20 @@ export function use(g, c, a) {
   emit(c, 'use', { item: id });
   return out;
 }
+// A bandit's map: read it (it's used up) to learn where this week's
+// glimmering caches are, nearest first. { places: [names] }
+function readMap(g, c, id) {
+  g.heroes.takeItem(c.hero.id, id, 1, { kind: 'use' });
+  const here = c.ent;
+  const near = glimmers(weekIndex(Date.now()))
+    .map((lid) => LANDMARKS.find((l) => l.id === lid))
+    .filter(Boolean)
+    .sort((a, b) => Math.hypot(a.x - here.x, a.z - here.z) - Math.hypot(b.x - here.x, b.z - here.z));
+  c.pushInventory();
+  emit(c, 'use', { item: id });
+  return { places: near.map((l) => `${l.name} (${regionAt(l.x, l.z)?.name ?? 'the wilds'})`) };
+}
+
 // The old name for using a healing item.
 export function drink(g, c, a) {
   if (!ITEMS[a.item]?.heal) fail('Pick a healing item.');

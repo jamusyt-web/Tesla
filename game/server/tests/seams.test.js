@@ -214,7 +214,7 @@ test('places: Hearthvale is a town, the Wilds are wilds, the rest meadow', () =>
 });
 
 test('registries: content, model groups and code-drawn props', () => {
-  assert.deepEqual(Object.keys(CONTENT.items), []);
+  assert.ok(CONTENT.items.maple_log && CONTENT.quests.some((q) => q.id === 'af_intro'), 'the Amberfold pack is merged');
   assert.throws(() => mergeInto({ a: 1 }, { a: 2 }, 'x'), /defined twice/);
   for (const slot of Object.keys(CORE)) assert.ok(MODELS[slot], slot);
   assert.deepEqual(checkManifest(), [], 'every slot in one group, every file there');

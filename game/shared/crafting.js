@@ -9,7 +9,7 @@
 // (same anti-cheat idea as fishing). Integer ticks at 60 Hz, and a stage
 // 1000 wide by 600 tall. Only plain arithmetic and Math.sqrt are used, so
 // every browser and the server get the same answer.
-import { ITEMS, qualityId, QUALITY } from './items.js';
+import { ITEMS, qualityId, QUALITY, QUALITY_BASES } from './items.js';
 
 export const CRAFT_TICK = 1000 / 60;
 export const READY = 45; // a moment to get ready
@@ -133,16 +133,22 @@ const AREA_ANY = [300, 220, 700, 380];
 
 export const recipeTier = (r) => (r.lvl <= 2 ? 1 : r.lvl <= 5 ? 2 : r.lvl <= 8 ? 3 : r.lvl <= 12 ? 4 : r.lvl <= 20 ? 5 : r.lvl <= 28 ? 6 : 7);
 // Tiers 5–7 add steps: a reheat (for metal) and another group of the
-// recipe's main motion (5), a chill (6), and one more group (7).
+// recipe's main motion (5), a chill (6), and one more group (7). A craft
+// never runs past MAX_STEPS: a long one (a blade) skips the extra groups.
+export const MAX_STEPS = 11;
 function harder(steps, t) {
   if (t < 5) return steps;
   const tap = [...steps].reverse().find((st) => st.k === 'tap');
   const drag = [...steps].reverse().find((st) => st.k === 'saw' || st.k === 'carve' || st.k === 'stir');
-  const group = () => (tap ? rep(3, S('tap', tap.skin)) : drag ? [S(drag.k, drag.skin, drag.n ? { n: drag.n } : {})] : [S('hold', 'chill')]);
-  const out = [...steps, ...(steps.some((st) => st.heat) ? [S('hold', 'reheat', { heat: 1 })] : []), ...group()];
-  if (t >= 6) out.push(S('hold', 'chill'));
-  if (t >= 7) out.push(...group());
-  return out;
+  const group = () => (tap ? rep(2, S('tap', tap.skin)) : drag ? [S(drag.k, drag.skin, drag.n ? { n: drag.n } : {})] : [S('hold', 'chill')]);
+  // What to add, most wanted first; what fits goes on in the usual order.
+  const heat = steps.some((st) => st.heat) ? [S('hold', 'reheat', { heat: 1 })] : [];
+  const extras = [...(t >= 6 ? [['chill', [S('hold', 'chill')]]] : []), ['reheat', heat], ['group', group()], ...(t >= 7 ? [['group2', group()]] : [])];
+  let room = MAX_STEPS - steps.length;
+  const take = new Set();
+  for (const [k, list] of extras) if (list.length <= room) (take.add(k), (room -= list.length));
+  const add = (k) => (take.has(k) ? extras.find((e) => e[0] === k)[1] : []);
+  return [...steps, ...add('reheat'), ...add('group'), ...add('chill'), ...add('group2')];
 }
 export const isStackable = (r) => ['material', 'consumable'].includes(ITEMS[r.out].cat);
 // How many you can make in one sitting (grows with Crafting level; extra:
@@ -501,6 +507,8 @@ export function outcomeOf({ r, batch, score, flawless, over, E = {} }, rng = Mat
     return { grade, item: r.out, q: 0, base, bonus, qty: base + bonus, xpMult, mw: false };
   }
   let q = 0;
+  // Kits, charms and set pieces come in one quality only.
+  if (!QUALITY_BASES.includes(r.out)) return { grade, item: r.out, q, base: r.qty, bonus: 0, qty: r.qty, xpMult, mw: false, quality: QUALITY[0].label };
   if (grade === 'S' && rng() < Math.min(0.5, (0.15 + 0.01 * Math.max(0, Math.min(10, over))) * (flawless ? 2 : 1) + (E.masterworkPct || 0))) q = 2;
   else if (score >= 85) q = 1;
   return { grade, item: qualityId(r.out, q), q, base: r.qty, bonus: 0, qty: r.qty, xpMult, mw: q === 2, quality: QUALITY[q].label };

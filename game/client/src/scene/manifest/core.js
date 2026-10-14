@@ -280,4 +280,18 @@ export const MODELS = {
   'icon:sword_iron': { url: DUN('weapon-sword'), height: 1, pose: [0, 0, -40] },
   'icon:sword_gold': { url: DUN('weapon-sword'), height: 1, pose: [0, 0, -40], remap: [{ band: 'metal', to: '#ffd23f', ref: 0.6 }], tint: { color: '#ffffff', amount: 0, emissive: '#ffb020', glow: 0.15 } },
   'icon:armor_iron': { url: DUN('shield-round'), height: 1, pose: [-10, 20, 0], remap: [{ band: 'orange', to: '#6c7183', ref: 0.5 }] },
+  // Amberfold's goods (the same files as above, recoloured: nothing more to download).
+  'icon:maple_log': { url: SUR('tree-log-small'), height: 1, pose: [0, 100, 0], remap: [{ to: '#b5652e', ref: 0.55 }] },
+  'icon:maple_plank': { url: SUR('resource-planks'), height: 1, pose: [0, 30, 0], remap: [{ to: '#d9894a', ref: 0.55 }] },
+  'icon:hearthcap': { url: NK('mushroom_red'), height: 1, recolor: { colorRed: '#d9542f', colorWhite: '#f6e7c8' } },
+  'icon:venison': { url: FOOD('fish'), height: 1, pose: [0, 20, 0], remap: [{ to: '#a8483a', ref: 0.45 }] },
+  'icon:rivercarp': { url: SUR('fish'), height: 1, pose: [0, 70, 0], remap: [{ to: '#9a8a5a', ref: 0.62 }] },
+  'icon:amber_trout': { url: SUR('fish-large'), height: 1, pose: [0, 70, 0], remap: [{ band: 'metal', to: '#d9a441', ref: 0.47 }] },
+  'icon:leaf_eel': { url: FOOD('fish'), height: 1, pose: [0, 20, 0], remap: [{ to: '#7a9a3a', ref: 0.45 }] },
+  'icon:legend_millcarp': { url: SUR('fish-large'), height: 1, pose: [0, 70, 0], remap: [{ band: 'metal', to: '#c9782a', ref: 0.47 }, { band: 'red', to: '#8a5a2a', ref: 0.47 }], tint: { color: '#ffffff', amount: 0, emissive: '#ffb020', glow: 0.2 } },
+  'icon:carp_chowder': { url: FOOD('bowl-soup'), height: 1, remap: [{ band: 'red', to: '#e0a33a', ref: 0.5 }] },
+  'icon:axe_steel': { url: SUR('tool-axe-upgraded'), height: 1, pose: [0, 0, -35], remap: [{ band: 'metal', to: '#9aa6b4', ref: 0.68 }] },
+  'icon:pick_steel': { url: SUR('tool-pickaxe-upgraded'), height: 1, pose: [0, 0, -35], remap: [{ band: 'metal', to: '#9aa6b4', ref: 0.68 }] },
+  'icon:steel_saber': { url: DUN('weapon-sword'), height: 1, pose: [0, 0, -40], remap: [{ band: 'metal', to: '#b4bfcc', ref: 0.6 }] },
+  'icon:thornwood_blade': { url: DUN('weapon-sword'), height: 1, pose: [0, 0, -40], remap: [{ band: 'metal', to: '#7a9a4a', ref: 0.6 }], tint: { color: '#ffffff', amount: 0, emissive: '#9fd36a', glow: 0.15 } },
 };
