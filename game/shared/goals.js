@@ -15,6 +15,7 @@
 //          locate(target) → { x, z } | null }   (the nearest place a target can be done)
 import { ITEMS } from './items.js';
 import { NODE_TYPES } from './nodes.js';
+import { STATE_FX, variantName } from './wilds.js';
 import { RECIPES } from './recipes.js';
 import { MONSTERS } from './monsters.js';
 import { STATIONS } from './crafting.js';
@@ -22,9 +23,17 @@ import { LANDMARKS } from './world.js';
 import { levelFromXp } from './skills.js';
 import { questDef, stepNeed } from './quests.js';
 
-export const SCORE = { elite: 95, quest: 90, ready: 88, readyAway: 60, pinned: 85, sideQuest: 78, unlock: 75, ancient: 72, almanac: 70, weekly: 68, upgrade: 65, order: 62, rich: 58, journal: 55, landmark: 50, landmarkNew: 80, fallback: 10 };
+export const SCORE = { elite: 95, quest: 90, ready: 88, readyAway: 60, pinned: 85, sideQuest: 78, unlock: 75, golden: 74, ancient: 72, almanac: 70, weekly: 68, upgrade: 65, order: 62, elder: 60, rich: 58, journal: 55, landmark: 50, sturdy: 40, landmarkNew: 80, fallback: 10 };
 // How much more a rich (1) or ancient (2) node asks of you (server/nodestates.js STATE_FX).
-export const STATE_GATE = { 1: 8, 2: 16 };
+export const STATE_GATE = Object.fromEntries(Object.entries(STATE_FX).map(([st, f]) => [st, f.gate]));
+// How each special node shows on the Compass: its source, why, and how far (m) it's worth the walk.
+const NODE_GOAL = {
+  1: { src: 'rich', why: 'Three times the yield', range: 150 },
+  2: { src: 'ancient', why: 'A rare find', range: 600 },
+  3: { src: 'sturdy', why: 'More goods', range: 50 },
+  4: { src: 'elder', why: 'More than twice the goods', range: 150 },
+  5: { src: 'golden', why: 'A golden find!', range: 600 },
+};
 export const SWITCH_BY = 15; // the card only switches for a rival this much better (or when its goal is done)
 export const UNLOCK_MS = 30 * 60_000;
 
@@ -174,13 +183,14 @@ export function suggest(state, now = Date.now()) {
     for (const x of u.list) if (x.show) add({ id: `unlock:${u.skill}:${u.lvl}:${x.text}`, src: 'unlock', text: `${cap(u.skill)} ${u.lvl}: ${x.text}`, why: 'New', target: x.show, score: SCORE.unlock });
   }
 
-  // Rich and ancient nodes you can work.
+  // Special nodes you can work: rich and ancient (the clock's), and the wild
+  // variants (shared/wilds.js), each as far as it's worth walking for.
   for (const n of state.nodeStates ?? []) {
     const t = NODE_TYPES[n.type];
-    if (!t || !n.st || lvl(hero, t.skill) < t.lvl + (STATE_GATE[n.st] ?? 0)) continue;
-    const d = dist(pos, n);
-    if (d > (n.st === 2 ? 600 : 150)) continue;
-    add({ id: `node:${n.id}`, src: n.st === 2 ? 'ancient' : 'rich', text: `${n.st === 2 ? 'Ancient' : 'Rich'} ${t.name}, ${bearing(pos, n)}`, why: n.st === 2 ? 'A rare find' : 'Three times the yield', target: { kind: 'nodeId', id: n.id }, score: n.st === 2 ? SCORE.ancient : SCORE.rich });
+    const S = NODE_GOAL[n.st];
+    if (!t || !S || lvl(hero, t.skill) < t.lvl + (STATE_GATE[n.st] ?? 0)) continue;
+    if (dist(pos, n) > S.range) continue;
+    add({ id: `node:${n.id}`, src: S.src, text: `${variantName(n.type, n.st)}, ${bearing(pos, n)}`, why: S.why, target: { kind: 'nodeId', id: n.id }, score: SCORE[S.src] });
   }
 
   // The next upgrade, per slot (the best two).

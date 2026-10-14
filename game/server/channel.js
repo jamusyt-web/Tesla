@@ -6,7 +6,7 @@ import { fightRating, FISH_MAX_TICKS } from '../shared/fishing.js';
 import { biteFor } from './gather.js';
 import { world } from './static.js';
 import { emit, listening } from './events.js';
-import { tickNodeStates, stateOf } from './nodestates.js';
+import { tickNodeStates, stateOf, regrow, seedVariants } from './nodestates.js';
 
 const SNAP_EVERY = 2; // 10 Hz snapshots
 const MOB_SPEED = 2.2;
@@ -40,6 +40,8 @@ export class Channel {
     this.id = id;
     this.players = new Map(); // accountId → Client
     this.nodes = new Map(town ? world().nodes.map((n) => [n.id, { ...n, hp: NODE_TYPES[n.type].hp, alive: true, respawnAt: 0, hitters: new Set() }]) : []);
+    // Today's wild variants (the same on every channel).
+    if (town && game?.opts?.wilds) seedVariants(this.nodes, Math.floor(Date.now() / 86_400_000));
     this.mobs = new Map();
     this.battles = new Map();
     this.tickNo = 0;
@@ -270,8 +272,9 @@ export class Channel {
       if (!n.alive && now >= n.respawnAt) {
         n.alive = true;
         n.hp = NODE_TYPES[n.type].hp;
+        if (this.game?.opts?.wilds) regrow(this, n); // it may come back better
         n.hitters.clear();
-        this.broadcast({ t: 'node', id: n.id, alive: true, hp: n.hp, ...(stateOf(n) ? { st: stateOf(n) } : {}) });
+        this.broadcast({ t: 'node', id: n.id, alive: true, hp: n.hp, st: stateOf(n) });
       }
     }
     for (const m of this.#live('mobs')) {

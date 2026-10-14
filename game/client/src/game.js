@@ -634,7 +634,8 @@ export class GameClient {
       s.on('attuned', (m) => this.onAttuned(m)),
       s.on('nh', (m) => this.onNodeHit(m)),
       s.on('node', (m) => this.onNode(m)),
-      s.on('nst', (m) => this.town.nodes.get(m.id)?.setSt(m.st)), // a node turned rich or ancient (or back)
+      s.on('nst', (m) => this.onNodeState(m)), // a node turned rich, ancient or another variant (or back)
+      s.on('find', (m) => this.hud.worldMap?.pin({ id: `find:${m.id}`, x: m.x, z: m.z, name: m.name, icon: m.st === 5 ? '✨' : '🔮', until: Date.now() + 10 * 60_000 })), // a golden or ancient node, shown on the map
       s.on('buffs', (m) => (this.hud.me.buffs = m.buffs || {})),
       s.on('loot', (m) => this.onLoot(m)),
       s.on('cast', (m) => {
@@ -1139,10 +1140,17 @@ export class GameClient {
     }
   }
 
+  onNodeState(m) {
+    const n = this.town.nodes.get(m.id);
+    if (!n) return;
+    n.setSt(m.st);
+    if (m.hp != null && n.alive) n.setHp(m.hp);
+  }
+
   onNode(m) {
     const view = this.town.nodes.get(m.id);
     if (!view) return;
-    if ('st' in m) view.setSt(m.st); // rich or ancient (or back to normal)
+    if ('st' in m) view.setSt(m.st); // its state as it regrows (a variant, or plain)
     markShadows(this, m.alive ? 1 : 3); // it grows back, or falls
     if (m.alive) {
       view.respawn();

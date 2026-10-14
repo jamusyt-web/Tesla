@@ -91,6 +91,11 @@ export const ITEMS = {
   letter_sandmere: { name: 'Letter to Sandmere', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true, town: 'sandmere', text: 'Sealed with wax. Walk it to the Sandmere Town Hall: waystones won’t carry it.' },
   letter_starfall: { name: 'Letter to Starfall', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true, town: 'starfall', text: 'Sealed with wax. Walk it to the Starfall Town Hall: waystones won’t carry it.' },
   // Curios: odd finds out in the world. Bring one back to its town hall.
+  // Golden finds (shared/wilds.js): what a golden tree, rock or herb gives
+  // besides its goods. Prized by collectors: sell one, or keep it.
+  golden_seed: { name: 'Golden Seed', icon: '🌰', cat: 'special', tag: 'gem', value: 320, rarity: 'epic', text: 'From the heart of a golden tree. Collectors pay well; one day it might grow.' },
+  geode_heart: { name: 'Geode Heart', icon: '💠', cat: 'special', tag: 'gem', value: 320, rarity: 'epic', text: 'Cracked from a glittering rock: crystals all the way through.' },
+  moonlit_petal: { name: 'Moonlit Petal', icon: '🌸', cat: 'special', tag: 'gem', value: 320, rarity: 'epic', text: 'It still glows a little, long after picking.' },
   lost_hat: { name: "Farmer Bram's Hat", icon: '👒', cat: 'special', tag: 'curio', value: 0, rarity: 'uncommon', bound: true, town: 'hearthvale', text: 'Blown off by the lake wind. Bram would like it back: hand it in at the Town Hall.' },
   old_spyglass: { name: 'Old Spyglass', icon: '🔭', cat: 'special', tag: 'curio', value: 0, rarity: 'uncommon', bound: true, town: 'hearthvale', text: 'Engraved "Wildwatch". The Town Hall keeps such things.' },
 

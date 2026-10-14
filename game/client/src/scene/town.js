@@ -11,6 +11,7 @@ import { CHUNK, scatterPoints, landDist } from './scatter.js';
 import { DUNGEONS } from '../../../shared/dungeon.js';
 import { biomeAt, groundAt, townAt } from '../../../shared/places.js';
 import { biome } from '../../../shared/biomes.js';
+import { fxOf, hpOf, variantName } from '../../../shared/wilds.js';
 import {
   BUILDINGS, ZONES, REGIONS, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, ENTRANCES, CRYPT, LANDS, EXTENT, SPAWN, NODE_TYPES, MAP, LANDMARKS,
   pathSegments, zonesOfKind, mulberry32, styleOf,
@@ -307,7 +308,7 @@ export class NodeView {
     this.full.visible = true;
     this.full.rotation.set(0, this.node.rot, 0);
     this.full.position.set(0, 0, 0);
-    this.full.scale.setScalar(this.node.s);
+    this.full.scale.setScalar(this.node.s * (this.k ?? 1));
     this.stump.visible = false;
     this.grow = instant ? 0 : 0.001;
     this.hp = this.maxHp;
@@ -327,9 +328,14 @@ export class NodeView {
     return !!this.fall || this.grow > 0 || this.shake > 0;
   }
 
-  // Rich (1: gold) or ancient (2: violet): a glow on the standing node; 0 clears it.
+  // A special node (shared/wilds.js): rich gold, ancient violet, elder green,
+  // golden gold and sparkling; sturdy and elder ones stand bigger. 0 clears it.
   tint(st) {
-    const col = { 1: '#ffc83a', 2: '#a46bff' }[st];
+    const S = fxOf(st);
+    const col = S.glow;
+    this.st = st;
+    this.k = S.scale;
+    if (this.full.visible && !this.fall && !this.grow) this.full.scale.setScalar(this.node.s * this.k);
     this.full.traverse((o) => {
       if (!o.isMesh || o.material.side === THREE.BackSide || !o.material.emissive) return;
       const base = o.userData.baseMat;
@@ -343,7 +349,7 @@ export class NodeView {
           o.material = m;
         }
         o.material.emissive.set(col);
-        o.material.emissiveIntensity = 0.35;
+        o.material.emissiveIntensity = st === 5 ? 0.55 : 0.35;
       } else if (base) {
         o.material.dispose();
         o.material = base;
@@ -372,10 +378,10 @@ export class NodeView {
       }
       if (f.t > 1.6) {
         const s = Math.max(0, 1 - (f.t - 1.6) / 0.5);
-        F.scale.setScalar(this.node.s * s);
+        F.scale.setScalar(this.node.s * (this.k ?? 1) * s);
         if (s <= 0) {
           F.visible = false;
-          F.scale.setScalar(this.node.s);
+          F.scale.setScalar(this.node.s * (this.k ?? 1));
           this.fall = null;
         }
       }
@@ -386,8 +392,14 @@ export class NodeView {
       this.grow = Math.min(1, this.grow + dt * 1.8);
       const g = this.grow;
       const el = g >= 1 ? 1 : 1 - Math.pow(2, -10 * g) * Math.cos(g * 10);
-      F.scale.setScalar(this.node.s * el);
+      F.scale.setScalar(this.node.s * (this.k ?? 1) * el);
       if (g >= 1) this.grow = 0;
+    }
+    // A golden one sparkles (when someone's near enough to see).
+    if (this.st === 5 && Math.random() < dt * 6) {
+      const p = this.root.position;
+      const v = new THREE.Vector3(p.x + (Math.random() - 0.5) * 2.4, 0.6 + Math.random() * 3.2 * (this.type.kind === 'tree' ? 1.4 : 0.4), p.z + (Math.random() - 0.5) * 2.4);
+      if (this.fx.near(v)) this.fx.burst(v, { n: 2, color: ['#fff1a8', '#ffd84a', '#ffffff'], speed: 0.6, up: 1.2, size: 0.12, life: 1.1, gravity: -0.2 });
     }
     if (this.shake > 0) {
       this.shake = Math.max(0, this.shake - dt * 3.5);
@@ -419,7 +431,7 @@ class NodeHandle {
     this.maxHp = this.type.hp;
     this.hp = this.maxHp;
     this.alive = true;
-    this.st = 0; // 1 rich, 2 ancient
+    this.st = 0; // a special state (shared/wilds.js): 1 rich, 2 ancient, 3 big, 4 elder, 5 golden
     this.root = { position: new THREE.Vector3(node.x, 0, node.z) };
     this.view = null; // the NodeView standing in, if any
     this.chunk = null; // its square, while built
@@ -429,11 +441,16 @@ class NodeHandle {
   get height() {
     const k = this.node.type;
     const size = assets.has(k) && assets.sizeOf(k, Math.abs(hash(this.node.id)));
-    if (size) return size.y * this.node.s;
-    return { tree: k === 'tree_pine' ? 6 : 4.6, rock: 2, herb: 1, fish: 0.5 }[this.type.kind] * this.node.s;
+    const s = this.node.s * fxOf(this.st).scale;
+    if (size) return size.y * s;
+    return { tree: k === 'tree_pine' ? 6 : 4.6, rock: 2, herb: 1, fish: 0.5 }[this.type.kind] * s;
   }
   setHp(hp) {
     this.hp = hp;
+  }
+  // The name it shows by ("Golden Oak Tree").
+  get name() {
+    return variantName(this.node.type, this.st);
   }
   hit(from, perfect, dmg) {
     this.ctl.live(this)?.hit(from, perfect, dmg);
@@ -461,6 +478,7 @@ class NodeHandle {
   setSt(st = 0) {
     if ((st | 0) === this.st) return;
     this.st = st | 0;
+    this.maxHp = hpOf(this.node.type, this.st);
     this.ctl.restyle(this);
   }
 }

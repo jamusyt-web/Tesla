@@ -174,9 +174,11 @@ class Client {
 // ─────────────────────────────────────────────────────────────────────────
 export class Game {
   // opts.shopSim = false turns off the shop simulation timer (tests drive it by hand).
+  // opts.wilds = false: nodes regrow plain (shared/wilds.js variants off); it's
+  // off under the test runner, so tests see the nodes they expect.
   constructor(db, opts = {}) {
     this.db = db;
-    this.opts = { shopSim: true, ...opts };
+    this.opts = { shopSim: true, wilds: !process.env.NODE_TEST_CONTEXT, ...opts };
     this.heroes = new Heroes(db);
     this.market = new Market(db, this.heroes);
     this.shops = new Shops(db, this.heroes);

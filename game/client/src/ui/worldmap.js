@@ -18,6 +18,7 @@ export class WorldMap {
   constructor(hud) {
     this.hud = hud;
     this.el = null;
+    this.live = new Map(); // id → a pin for something happening now (pin())
   }
   get isOpen() {
     return !!this.el;
@@ -215,6 +216,7 @@ export class WorldMap {
     const g = this.hud.game;
     const me = g.myPos();
     this.#fog(x);
+    this.#livePins(x);
     // A picked spot to walk to.
     if (this.sel && !this.sel.stone) {
       const [sx, sy] = this.#toScreen(this.sel.x, this.sel.z);
@@ -282,6 +284,39 @@ export class WorldMap {
       x.fillText(PIN[l.kind] ?? '📍', sx, sy);
     }
     x.globalAlpha = 1;
+  }
+
+  // Live pins: golden finds and world events happening now, with their names.
+  #livePins(x) {
+    const now = Date.now();
+    x.font = `${Math.max(12, Math.min(22, 7 * this.s))}px sans-serif`;
+    x.textAlign = 'center';
+    x.textBaseline = 'middle';
+    for (const [id, p] of this.live) {
+      if (p.until < now) {
+        this.live.delete(id);
+        continue;
+      }
+      const [sx, sy] = this.#toScreen(p.x, p.z);
+      x.fillText(p.icon ?? '✨', sx, sy);
+      x.save();
+      x.font = `600 ${Math.max(12, Math.min(15, 5 * this.s))}px Nunito, sans-serif`;
+      x.lineWidth = 3;
+      x.strokeStyle = 'rgba(255, 250, 240, 0.9)';
+      x.fillStyle = '#3d2a14';
+      x.strokeText(p.name, sx, sy + 16);
+      x.fillText(p.name, sx, sy + 16);
+      x.restore();
+    }
+  }
+
+  // Pin something happening now on the map ({ id, x, z, name, icon?, until }); a
+  // later pin with the same id replaces it, unpin(id) takes it off.
+  pin(p) {
+    this.live.set(p.id, p);
+  }
+  unpin(id) {
+    this.live.delete(id);
   }
 
   // ── The card at the bottom: travel / walk ────────────────────────────

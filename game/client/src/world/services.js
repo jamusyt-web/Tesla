@@ -304,7 +304,8 @@ function worldAction(g, L, cur) {
     const k = (same ? 0 : 1000) + dd;
     if (!node || k < node.k) node = { n, t, dd, k, same };
   }
-  if (node) c.push({ rule: 'node', d: node.dd, label: node.same ? `Next ${node.t.name} (${Math.round(node.dd)} m)` : `${VERB[node.t.kind] ?? 'Gather'} ${node.t.name}`, glyph: node.t.kind === 'tree' ? 'pine' : node.t.kind === 'rock' ? 'pick' : 'herbs', fn: () => g.goNode(node.n.id) });
+  const nameOf = (n) => g.town.nodes.get(n.id)?.name ?? NODE_TYPES[n.type]?.name;
+  if (node) c.push({ rule: 'node', d: node.dd, label: node.same ? `Next ${node.t.name} (${Math.round(node.dd)} m)` : `${VERB[node.t.kind] ?? 'Gather'} ${nameOf(node.n)}`, glyph: node.t.kind === 'tree' ? 'pine' : node.t.kind === 'rock' ? 'pick' : 'herbs', fn: () => g.goNode(node.n.id) });
   // 11. Fishing: cast (again).
   const spot = g.nearestNode('fish_spot');
   if (spot && d(spot.x, spot.z) < FISH_RANGE + 2 + slack('cast')) c.push({ rule: 'cast', d: d(spot.x, spot.z), label: g.lastFish && Date.now() - g.lastFish < 30_000 ? 'Cast again' : 'Cast', glyph: 'rod', fn: () => g.goNode(spot.id) });

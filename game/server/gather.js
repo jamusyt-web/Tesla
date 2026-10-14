@@ -11,6 +11,7 @@ import { emit } from './events.js';
 import { highlight } from './digest.js';
 import { rint, q2 } from './channel.js';
 import { stateOf, spend, STATE_FX } from './nodestates.js';
+import { stateWord, keepsakeOf } from '../shared/wilds.js';
 
 export const GATHER_ACTS = new Set(['chop', 'mine', 'pick']);
 
@@ -45,7 +46,7 @@ export function hitNode(g, c, nodeId, now) {
   const lvl = levelFromXp(c.hero.skills[t.skill] || 0);
   // A rich or ancient node asks more of you (SPEC §4.3).
   const need = t.lvl + (STATE_FX[stateOf(n)]?.gate ?? 0);
-  if (lvl < need) fail(`${stateOf(n) ? `This ${['', 'rich', 'ancient'][stateOf(n)]} ${t.name}` : 'It'} needs ${t.skill[0].toUpperCase() + t.skill.slice(1)} level ${need}.`);
+  if (lvl < need) fail(`${stateOf(n) ? `This ${stateWord(n.type, stateOf(n)).toLowerCase()} ${t.name}` : 'It'} needs ${t.skill[0].toUpperCase() + t.skill.slice(1)} level ${need}.`);
   const E = c.effects();
   const K = BY_KIND[t.kind] ?? {};
   let power = 1;
@@ -111,7 +112,7 @@ export function grantGather(g, c, t, n, finisher) {
   const loot = {};
   const give = (id, q) => isItem(id) && q > 0 && (loot[id] = (loot[id] || 0) + q);
   for (const d of t.drops) {
-    let q = rint(d.min, d.max) * S.yield;
+    let q = Math.round(rint(d.min, d.max) * S.yield);
     if (q && Math.random() < doubleChance(lvl) + (E[K.double] || 0)) q *= 2;
     give(d.id, q);
   }
@@ -132,7 +133,14 @@ export function grantGather(g, c, t, n, finisher) {
     give(r.id, 1);
     rares.push(r.id);
   }
+  // A golden node's keepsake (a Golden Seed, a Geode Heart, a Moonlit Petal).
+  if (S.keepsake && keepsakeOf(n.type)) {
+    give(keepsakeOf(n.type), 1);
+    rares.push(keepsakeOf(n.type));
+  }
   for (const [id, q] of Object.entries(loot)) g.heroes.addItem(c.hero.id, id, q, 'gather');
+  // A variant found goes in the journal (the field guide).
+  if (stateOf(n)) g.journal?.note(c.hero.id, 'variant', `${n.type}:${stateOf(n)}`);
   // Xp: the node's state, a meal, and forest lore in the woods.
   const forest = zoneAt(n.x, n.z)?.kind === 'forest' ? E.forestXp || 0 : 0;
   const xp = g.heroes.addXp(c.hero, t.skill, Math.round(t.xp * S.xp * (1 + (E.gatherXp || 0) + forest)));

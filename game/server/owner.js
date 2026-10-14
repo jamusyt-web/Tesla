@@ -2,7 +2,9 @@
 // and out by reason, gold per hour played, prices per town, how full the
 // merchants are, alarms with a suggested knob) and the Engagement tab. The
 // owner turns the knobs (owner.econ.set); nothing changes on its own.
-import { REGIONS } from '../shared/world.js';
+import { REGIONS, NODE_TYPES } from '../shared/world.js';
+import { STATE_FX } from '../shared/wilds.js';
+import { force } from './nodestates.js';
 import { tradeOf, setOverrides, overrides } from '../shared/economy.js';
 import { today, DAY_MS } from './telemetry.js';
 import { engageReport } from './engage.js';
@@ -75,3 +77,18 @@ const days = (a) => Math.max(1, Math.min(60, Number(a?.days) || 7));
 register('owner.econ', (g, c, a) => (admin(g, c), econReport(g.db, days(a))), { inRun: true });
 register('owner.econ.set', (g, c, a) => (admin(g, c), setKnob(g, a.key, a.value)), { inRun: true });
 register('owner.engage', (g, c, a) => (admin(g, c), engageReport(g.db, days(a))), { inRun: true });
+// The standing tree, rock or herb nearest the owner (within 15 m) turns into a
+// state (shared/wilds.js: 3 sturdy, 4 elder, 5 golden; 0 plain).
+register('owner.wild', (g, c, a) => {
+  admin(g, c);
+  const st = Number(a?.st ?? 5);
+  if (!STATE_FX[st]) fail('No such state.');
+  let best = null;
+  for (const n of c.ch.nodes.values()) {
+    const d = Math.hypot(n.x - c.ent.x, n.z - c.ent.z);
+    if (n.alive && NODE_TYPES[n.type]?.kind !== 'fish' && d < 15 && (!best || d < best.d)) best = { n, d };
+  }
+  if (!best) fail('Stand next to a tree, rock or herb.');
+  force(c.ch, best.n, st);
+  return { id: best.n.id, st };
+});
