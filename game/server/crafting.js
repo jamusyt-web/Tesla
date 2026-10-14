@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { ITEMS } from '../shared/items.js';
 import { RECIPE_BY_ID } from '../shared/recipes.js';
 import { levelFromXp } from '../shared/skills.js';
-import { buildSpec, replayCraft, finalizeCraft, scoreOf, isFlawless, outcomeOf, batchCap, isStackable, recipeTier, CRAFT_TICK, CRAFT_MAX_TICKS, STATIONS } from '../shared/crafting.js';
+import { buildSpec, replayCraft, unpackInputs, finalizeCraft, scoreOf, isFlawless, outcomeOf, batchCap, isStackable, recipeTier, CRAFT_TICK, CRAFT_MAX_TICKS, STATIONS } from '../shared/crafting.js';
 import { spotsOf, inYard, nearestStation, YARD_RANGE } from '../shared/stations.js';
 import { townAt } from '../shared/places.js';
 import { REGIONS } from '../shared/world.js';
@@ -121,25 +121,26 @@ export class Crafting {
     return { sid, spec, station: r.station, spot, escrow };
   }
 
-  finish(c, { sid, toggles, end, off, stop } = {}, now = Date.now()) {
+  // inputs: what the finger did, packed (shared/crafting.js packInputs).
+  finish(c, { sid, inputs, end, off, stop } = {}, now = Date.now()) {
     const cr = c.craft;
     if (!cr || cr.sid !== sid) {
       const done = this.q.logged.get(c.hero.id, String(sid));
       if (done) return JSON.parse(done.result); // a retried finish: same answer, nothing granted twice
       fail('That craft already ended.');
     }
-    let tog = Array.isArray(toggles) ? toggles : null;
     end = Number(end);
-    let ok = tog && tog.length <= 400 && Number.isInteger(end) && end >= 0 && end <= CRAFT_MAX_TICKS;
-    if (ok) for (let i = 0; i < tog.length; i++) if (!Number.isInteger(tog[i]) || tog[i] < 0 || tog[i] > end || (i && tog[i] <= tog[i - 1])) ok = false;
+    let ok = Number.isInteger(end) && end >= 0 && end <= CRAFT_MAX_TICKS;
+    let inp = ok ? unpackInputs(inputs ?? [], end) : null;
+    if (!inp) ok = false;
     // Can't have played it faster than real time (same floor as fishing).
     const tooFast = ok && now - cr.startedAt < ((end * CRAFT_TICK) * 0.85) - 400;
     const o = Array.isArray(off) ? off.map((v) => Math.max(0, Math.min(8, Math.round(Number(v) || 0)))) : [0, 0];
     if (!ok || tooFast) {
-      tog = [];
+      inp = [];
       end = CRAFT_MAX_TICKS;
     }
-    const s = finalizeCraft(replayCraft(cr.spec, tog, end, [o[0] ?? 0, o[1] ?? 0]));
+    const s = finalizeCraft(replayCraft(cr.spec, inp, end, [o[0] ?? 0, o[1] ?? 0]));
     return this.#settle(c, s, !ok || tooFast ? 'suspect' : stop ? 'stop' : 'play');
   }
 

@@ -240,7 +240,7 @@ export async function runCompassBot({ ws, name, col, nav, until, log = () => {} 
     const st = await rpc('craft.start', { recipe: recipeId, batch: 1 });
     if (!st.ok) return false;
     await sleep(1500);
-    const fin = await rpc('craft.finish', { sid: st.data.sid, toggles: [], end: 1, off: [0, 0] });
+    const fin = await rpc('craft.finish', { sid: st.data.sid, inputs: [], end: 1, off: [0, 0] });
     return fin.ok;
   };
   // Something it can make from its bag (to train Crafting), cheapest first.

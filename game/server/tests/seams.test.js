@@ -98,7 +98,7 @@ test('the tutorial path emits gather, craft, kill and stock in order, and each p
     const spot = spotsOf('workbench')[0];
     Object.assign(c.ent, { x: spot.x, z: spot.z });
     const st = dispatch(game, c, 'craft.start', { recipe: 'oak_plank', batch: 1 });
-    dispatch(game, c, 'craft.finish', { sid: st.sid, toggles: [], end: 1, off: [0, 0] });
+    dispatch(game, c, 'craft.finish', { sid: st.sid, inputs: [], end: 1, off: [0, 0] });
     assert.equal(c.hero.tutorial, 2);
     // 3. Slay a monster.
     const mob = [...ch.mobs.values()].find((m) => m.type === 'slime');

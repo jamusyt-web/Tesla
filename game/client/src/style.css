@@ -434,7 +434,7 @@ input, select { font-family: inherit; color: var(--ink); user-select: text; -web
 .craft-icon.done { filter: none; margin: 0 auto; width: 72px; height: 72px; }
 .craft-step { text-align: center; font-weight: 800; font-size: 17px; color: #e8c983; min-height: 22px; letter-spacing: 0.02em; }
 .craft-stage { position: relative; }
-.craft-cv { width: 100%; height: 150px; display: block; border-radius: 6px; border: 1px solid #000; background: radial-gradient(ellipse at center, #3d2c20 0%, #241911 80%); }
+.craft-cv { width: 100%; height: auto; aspect-ratio: 5 / 3; touch-action: none; display: block; border-radius: 6px; border: 1px solid #000; background: radial-gradient(ellipse at center, #3d2c20 0%, #241911 80%); }
 .craft-mark { position: absolute; left: 0; right: 0; top: 8px; text-align: center; font-family: var(--font-display); font-weight: 900; font-size: 18px; letter-spacing: 0.06em; text-shadow: 0 2px 0 #000; pointer-events: none; opacity: 0; }
 .craft-mark.pop { animation: markpop .7s ease-out; }
 @keyframes markpop { 0% { opacity: 0; transform: translateY(4px); } 15% { opacity: 1; transform: none; } 70% { opacity: 1; } 100% { opacity: 0; } }

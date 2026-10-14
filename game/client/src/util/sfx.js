@@ -85,6 +85,28 @@ export const sfx = {
     tone(110, 0.5, { type: 'sawtooth', vol: 0.12, slide: -60 });
   },
   crumble: () => noise(0.45, { vol: 0.9, freq: 900, q: 0.6 }),
+  // Crafting: metal, wood, water and fire.
+  clang: (q) => {
+    tone(q === 'P' ? 1760 : 1320, 0.4, { type: 'triangle', vol: 0.22 });
+    tone(q === 'P' ? 2640 : 1980, 0.3, { type: 'sine', vol: 0.12, delay: 0.005 });
+    noise(0.06, { vol: 0.8, freq: 3000, q: 1.5 });
+  },
+  thud: () => {
+    tone(110, 0.12, { type: 'square', vol: 0.16, slide: -40 });
+    noise(0.08, { vol: 0.5, freq: 400, q: 1 });
+  },
+  knock: () => {
+    tone(520, 0.06, { type: 'square', vol: 0.14 });
+    noise(0.05, { vol: 0.6, freq: 900, q: 2 });
+  },
+  rasp: () => noise(0.16, { vol: 0.5, freq: 2200, q: 0.9 }),
+  scrape: () => noise(0.07, { vol: 0.25, freq: 3200, q: 1.2 }),
+  sizzle: () => noise(0.8, { vol: 0.45, freq: 5000, q: 0.4 }),
+  whoosh: () => noise(0.45, { vol: 0.6, freq: 600, q: 0.5 }),
+  plop: () => {
+    tone(300, 0.14, { type: 'sine', vol: 0.3, slide: -180 });
+    noise(0.12, { vol: 0.3, freq: 700, q: 1 });
+  },
   pick: () => {
     tone(880, 0.07, { type: 'sine', vol: 0.25 });
     tone(1320, 0.1, { type: 'sine', vol: 0.2, delay: 0.06 });

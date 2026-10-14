@@ -253,6 +253,7 @@ test('walk-in shops: owner stocks, a friend walks in, sees the shelves and buys;
 
 test('hands-on crafting: materials held while you work, the server replays your timing, results are paid once', async () => {
   const { bot } = await import('./craft-bot.js');
+  const { packInputs } = await import('../../shared/crafting.js');
   const { spotsOf } = await import('../../shared/stations.js');
   const a = await player('Smith');
   try {
@@ -270,9 +271,9 @@ test('hands-on crafting: materials held while you work, the server replays your 
     assert.equal(game.heroes.count(a.id, 'oak_log'), 14, '6 logs held while crafting');
     // You can't wander off or start something else mid-craft.
     assert.match((await a.rpc('hit', { node: NODES[0].id })).err, /Finish your craft/);
-    const { s, tog } = bot(st.data.spec, 0, 5, 0);
+    const cheatPlay = bot(st.data.spec, 0, 5, 0);
     // Finishing instantly is impossible for a human: graded as if nothing was pressed.
-    const cheat = await a.call('craft.finish', { sid: st.data.sid, toggles: tog, end: s.tick, off: [0, 0] });
+    const cheat = await a.call('craft.finish', { sid: st.data.sid, inputs: packInputs(cheatPlay.inputs), end: cheatPlay.end, off: [0, 0] });
     assert.equal(cheat.ok, true, cheat.err);
     assert.equal(cheat.data.grade, 'D');
     assert.equal(cheat.data.out.qty, 3, 'still never less than the plain recipe');
@@ -281,14 +282,14 @@ test('hands-on crafting: materials held while you work, the server replays your 
     assert.equal(st2.ok, true, st2.err);
     assert.match((await a.call('craft.cancel', { sid: 'nope' })).err, /already ended/);
     const play = bot(st2.data.spec, 0, 7, 0);
-    await new Promise((r) => setTimeout(r, (play.s.tick / 60) * 1000 + 50));
-    const fin = await a.call('craft.finish', { sid: st2.data.sid, toggles: play.tog, end: play.s.tick, off: [0, 0] });
+    await new Promise((r) => setTimeout(r, (play.end / 60) * 1000 + 50));
+    const fin = await a.call('craft.finish', { sid: st2.data.sid, inputs: packInputs(play.inputs), end: play.end, off: [0, 0] });
     assert.equal(fin.ok, true, fin.err);
     assert.equal(fin.data.grade, 'S');
     assert.ok(fin.data.out.qty >= 3);
     const planks = game.heroes.count(a.id, 'oak_plank');
     // A retried finish gets the same answer and pays nothing more.
-    const again = await a.call('craft.finish', { sid: st2.data.sid, toggles: play.tog, end: play.s.tick, off: [0, 0] });
+    const again = await a.call('craft.finish', { sid: st2.data.sid, inputs: packInputs(play.inputs), end: play.end, off: [0, 0] });
     assert.deepEqual(again.data.out, fin.data.out);
     assert.equal(game.heroes.count(a.id, 'oak_plank'), planks);
     assert.equal(game.heroes.count(a.id, 'oak_log'), 8);

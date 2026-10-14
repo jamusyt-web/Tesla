@@ -73,8 +73,8 @@ test('each town has its own stations: crafting claims the nearest one', () => {
   assert.ok(Math.hypot(sa.spot.x - ta.x, sa.spot.z - ta.z) < 0.01 && Math.hypot(sb.spot.x - hb.x, sb.spot.z - hb.z) < 0.01, 'each got the near spot at their own bench');
   assert.deepEqual(a.ch.spots.get('testvale_workbench').slice(0, 1), [a.hero.id]);
   // Finishing frees the spot at the bench it was claimed at.
-  dispatch(game, a, 'craft.finish', { sid: sa.sid, toggles: [], end: 1, off: [0, 0] });
-  dispatch(game, b, 'craft.finish', { sid: sb.sid, toggles: [], end: 1, off: [0, 0] });
+  dispatch(game, a, 'craft.finish', { sid: sa.sid, inputs: [], end: 1, off: [0, 0] });
+  dispatch(game, b, 'craft.finish', { sid: sb.sid, inputs: [], end: 1, off: [0, 0] });
   assert.ok(!a.ch.spots.get('testvale_workbench').includes(a.hero.id));
   assert.ok(game.heroes.count(a.hero.id, 'oak_plank') >= 1, 'made a plank in Testvale');
   game.disconnect(a);
@@ -93,7 +93,7 @@ test("a town's own recipe is refused anywhere else", () => {
     put(c, tv.x, tv.z);
     const st = dispatch(game, c, 'craft.start', { recipe: 'tv_plank', batch: 1 });
     assert.equal(st.spot.prop, 'testvale_workbench');
-    dispatch(game, c, 'craft.finish', { sid: st.sid, toggles: [], end: 1, off: [0, 0] });
+    dispatch(game, c, 'craft.finish', { sid: st.sid, inputs: [], end: 1, off: [0, 0] });
   } finally {
     game.disconnect(c);
   }

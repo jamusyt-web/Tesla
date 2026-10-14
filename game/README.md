@@ -36,9 +36,9 @@ A cozy multiplayer economy adventure game for phone and PC. You gather, craft, a
   - **Skills and rare drops**: Foraging, Mining, Herbalism and Fishing level up and increase your double-drop chance. Rare drops (Golden Acorn, Sapphire, Golden Koi) are announced to the whole server.
   - **Tools change in your hand**: the axe, pickaxe, rod or sword shows in your hero's hand depending on what you're doing. Each tier has its own 3D model (wood → copper → iron → gold, with gold glowing). New skins are just data in `shared/items.js`.
 - **Hands-on crafting**: you make things yourself at five stations in the Workshop yard: **Forge** (smelt bars), **Anvil** (hammer tools, blades and plate), **Workbench** (saw planks, stitch leather, assemble rods), **Grindstone** and **Cookpot** (food and potions).
-  - **The minigame**: each step is a timing beat with one button. Tap as a ring closes (hammer, saw), tap as a marker crosses the mark (pour, quench), or hold and let go in the band (heat, bellows, simmer). A good heat makes the hammering that follows more forgiving.
+  - **Real motions**: each step is one motion that copies the real job, and the thing you're making changes with every stroke. **Tap** the glowing spot to hammer, rivet, chisel or drop in an ingredient (dead centre is Perfect; the spot cools, so don't dawdle). **Hold** and let go in the band to heat the bar, pour the metal, quench or simmer. **Saw** back and forth along the line, **carve** along a dotted path (mark, scrape, cut, stitch, sharpen), or **stir** round the pot. Crafts take 2 to 10 strokes. A good heat makes the hammer spots bigger.
   - **Results are graded S to D**: never worse than the plain recipe. Refining and food get up to +20% bonus yield. Tools and gear can come out **Fine** (+15% stats) or, rarely, **Masterwork** (+30%, announced to the town).
-  - **Anti-cheat**: the server replays your recorded timing, the same way it checks fishing.
+  - **Anti-cheat**: the server replays what your finger did (taps, holds and drags), the same way it checks fishing.
   - **Quick craft**: once you've made a refining or cooking recipe well 3 times, you can batch it without the minigame for a small fee and half XP.
 - **Player-driven market (Albion-style order book)**:
   - **Orders**: place buy or sell orders, or **buy/sell instantly** against the book.

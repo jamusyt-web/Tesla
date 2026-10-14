@@ -58,9 +58,9 @@ function beginCraft(g, st, recipe, batch) {
     onDone: (fin) => finishCraft(g, fin),
     onStop: (fin) => finishCraft(g, fin),
     onStep: (step, q) => {
-      if (step.k === 'strike') g.me.av.play('swing', 0.32);
-      else if (step.k === 'sweep') g.me.av.play('pick', 0.4);
-      else g.me.av.play('cast', 0.45);
+      if (step.k === 'tap') g.me.av.play('swing', 0.32);
+      else if (step.k === 'hold') g.me.av.play('cast', 0.45);
+      else g.me.av.play('pick', 0.4);
       const p = stationPos(station, g.me.local.x, g.me.local.z);
       if (p && q !== 'M') g.fx.burst(new THREE.Vector3(p.x, 1.1, p.z), { n: q === 'P' ? 14 : 6, color: station === 'cookpot' ? ['#ffffff', '#d9f3ff'] : station === 'forge' || station === 'anvil' ? ['#ffd84a', '#ff9a3c', '#fff1a8'] : ['#e0bd8a', '#c89a62'], speed: 4, up: 3, size: 0.12, life: 0.5, gravity: 6 });
     },
@@ -125,7 +125,7 @@ export function resumeCraft(g, you) {
   if (c) {
     // Reloaded or another device: it can only be finished as it is.
     g.sock
-      .rpc('craft.finish', { sid: c.sid, toggles: [], end: 0, off: [0, 0], stop: true })
+      .rpc('craft.finish', { sid: c.sid, inputs: [], end: 0, off: [0, 0], stop: true })
       .then((res) => g.hud.toast(`Your ${ITEMS[res.out?.item]?.name || 'craft'} was finished as it was (grade ${res.grade}).`))
       .catch(() => {});
   } else if (g.craft) {

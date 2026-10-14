@@ -3,32 +3,59 @@ import assert from 'node:assert/strict';
 import { RECIPES, RECIPE_BY_ID } from '../../shared/recipes.js';
 import { ITEMS } from '../../shared/items.js';
 import { bot } from './craft-bot.js';
-import { buildSpec, replayCraft, finalizeCraft, scoreOf, gradeOf, isFlawless, outcomeOf, isStackable, batchCap, CRAFT_MAX_TICKS } from '../../shared/crafting.js';
+import { buildSpec, replayCraft, finalizeCraft, scoreOf, gradeOf, isFlawless, outcomeOf, isStackable, batchCap, newCraft, input, advance, packInputs, unpackInputs, STEP_TEXT, READY, STAGE_W, STAGE_H, MAX_INPUTS, CRAFT_MAX_TICKS } from '../../shared/crafting.js';
 
 test('the server replay of recorded inputs matches live play, for every recipe', () => {
   for (const r of RECIPES)
     for (let seed = 1; seed <= 12; seed++) {
       const spec = buildSpec(r, { lvl: r.lvl, batch: batchCap(r, 10), seed });
-      const { s, tog } = bot(spec, 70, seed);
-      const back = replayCraft(JSON.parse(JSON.stringify(spec)), tog, s.tick, [2, 2]);
+      const { s, inputs, end } = bot(spec, 45, seed);
+      // Sent packed, the way the client sends them.
+      const back = replayCraft(JSON.parse(JSON.stringify(spec)), unpackInputs(packInputs(inputs), end), end, [2, 2]);
       assert.deepEqual(back.res, s.res, `${r.id} seed ${seed}`);
       assert.equal(scoreOf(back), scoreOf(s));
+      assert.ok(inputs.length <= MAX_INPUTS, `${r.id}: ${inputs.length} inputs`);
     }
 });
 
-test('doing nothing finishes as all misses (grade D, plain output); mashing scores badly', () => {
+test('moving time on in one jump or many small ones comes out the same', () => {
+  const spec = buildSpec(RECIPE_BY_ID.sword_iron, { lvl: 6, seed: 4 });
+  const { inputs, end } = bot(spec, 45, 2);
+  const a = replayCraft(spec, inputs, end, [2, 2]);
+  const b = newCraft(spec, [2, 2]);
+  let k = 0;
+  for (let t = 0; t <= end; t++) {
+    while (k < inputs.length && inputs[k][0] === t) input(b, inputs[k++]);
+    advance(b, t);
+  }
+  assert.deepEqual(b.res, a.res);
+});
+
+test('bad inputs are refused whole', () => {
+  assert.deepEqual(unpackInputs([0, 0, 500, 300, 5, 2, 500, 300], 10), [[0, 0, 500, 300], [5, 2, 500, 300]]);
+  for (const bad of [[0, 0, 500], [0, 3, 1, 1], [-1, 0, 1, 1], [0, 0, 1.5, 1], [0, 0, 9999, 1], [20, 0, 1, 1], 'x'])
+    assert.equal(unpackInputs(bad, 10), null, JSON.stringify(bad));
+  assert.equal(unpackInputs(new Array((MAX_INPUTS + 1) * 4).fill(0), 10), null);
+});
+
+test('doing nothing finishes as all misses (grade D, plain output); tapping all over scores badly', () => {
   const r = RECIPE_BY_ID.sword_iron;
   const idle = finalizeCraft(replayCraft(buildSpec(r, { lvl: 6, seed: 3 }), [], CRAFT_MAX_TICKS));
   assert.equal(scoreOf(idle), 0);
   assert.equal(gradeOf(0), 'D');
-  for (const per of [4, 6, 10, 15, 20]) {
+  let x = 11;
+  const rnd = (n) => ((x = (x * 16807) % 2147483647) % n);
+  for (const per of [4, 8, 15, 30]) {
     let sum = 0;
-    for (let n = 0; n < 60; n++) {
-      const tog = [];
-      for (let t = 0; t < CRAFT_MAX_TICKS; t += per) tog.push(t, t + 2);
-      sum += scoreOf(finalizeCraft(replayCraft(buildSpec(r, { lvl: 6, seed: 500 + n }), tog, CRAFT_MAX_TICKS)));
+    for (let n = 0; n < 40; n++) {
+      const inp = [];
+      for (let t = 0; t < CRAFT_MAX_TICKS - 3; t += per) {
+        const [px, py] = [rnd(1000), rnd(600)];
+        inp.push([t, 0, px, py], [t + 2, 2, px, py]);
+      }
+      sum += scoreOf(finalizeCraft(replayCraft(buildSpec(r, { lvl: 6, seed: 500 + n }), inp, CRAFT_MAX_TICKS)));
     }
-    assert.ok(sum / 60 < 20, `mashing every ${per} ticks scores ${sum / 60}`);
+    assert.ok(sum / 40 < 25, `tapping at random every ${per} ticks scores ${sum / 40}`);
   }
 });
 
@@ -36,13 +63,13 @@ test('stopping early never beats finishing', () => {
   const r = RECIPE_BY_ID.sword_iron;
   for (let n = 0; n < 80; n++) {
     const spec = buildSpec(r, { lvl: 6, seed: 9000 + n });
-    const { s, tog } = bot(spec, 70, n + 1);
+    const { s, inputs, end } = bot(spec, 45, n + 1);
     const full = scoreOf(s);
-    for (const f of [0.25, 0.5, 0.75]) assert.ok(scoreOf(finalizeCraft(replayCraft(spec, tog, Math.floor(s.tick * f), [2, 2]))) <= full);
+    for (const f of [0.25, 0.5, 0.75]) assert.ok(scoreOf(finalizeCraft(replayCraft(spec, inputs, Math.floor(end * f), [2, 2]))) <= full);
   }
 });
 
-test('skill matters: careful play makes Fine gear far more often than sloppy play', () => {
+test('skill matters: a steady hand makes Fine gear far more often than a shaky one', () => {
   const r = RECIPE_BY_ID.sword_iron;
   let rs = 7;
   const rng = () => ((rs = (rs * 16807) % 2147483647) / 2147483647);
@@ -58,13 +85,24 @@ test('skill matters: careful play makes Fine gear far more often than sloppy pla
     }
     return { fine: fine / 200, mw: mw / 200 };
   };
-  const skilled = rate(45);
-  const casual = rate(110);
+  const skilled = rate(22);
+  const casual = rate(70);
   assert.ok(skilled.fine > 0.7, `skilled fine ${skilled.fine}`);
   assert.ok(casual.fine < 0.5, `casual fine ${casual.fine}`);
   assert.ok(skilled.mw > 0 && skilled.mw < 0.4, `masterwork stays rare: ${skilled.mw}`);
 });
 
+test('every recipe is a short run of real motions', () => {
+  for (const r of RECIPES) {
+    const spec = buildSpec(r, { lvl: r.lvl, seed: 2 });
+    assert.ok(spec.steps.length >= 2 && spec.steps.length <= 11, `${r.id}: ${spec.steps.length} steps`);
+    for (const st of spec.steps) assert.ok(STEP_TEXT[st.skin], `${r.id}: words for ${st.skin}`);
+  }
+  const kinds = (id) => buildSpec(RECIPE_BY_ID[id], { lvl: 10, seed: 1 }).steps.map((st) => st.k);
+  assert.ok(kinds('sword_iron').includes('tap') && kinds('sword_iron').includes('carve'), 'swords are hammered then sharpened');
+  assert.ok(kinds('oak_plank').includes('saw'), 'planks are sawn');
+  assert.ok(kinds('fish_stew').includes('stir'), 'stew is stirred');
+});
 test('outcomes: never less than the plain recipe; bonus yield only for materials/food', () => {
   for (const r of RECIPES)
     for (const score of [0, 55, 75, 88, 95, 100]) {
@@ -77,18 +115,25 @@ test('outcomes: never less than the plain recipe; bonus yield only for materials
     }
 });
 
-test('specs only use integers and keep every window reachable', () => {
+test('specs only use integers and every step can be done well', () => {
   for (const r of RECIPES) {
     const spec = buildSpec(r, { lvl: 10, batch: batchCap(r, 10), seed: 4 });
-    const { P, G, W } = spec.win;
-    assert.ok(P < G && G < W);
-    for (const st of spec.steps) {
-      for (const v of Object.values(st)) if (typeof v === 'number') assert.ok(Number.isInteger(v), `${r.id} ${JSON.stringify(st)}`);
-      if (st.k === 'sweep') assert.ok(st.c >= W + 6 && st.c <= st.H - W - 6);
-      if (st.k === 'press') assert.ok(st.at + W + 4 <= st.F);
-    }
+    assertSpec(r, spec);
   }
 });
+const assertSpec = (r, spec) => {
+  const { P, G, W, p, g } = spec.win;
+  assert.ok(P < G && G < W && p < g && g < 1000);
+  let worst = READY;
+  for (const st of spec.steps) {
+    for (const v of Object.values(st)) if (typeof v === 'number') assert.ok(Number.isInteger(v), `${r.id} ${JSON.stringify(st)}`);
+    if (st.k === 'hold') assert.ok(st.at + W + 4 <= st.F);
+    if (st.k === 'tap') assert.ok(st.x - st.r >= 0 && st.x + st.r <= STAGE_W && st.y - st.r >= 0 && st.y + st.r <= STAGE_H, `${r.id} tap on the stage`);
+    if (st.k === 'carve') for (const [x, y] of st.pts) assert.ok(x >= 0 && x <= STAGE_W && y >= 0 && y <= STAGE_H);
+    worst += (st.T ?? 600 + st.F) + 30;
+  }
+  assert.ok(worst < CRAFT_MAX_TICKS, `${r.id}: even an idle craft ends on its own (${worst})`);
+};
 
 // ── Tiers 5–7 (Phase 1, M4) ──
 import { recipeTier, windows } from '../../shared/crafting.js';
@@ -103,18 +148,13 @@ test('tiers 5–7: more steps, the same reachable windows, and replays still agr
     for (const r of atTier(lvl)) {
       const spec = buildSpec(r, { lvl, batch: 1, seed: 5 });
       assert.equal(spec.tier, t);
-      const { P, G, W } = spec.win;
-      assert.ok(P >= 2 && P < G && G < W, `${r.id}: ${P}/${G}/${W}`);
-      for (const st of spec.steps) {
-        for (const v of Object.values(st)) if (typeof v === 'number') assert.ok(Number.isInteger(v), `${r.id} ${JSON.stringify(st)}`);
-        if (st.k === 'sweep') assert.ok(st.c >= W + 6 && st.c <= st.H - W - 6, `${r.id} sweep reachable`);
-        if (st.k === 'press') assert.ok(st.at + W + 4 <= st.F, `${r.id} press reachable`);
-      }
+      assert.ok(spec.win.P >= 2);
+      assertSpec(r, spec);
       if (r.pattern === 'forge_blade') assert.ok(spec.steps.length > base.steps.length, 'harder tiers have more steps');
       if (t >= 6) assert.ok(spec.steps.some((st) => st.skin === 'chill'), 'a chill from tier 6');
       // A careful player can still ace it, and the server replays it exactly.
-      const { s, tog } = bot(spec, 20, 9);
-      const back = replayCraft(JSON.parse(JSON.stringify(spec)), tog, s.tick, [2, 2]);
+      const { s, inputs, end } = bot(spec, 15, 9);
+      const back = replayCraft(JSON.parse(JSON.stringify(spec)), inputs, end, [2, 2]);
       assert.deepEqual(back.res, s.res);
       assert.ok(scoreOf(s) >= 70, `${r.id}: careful play scores ${scoreOf(s)}`);
     }

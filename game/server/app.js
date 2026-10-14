@@ -167,7 +167,7 @@ export function createServer(db, opts = {}) {
     return serveStatic(req, res, url);
   });
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 }) // room for a long craft's finger inputs;
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://x');
     if (url.pathname !== '/ws') return socket.destroy();
