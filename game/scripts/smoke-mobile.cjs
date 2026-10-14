@@ -46,9 +46,16 @@ const post = (p, b, t) => fetch(base + p, { method: 'POST', headers: { 'content-
     }
     // Play: fight when fighting, close what opens, else press the button (or
     // now and then the goal card's "Take me there").
-    await pg.evaluate(({ tick, st }) => {
+    await pg.evaluate(async ({ tick, st }) => {
       const { game: g, hud, sock } = window.__hv;
       if (st.battle) return sock.send({ t: 'bact', a: 'attack' });
+      // Inside the shop (the goal card sent us to stock it): put something on a shelf, then out.
+      if (g.room) {
+        const item = Object.keys(hud.me.inv ?? {}).find((id) => hud.me.inv[id] > 1 && !/^(axe|pick|rod|sword)_/.test(id));
+        if (item) await sock.rpc('shop.stock', { slot: tick % 8, item, qty: 1, price: 5 }).catch(() => {});
+        hud.panels.close();
+        return g.exitShop();
+      }
       if (hud.craftGame) return hud.craftGame.scrim?.classList.contains('result') ? hud.craftGame.close() : null; // let the craft play out, then close its result
       if (hud.panels.cur) return hud.panels.close();
       if (hud.levelup?.el && !hud.levelup.el.classList.contains('hidden')) hud.levelup.close();
