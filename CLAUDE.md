@@ -66,7 +66,8 @@ The game is playable. See `game/README.md` for the full list. It has:
   - the journal with fog and landmarks;
   - the welcome-back digest and Hearth Rest;
   - level-up unlocks;
-  - the owner's Economy and Engagement tabs.
+  - the owner's Economy and Engagement tabs;
+- the living wilds: better variants of trees, rocks and herbs, shifting groves and the Deepwood, world events, and the field guide.
 
 ## Going online (multiplayer for the friends)
 
@@ -115,7 +116,14 @@ This step grows the world from one island to five towns, each with its own biome
     - W1b: the map patch `020_amberfold` (from `scripts/world/amberfold.mjs`), the autumn biome, Kenney fall trees, pumpkins, windmill and cave kit, lazy model groups (`biome:autumn`, `mobs:amberfold`, `kit:cave`);
     - I3: `server/tests/world-content.test.js` (density rules, sources and uses, quest targets, the fight curve), `scripts/sim/fight.mjs`, `gold.mjs`, `pace.mjs`, the census at Amberfold's six spots.
   - **Gate G3, still owed:** the owner's phone fps in Amberfold square, and the 2-hour playtest with friends (`af_intro`, orders and the Warren).
-  - **Next: Phase 4**, the rest of the world (Rimeholt, Sandmere, Starfall, Fourways and the Hollowmere Causeway). Copy Amberfold's pattern: a content pack folder, a world script writing a patch, a biome file, lazy model groups.
+  - **Living wilds** (L1–L5, built October 2026 at the owner's request, between Phases 3 and 4). See "Living wilds is built" in `HANDOFF.md`:
+    - L1: any tree, rock or herb can regrow sturdy, elder or golden (`shared/wilds.js`, `server/nodestates.js`);
+    - L2: shifting groves (`server/groves.js`) and the Deepwood forest (`scripts/world/wildwoods.mjs` → patch `030_wildwoods`);
+    - L3: world events every 10 minutes (`shared/worldevents.js`, `server/worldevents.js`), shown on the map, in the Book's Today tab and on the goal card;
+    - L4: the field guide Book tab (`shared/fieldguide.js`, `server/fieldguide.js`, `client/src/ui/fieldguide.js`);
+    - L5: `server/tests/wilds.test.js`, the census at the Deepwood spots, a review.
+    - Owner test tools: `owner.wild { st }` and `owner.event { kind }`.
+  - **Next: Phase 4**, the rest of the world (Rimeholt, Sandmere, Starfall, Fourways and the Hollowmere Causeway). Copy Amberfold's pattern: a content pack folder, a world script writing a patch, a biome file, lazy model groups. Give each town's forests `grove` ids (`growForest` in `scripts/world/lib.mjs`).
   - When you finish a package, update this list.
 
 ## How to work here

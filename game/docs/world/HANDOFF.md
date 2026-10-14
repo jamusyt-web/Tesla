@@ -88,6 +88,17 @@ Amberfold and the Westmarch are in the game. How they were made is the pattern f
 - **Checks:** `server/tests/content-amberfold.test.js` and `world-content.test.js`; `node scripts/sim/fight.mjs` prints the fight curve against the real tables.
 - **Gate G3** still needs the owner's phone fps in Amberfold square and the 2-hour playtest with friends.
 
+## Living wilds is built (October 2026)
+
+Between Phase 3 and Phase 4, at the owner's request ("something to do all the time, not always quests; big forests with randomly generated better trees"), the wild itself became content. Every later town gets all of it for free:
+- **Variants** (`shared/wilds.js`, `server/nodestates.js`): any tree, rock or herb can regrow sturdy (8%), elder (1.2%) or golden (0.15%). Golden ones glow, always drop a rare and give a keepsake, and are announced to the region with a map pin. The clock's rich and ancient states still run; `RANK` picks the better of the two.
+- **Shifting groves** (`server/groves.js`): nodes with `grove: <id>` keep about 60% of their slots filled. A felled tree comes back as a sapling in another empty slot, never under a player. Empty slots are `g: 'gone'`. Grove trees don't block walking (`shared/nav.js`). The Deepwood (`scripts/world/wildwoods.mjs` → `maps/patches/030_wildwoods.json`) is a big grove forest north of the Westmarch road; Amberwood got an orchard grove.
+- **World events** (`shared/worldevents.js` schedule, the same on every channel; `server/worldevents.js` runs them): every 10 minutes most regions get one of a growing rain, a golden hour, a fish frenzy, a stampede, a treasure goblin, or moonlit herbs at night. They show as a toast, a map pin, "Happening now" in the Book's Today tab, and a goal on the goal card.
+- **Field guide** (`shared/fieldguide.js`, `server/fieldguide.js`, `client/src/ui/fieldguide.js`): a Book tab with every tree, rock, herb, fish and creature on the map and each one's kinds. It's built from the map, so new towns fill it by themselves. Pages pay at 25, 50 and 100% (claims share `journal_claims` as `guide:<id>`).
+- **Owner tools:** `owner.wild { st }` turns the nearest node into a variant (3 sturdy, 4 elder, 5 golden); `owner.event { kind }` starts an event near you.
+- **Tests:** `server/tests/wilds.test.js`. Wilds randomness is off under the test runner (`game.opts.wilds`), so older tests stay deterministic.
+- **For Phase 4:** give each new town's forests `grove` ids (use `growForest` in `scripts/world/lib.mjs`) and add census spots in them.
+
 A lesson from Phase 3: the spec's first-draft autumn fog (22–80 m, the colour of the ground) hid everything past 25 m on a phone. Keep each biome's fog light and different from its ground, and look at it at phone size.
 
 ## Next step
