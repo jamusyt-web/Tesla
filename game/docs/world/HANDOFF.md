@@ -59,7 +59,7 @@ Within each phase, packages own disjoint files (the spec lists them), so indepen
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   Claude-Session: <this session's link>
   ``` Never put model names in commits.
-- `npm test` must stay green, at 203 tests today (`cd game && npm test`). A fishing test occasionally fails on random rolls when everything runs at once.
+- `npm test` must stay green, at 215 tests today (`cd game && npm test`). A fishing test occasionally fails on random rolls when everything runs at once.
 - To play-test, run `cd game && npx vite build`, then `OPEN_SIGNUP=1 PORT=8790 DATA_DIR=<tmp> node --no-warnings server/index.js`, then drive headless Chromium with the launch args `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`.
   - The first account on a fresh data dir is the server owner and can use `owner.teleport`.
   - Stop the server with `pkill -f "^node --no-warnings server/index.js"`. Never use a pattern that matches your own shell.

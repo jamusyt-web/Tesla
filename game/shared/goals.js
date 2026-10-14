@@ -193,10 +193,12 @@ export function suggest(state, now = Date.now()) {
     add({ id: `node:${n.id}`, src: S.src, text: `${variantName(n.type, n.st)}, ${bearing(pos, n)}`, why: S.why, target: { kind: 'nodeId', id: n.id }, score: SCORE[S.src] });
   }
 
-  // World events happening now (shared/worldevents.js): near ones are worth a detour.
+  // World events happening now (shared/worldevents.js): near ones are worth a
+  // detour. Once you're there, what it brought (the golden tree, the
+  // monsters) is the goal instead.
   for (const e of state.events ?? []) {
     const d = dist(pos, e);
-    if (d > 600) continue;
+    if (d > 600 || d < 15) continue;
     add({ id: `event:${e.id}`, src: 'event', text: `${e.name}, ${bearing(pos, e)}`, why: 'Happening now', target: { kind: 'point', x: e.x, z: e.z }, score: d < 250 ? SCORE.event : SCORE.eventFar });
   }
 

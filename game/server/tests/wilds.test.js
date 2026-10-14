@@ -8,12 +8,12 @@ import { NODE_TYPES } from '../../shared/nodes.js';
 import { ITEMS } from '../../shared/items.js';
 import { mulberry32, NODES, REGIONS, buildColliders, isWalkable } from '../../shared/world.js';
 import '../map.js';
-import { regrow, spend, seedVariants, tickNodeStates, stateOf } from '../nodestates.js';
+import { regrow, spend, seedVariants, tickNodeStates, stateOf, scheduled, force } from '../nodestates.js';
 import { initGroves, fell, tickGroves, groveFill } from '../groves.js';
 import { eventsAt, eventText, SLOT_MS } from '../../shared/worldevents.js';
 import { startHere, finish, activeEvents } from '../worldevents.js';
 import { MONSTERS } from '../../shared/monsters.js';
-import { grantGather } from '../gather.js';
+import { grantGather, hitNode } from '../gather.js';
 import { buildGuide, guideEntries } from '../../shared/fieldguide.js';
 import { harness } from './harness.js';
 
@@ -86,6 +86,63 @@ test('a shifting grove: about 60% full, a felled tree regrows as a sapling elsew
   }
   assert.ok(slots.every((s) => s.g !== 'sapling' || !s.alive));
   assert.ok(ch.sent.some((m) => m.g === 'sapling') && ch.sent.some((m) => m.g === 'gone'));
+});
+
+test("on a real channel a felled grove tree's stump goes, an over-full grove thins, and the clock skips empty slots", () => {
+  const { hero, done } = harness();
+  try {
+    const c = hero('Ash');
+    const ch = c.ch;
+    const n = [...ch.nodes.values()].find((x) => x.grove && x.alive);
+    Object.assign(c.ent, { x: n.x + 30, z: n.z });
+    const now = Date.now();
+    Object.assign(n, { alive: false, respawnAt: now + 1000 });
+    const s = fell(ch, n, now, 1000);
+    assert.ok(s);
+    for (let i = 0; i < 40; i++) ch.tick(now + 2000 + i * 50, 0.05);
+    assert.equal(n.g, 'gone', 'the stump is gone');
+    assert.ok(s.alive, 'the sapling stood up');
+    // A growing rain fills the grove; felling then thins it back, no saplings.
+    const list = ch.groves.get(n.grove);
+    for (const x of list) if (x.g === 'gone') Object.assign(x, { g: null, alive: true, hp: 6, vanishAt: 0 });
+    const m = list.find((x) => x.alive);
+    m.alive = false;
+    assert.equal(fell(ch, m, now, 1000), null);
+    assert.ok(m.vanishAt && m.respawnAt === Infinity, 'its stump just goes');
+    // The clock never makes an empty slot rich.
+    for (const x of list) if (x !== m) Object.assign(x, { g: 'gone', alive: false });
+    for (let k = 0; k < 50; k++) for (const id of scheduled(ch, now + k * 600_000).keys()) assert.notEqual(ch.nodes.get(id).g, 'gone', id);
+  } finally {
+    done();
+  }
+});
+
+test('an event monster mid-fight leaves when the fight ends; a gentle-handed golden herb gives its keepsake once', () => {
+  const { game, hero, done } = harness();
+  try {
+    const c = hero('Moss');
+    const ch = c.ch;
+    Object.assign(c.ent, { x: 0, z: -50 });
+    const e = startHere(ch, c, 'stampede');
+    const mob = ch.mobs.get(ch.wev.get(e.id).mobs[0]);
+    mob.state = 'battle';
+    finish(ch, e.id, ch.wev.get(e.id));
+    assert.ok(ch.mobs.has(mob.id), 'not pulled out of a fight');
+    ch.battleOver({ mob, queue: [] }, false);
+    assert.ok(!ch.mobs.has(mob.id), 'gone once the fight is lost');
+    // Gentle Hands keeps a herb growing, but a golden one turns plain.
+    const herb = [...ch.nodes.values()].find((x) => x.type === 'herb_mint' && x.alive);
+    force(ch, herb, ST.golden);
+    Object.assign(c.ent, { x: herb.x + 1, z: herb.z, lastSwing: 0 });
+    herb.hp = 1;
+    c.effects = () => ({ gentleHands: 1 });
+    const r = hitNode(game, c, herb.id, Date.now());
+    assert.ok(r.kept, 'left growing');
+    assert.equal(stateOf(herb), 0, 'but plain now');
+    assert.equal(game.heroes.count(c.hero.id, 'moonlit_petal'), 1);
+  } finally {
+    done();
+  }
 });
 
 test("the Deepwood is on the map: groves of trees, herbs and rocks, a glade stone, and grove trees don't block", () => {

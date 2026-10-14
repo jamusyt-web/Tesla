@@ -78,8 +78,13 @@ export function hitNode(g, c, nodeId, now) {
 
   // Gentle hands: now and then a picked herb is left growing.
   if (t.kind === 'herb' && Math.random() < (E.gentleHands || 0)) {
-    n.hp = t.hp;
     grantGather(g, c, t, n, true);
+    // It stays, but plain: a rich, ancient or moonlit herb gives its gift once.
+    if (stateOf(n)) {
+      spend(ch, n);
+      ch.broadcast({ t: 'nst', id: n.id, st: 0, hp: t.hp });
+    }
+    n.hp = t.hp;
     n.hitters.clear();
     ch.broadcast({ t: 'nh', id: n.id, by: c.hero.id, hp: n.hp, dmg: 0, perfect: false, rot: q2(e.rot) });
     return { hp: n.hp, kept: true };

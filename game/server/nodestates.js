@@ -49,7 +49,16 @@ export function scheduled(ch, now) {
   REGIONS.forEach((r, i) => {
     const pool = P[r.id];
     if (!pool?.length) return;
-    const pick = (key) => pool[hash32(key) % pool.length];
+    // The hashed node, or the next one along when that's an empty grove slot
+    // or a stump about to go (nothing there to shine).
+    const pick = (key) => {
+      const h = hash32(key);
+      for (let j = 0; j < pool.length; j++) {
+        const n = ch.nodes.get(pool[(h + j) % pool.length]);
+        if (n && n.g !== 'gone' && !n.vanishAt) return n.id;
+      }
+      return pool[h % pool.length];
+    };
     const k = Math.floor(now / RICH_EVERY);
     if (now - k * RICH_EVERY < RICH_FOR) {
       const key = `rich:${r.id}:${k}`;

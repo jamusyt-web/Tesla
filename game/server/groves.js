@@ -36,14 +36,24 @@ function empty(n) {
   n.vanishAt = 0;
 }
 
+// Is someone standing on this slot? (Nothing sprouts under a hero.)
+export const busyAt = (ch, s) => [...ch.players.values()].some((c) => Math.hypot(c.ent.x - s.x, c.ent.z - s.z) < CLEAR);
+
 // A grove node fell at `now` and would regrow in growMs: a sapling starts in
 // a free slot near it instead, and its stump goes when the sapling is grown.
-// Returns the sapling's slot, or null (no free slot: it regrows where it stood).
+// A grove fuller than GROVE_FILL (after a growing rain) just loses the tree.
+// Returns the sapling's slot, or null (none: the stump goes, or with no free
+// slot at all, the tree regrows where it stood).
 export function fell(ch, n, now, growMs, rng = Math.random) {
   const list = ch.groves?.get(n.grove);
   if (!list) return null;
-  const busy = (s) => [...ch.players.values()].some((c) => Math.hypot(c.ent.x - s.x, c.ent.z - s.z) < CLEAR);
-  const free = list.filter((s) => s !== n && s.g === 'gone' && !busy(s));
+  const up = list.filter((s) => s !== n && s.g !== 'gone' && !s.vanishAt).length;
+  if (up >= Math.ceil(list.length * GROVE_FILL)) {
+    n.respawnAt = Infinity;
+    n.vanishAt = now + growMs;
+    return null;
+  }
+  const free = list.filter((s) => s !== n && s.g === 'gone' && !busyAt(ch, s));
   if (!free.length) return null;
   free.sort((a, b) => Math.hypot(a.x - n.x, a.z - n.z) - Math.hypot(b.x - n.x, b.z - n.z));
   const s = free[Math.floor(rng() * Math.min(NEAREST, free.length))];
@@ -55,15 +65,16 @@ export function fell(ch, n, now, growMs, rng = Math.random) {
   return s;
 }
 
-// Each tick: stumps whose sapling has grown are gone.
+// Each tick, for a felled grove node: its stump is gone once its sapling has grown.
+export function vanish(ch, n, now) {
+  if (!n.vanishAt || now < n.vanishAt || n.alive) return;
+  n.vanishAt = 0;
+  n.g = 'gone';
+  n.respawnAt = Infinity;
+  ch.broadcast({ t: 'node', id: n.id, alive: false, hp: 0, g: 'gone' });
+}
 export function tickGroves(ch, nodes, now) {
-  for (const n of nodes) {
-    if (!n.vanishAt || now < n.vanishAt || n.alive) continue;
-    n.vanishAt = 0;
-    n.g = 'gone';
-    n.respawnAt = Infinity;
-    ch.broadcast({ t: 'node', id: n.id, alive: false, hp: 0, g: 'gone' });
-  }
+  for (const n of nodes) vanish(ch, n, now);
 }
 
 // How full each grove is: { grove: [standing or growing, slots] } (for tests and the owner).

@@ -7,7 +7,7 @@ import { biteFor } from './gather.js';
 import { world } from './static.js';
 import { emit, listening } from './events.js';
 import { tickNodeStates, stateOf, regrow, seedVariants } from './nodestates.js';
-import { initGroves, tickGroves } from './groves.js';
+import { initGroves, vanish } from './groves.js';
 import { tickWorldEvents, activeEvents } from './worldevents.js';
 
 const SNAP_EVERY = 2; // 10 Hz snapshots
@@ -273,8 +273,7 @@ export class Channel {
         c.send({ t: 'fishResult', ok: false, reason: 'The line went slack — it got away.' });
       }
     }
-    const nodes = this.#live('nodes');
-    for (const n of nodes) {
+    for (const n of this.#live('nodes')) {
       if (!n.alive && now >= n.respawnAt) {
         n.alive = true;
         n.g = null; // (a grove's sapling, grown)
@@ -282,9 +281,8 @@ export class Channel {
         if (this.game?.opts?.wilds) regrow(this, n); // it may come back better
         n.hitters.clear();
         this.broadcast({ t: 'node', id: n.id, alive: true, hp: n.hp, st: stateOf(n) });
-      }
+      } else if (n.vanishAt) vanish(this, n, now); // a grove stump whose sapling has grown
     }
-    tickGroves(this, nodes, now);
     for (const m of this.#live('mobs')) {
       if (m.state === 'dead') {
         if (now >= m.respawnAt) {
@@ -374,8 +372,14 @@ export class Channel {
     if (b.def.boss) this.game.announce(`${[...b.fighters.values()].map((f) => f.c.hero.name).join(', ')} defeated the ${b.def.name}!`);
   }
   // A battle finished; a monster that won goes back to roaming.
+  // One whose event ended mid-fight (m.expired) leaves now instead.
   battleOver(b, victory) {
-    if (!victory) for (const m of [b.mob, ...b.queue]) if (m.state === 'battle') m.state = 'roam';
+    if (victory) return;
+    for (const m of [b.mob, ...b.queue]) {
+      if (m.state !== 'battle') continue;
+      m.state = 'roam';
+      if (m.expired) this.removeMob(m.id);
+    }
   }
 
   // c was moved by fast travel: everyone sees them vanish and reappear (no

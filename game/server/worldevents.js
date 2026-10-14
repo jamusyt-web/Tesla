@@ -14,6 +14,7 @@ import { NODE_TYPES, LAKES, SPAWNS } from '../shared/world.js';
 import { regionAt } from '../shared/places.js';
 import { ST } from '../shared/wilds.js';
 import { force } from './nodestates.js';
+import { busyAt } from './groves.js';
 
 const CHECK_MS = 3000;
 const SPROUT_MS = 30_000;
@@ -26,10 +27,18 @@ export function tickWorldEvents(ch, now) {
   const on = eventsAt(now);
   for (const e of on) if (!ch.wev.has(e.id)) start(ch, e, now);
   for (const [id, e] of ch.wev) {
-    if (!e.done && now >= e.end) finish(ch, id, e);
+    if (!e.done && (now >= e.end || spent(ch, e))) finish(ch, id, e);
     // (An ended one is kept a while, so it can't start again in its slot.)
     else if (e.done && now - e.end > 15 * 60_000) ch.wev.delete(id);
   }
+}
+
+// An event whose monsters are all beaten, or whose golden finds are all
+// gathered, is over early (so no one walks to it for nothing).
+function spent(ch, e) {
+  if (e.mobs.length) return e.mobs.every((id) => !ch.mobs.has(id));
+  if (e.nodes?.length) return e.nodes.every((id) => !ch.nodes.get(id)?.st);
+  return false;
 }
 
 // The events on now, for a hero arriving (pins on the map).
@@ -43,7 +52,7 @@ export function start(ch, e, now = Date.now()) {
   const near = (n, r) => Math.hypot(n.x - e.x, n.z - e.z) < r;
   if (e.kind === 'growth') {
     for (const s of ch.groves?.get(e.target) ?? []) {
-      if (s.g !== 'gone') continue;
+      if (s.g !== 'gone' || busyAt(ch, s)) continue;
       s.g = 'sapling';
       s.respawnAt = now + SPROUT_MS;
       ch.broadcast({ t: 'node', id: s.id, alive: false, hp: 0, g: 'sapling', respawnIn: SPROUT_MS });
@@ -54,6 +63,7 @@ export function start(ch, e, now = Date.now()) {
     pool.sort((a, b) => Math.hypot(a.x - e.x, a.z - e.z) - Math.hypot(b.x - e.x, b.z - e.z));
     pool.slice(0, herbsOnly ? 2 : 1).forEach((n) => force(ch, n, ST.golden));
     pool.slice(herbsOnly ? 2 : 1, herbsOnly ? 5 : 3).forEach((n) => force(ch, n, ST.elder));
+    ev.nodes = pool.slice(0, herbsOnly ? 5 : 3).map((n) => n.id);
   } else if (e.kind === 'frenzy') {
     (ch.frenzy ??= new Map()).set(e.target, e.end);
   } else if (e.kind === 'stampede' && MONSTERS[e.monster]) {
@@ -101,6 +111,7 @@ export function startHere(ch, c, kind, now = Date.now()) {
 export function finish(ch, id, ev) {
   ev.done = true;
   if (ev.kind === 'frenzy') ch.frenzy?.delete(ev.target);
-  for (const m of ev.mobs) ch.removeMob(m); // (one mid-fight stays until the fight ends)
+  // One mid-fight stays until the fight ends, then leaves (channel.battleOver).
+  for (const id of ev.mobs) if (!ch.removeMob(id)) ch.mobs.get(id) && (ch.mobs.get(id).expired = true);
   ch.broadcast({ t: 'wev', id, done: true });
 }

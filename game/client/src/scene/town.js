@@ -508,7 +508,8 @@ class NodeHandle {
   }
   // A grove slot's state (server/groves.js): null, 'sapling' (standing up in ms) or 'gone'.
   setG(g = null, ms = 0) {
-    if (g === this.g && g !== 'sapling') return;
+    // (Gone again still hides the stump a reset may have shown.)
+    if (g === this.g && g !== 'sapling' && g !== 'gone') return;
     this.g = g;
     if (g) this.alive = false;
     const v = g === 'sapling' ? this.ctl.live(this) : this.view;
@@ -748,6 +749,13 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
   // ── Gatherable nodes: a handle for each, drawn by their chunks
   const nodes = new Map();
   const live = new Set(); // handles with a NodeView standing in
+  // A node in a state that shines (rich, ancient, elder, golden) keeps its own
+  // NodeView; a sturdy one (only bigger) keeps it only near the camera's
+  // focus, so a forest of them doesn't cost a phone dozens of draws.
+  const SHINES = new Set([1, 2, 4, 5]);
+  const BIG_NEAR = 30;
+  const bigFocus = { x: 0, z: 0 };
+  const keepView = (h) => SHINES.has(h.st) || (h.st === 3 && Math.hypot(h.node.x - bigFocus.x, h.node.z - bigFocus.z) < BIG_NEAR);
   const ctl = {
     // The NodeView for h, made if its chunk is built.
     live(h) {
@@ -785,8 +793,8 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       if (changed) town.rev++;
     },
     restyle(h) {
-      if (h.st) ctl.live(h)?.tint(h.st);
-      else h.view?.tint(0);
+      if (h.st && keepView(h)) ctl.live(h)?.tint(h.st);
+      else h.view?.tint(h.st);
     },
   };
   function dropView(h) {
@@ -1124,7 +1132,10 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
     ch.lod = set;
     ch.pending = null;
     ch.group.add(group);
-    for (const h of ch.nodes) ctl.sync(h);
+    for (const h of ch.nodes) {
+      if (h.st && keepView(h)) ctl.live(h); // (a chunk built later still shows its golden tree)
+      ctl.sync(h);
+    }
     town.rev++;
   }
 
@@ -1234,7 +1245,7 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       for (const h of live) {
         const v = h.view;
         v.update(dt);
-        if (h.st || v.busy) h.idle = 0;
+        if (v.busy || keepView(h)) h.idle = 0;
         else if ((h.idle += dt) > 1.2) {
           // Settled: back into the merged meshes.
           dropView(h);
@@ -1253,6 +1264,9 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
         nextStream = t + 0.25;
         stream(fx0, fz0);
         busy = true;
+        // Sturdy ones come into view near the focus (their size shows).
+        Object.assign(bigFocus, { x: fx0, z: fz0 });
+        for (const ch of chunks.values()) if (ch.lod) for (const h of ch.nodes) if (h.st === 3 && !h.view && keepView(h)) ctl.live(h);
       }
       if (busy) busy = pump(STEP_MS);
       // Ink and small detail by tile, and the statics' ink, by distance.
