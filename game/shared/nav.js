@@ -17,9 +17,11 @@ export function buildColliders() {
     .concat(GATES.flatMap((g) => gateColliders(g)))
     .concat(ENTRANCES.map((e) => (quarter(e.rot) ? { x: e.x, z: e.z, w: CRYPT.d, d: CRYPT.w } : { x: e.x, z: e.z, w: CRYPT.w, d: CRYPT.d })));
   const circles = FOUNTAINS.map((f) => ({ x: f.x, z: f.z, r: f.r }));
+  // (Trees in a shifting grove don't block: they come and go, so a solid one
+  // would leave an invisible wall where it stood. You brush through them.)
   for (const n of NODES) {
     const t = NODE_TYPES[n.type];
-    if (t.r > 0) circles.push({ x: n.x, z: n.z, r: t.r * n.s });
+    if (t.r > 0 && !n.grove) circles.push({ x: n.x, z: n.z, r: t.r * n.s });
   }
   for (const p of PROPS) if (p.r > 0) circles.push({ x: p.x, z: p.z, r: p.r });
   for (const st of STONES) circles.push({ x: st.x, z: st.z, r: STONE_R });

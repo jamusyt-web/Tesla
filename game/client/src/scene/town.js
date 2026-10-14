@@ -311,6 +311,7 @@ export class NodeView {
     this.full.scale.setScalar(this.node.s * (this.k ?? 1));
     this.stump.visible = false;
     this.grow = instant ? 0 : 0.001;
+    this.sap = null;
     this.hp = this.maxHp;
   }
 
@@ -323,9 +324,28 @@ export class NodeView {
     this.stump.visible = true;
   }
 
-  // Still moving: shaking from a hit, falling, or growing back.
+  // Still moving: shaking from a hit, falling, growing back, or a sapling.
   get busy() {
-    return !!this.fall || this.grow > 0 || this.shake > 0;
+    return !!this.fall || this.grow > 0 || this.shake > 0 || !!this.sap;
+  }
+
+  // A grove's sapling (server/groves.js): small, growing until it stands up in `ms`.
+  sapling(ms) {
+    this.alive = false;
+    this.fall = null;
+    this.stump.visible = false;
+    this.full.visible = true;
+    this.full.rotation.set(0, this.node.rot, 0);
+    this.sap = { t: 0, dur: Math.max(1, ms / 1000) };
+    this.full.scale.setScalar(this.node.s * 0.15);
+  }
+  // An empty grove slot: nothing there.
+  setGone() {
+    this.alive = false;
+    this.fall = null;
+    this.sap = null;
+    this.full.visible = false;
+    this.stump.visible = false;
   }
 
   // A special node (shared/wilds.js): rich gold, ancient violet, elder green,
@@ -388,6 +408,14 @@ export class NodeView {
       return;
     }
     if (!F.visible) return; // felled / broken: nothing to animate until it regrows
+    if (this.sap) {
+      // A sapling: from a sprig to half size, a little sway.
+      const s = this.sap;
+      s.t += dt;
+      F.scale.setScalar(this.node.s * (0.15 + 0.4 * Math.min(1, s.t / s.dur)));
+      F.rotation.z = Math.sin(this.t * 1.6 + this.node.x) * 0.03;
+      return;
+    }
     if (this.grow > 0) {
       this.grow = Math.min(1, this.grow + dt * 1.8);
       const g = this.grow;
@@ -432,6 +460,7 @@ class NodeHandle {
     this.hp = this.maxHp;
     this.alive = true;
     this.st = 0; // a special state (shared/wilds.js): 1 rich, 2 ancient, 3 big, 4 elder, 5 golden
+    this.g = null; // a grove slot's state: null, 'sapling' or 'gone'
     this.root = { position: new THREE.Vector3(node.x, 0, node.z) };
     this.view = null; // the NodeView standing in, if any
     this.chunk = null; // its square, while built
@@ -464,6 +493,7 @@ class NodeHandle {
   respawn() {
     const v = this.ctl.live(this);
     this.alive = true;
+    this.g = null;
     this.hp = this.maxHp;
     v?.respawn();
     this.ctl.sync(this);
@@ -472,7 +502,18 @@ class NodeHandle {
   reset(alive, hp = this.maxHp) {
     this.alive = alive;
     this.hp = hp;
+    if (alive) this.g = null;
     if (this.view) alive ? this.view.respawn(true) : this.view.setDead();
+    this.ctl.sync(this);
+  }
+  // A grove slot's state (server/groves.js): null, 'sapling' (standing up in ms) or 'gone'.
+  setG(g = null, ms = 0) {
+    if (g === this.g && g !== 'sapling') return;
+    this.g = g;
+    if (g) this.alive = false;
+    const v = g === 'sapling' ? this.ctl.live(this) : this.view;
+    if (g === 'sapling') v?.sapling(ms);
+    else if (g === 'gone') v?.setGone();
     this.ctl.sync(this);
   }
   setSt(st = 0) {
@@ -714,7 +755,8 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       const ch = h.chunk;
       if (!ch?.lod || h.type.kind === 'fish') return null; // (fishing spots are only ripples)
       const v = new NodeView(h.node, fx);
-      if (!h.alive) v.setDead();
+      if (h.g === 'gone') v.setGone();
+      else if (!h.alive) v.setDead();
       v.hp = h.hp;
       if (h.st) v.tint(h.st);
       v.onLand = () => h.onLand?.();
@@ -733,10 +775,10 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       let changed = false;
       if (m) {
         changed = m.show(id + '|f', !h.view && h.alive) || changed;
-        changed = m.show(id + '|s', !h.view && !h.alive) || changed;
+        changed = m.show(id + '|s', !h.view && !h.alive && !h.g) || changed;
       }
       if (h.pick) {
-        const tall = h.alive ? Math.max(1, h.height) : 0.7;
+        const tall = h.alive ? Math.max(1, h.height) : h.g ? 0.01 : 0.7;
         h.pick.scale.y = tall;
         h.pick.updateMatrix();
       }

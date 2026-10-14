@@ -7,6 +7,7 @@ import { biteFor } from './gather.js';
 import { world } from './static.js';
 import { emit, listening } from './events.js';
 import { tickNodeStates, stateOf, regrow, seedVariants } from './nodestates.js';
+import { initGroves, tickGroves } from './groves.js';
 
 const SNAP_EVERY = 2; // 10 Hz snapshots
 const MOB_SPEED = 2.2;
@@ -40,7 +41,8 @@ export class Channel {
     this.id = id;
     this.players = new Map(); // accountId → Client
     this.nodes = new Map(town ? world().nodes.map((n) => [n.id, { ...n, hp: NODE_TYPES[n.type].hp, alive: true, respawnAt: 0, hitters: new Set() }]) : []);
-    // Today's wild variants (the same on every channel).
+    // Shifting groves start part empty; today's wild variants (both the same on every channel).
+    if (town) initGroves(this);
     if (town && game?.opts?.wilds) seedVariants(this.nodes, Math.floor(Date.now() / 86_400_000));
     this.mobs = new Map();
     this.battles = new Map();
@@ -193,7 +195,7 @@ export class Channel {
       channel: this.id,
       you: c.publicSelf(),
       players: [...this.players.values()].filter((o) => o !== c).map((o) => o.publicInfo()),
-      nodes: [...this.nodes.values()].filter((n) => !n.alive || n.hp < NODE_TYPES[n.type].hp || stateOf(n)).map((n) => ({ id: n.id, hp: n.hp, alive: n.alive, respawnIn: n.alive ? 0 : Math.max(0, n.respawnAt - Date.now()), ...(stateOf(n) ? { st: stateOf(n) } : {}) })),
+      nodes: [...this.nodes.values()].filter((n) => !n.alive || n.hp < NODE_TYPES[n.type].hp || stateOf(n)).map((n) => ({ id: n.id, hp: n.hp, alive: n.alive, respawnIn: n.alive || n.g === 'gone' ? 0 : Math.max(0, n.respawnAt - Date.now()), ...(stateOf(n) ? { st: stateOf(n) } : {}), ...(n.g ? { g: n.g } : {}) })),
       mobs: this.nearMobs(c),
       battles: [...this.battles.values()].map((b) => b.publicState()),
     };
@@ -268,15 +270,18 @@ export class Channel {
         c.send({ t: 'fishResult', ok: false, reason: 'The line went slack — it got away.' });
       }
     }
-    for (const n of this.#live('nodes')) {
+    const nodes = this.#live('nodes');
+    for (const n of nodes) {
       if (!n.alive && now >= n.respawnAt) {
         n.alive = true;
+        n.g = null; // (a grove's sapling, grown)
         n.hp = NODE_TYPES[n.type].hp;
         if (this.game?.opts?.wilds) regrow(this, n); // it may come back better
         n.hitters.clear();
         this.broadcast({ t: 'node', id: n.id, alive: true, hp: n.hp, st: stateOf(n) });
       }
     }
+    tickGroves(this, nodes, now);
     for (const m of this.#live('mobs')) {
       if (m.state === 'dead') {
         if (now >= m.respawnAt) {

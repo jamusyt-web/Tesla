@@ -13,6 +13,7 @@
 import meadow from './biomes/meadow.js';
 import wilds from './biomes/wilds.js';
 import autumn from './biomes/autumn.js';
+import deepwood from './biomes/deepwood.js';
 
 export const BIOMES = {};
 export function registerBiome(b) {
@@ -22,6 +23,7 @@ export function registerBiome(b) {
 registerBiome(meadow);
 registerBiome(wilds);
 registerBiome(autumn);
+registerBiome(deepwood);
 
 export const biome = (id) => BIOMES[id] ?? BIOMES.meadow;
 

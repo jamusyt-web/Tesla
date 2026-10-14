@@ -6,8 +6,10 @@ import assert from 'node:assert/strict';
 import { ST, STATE_FX, ODDS, rollVariant, variantName, hpOf, yieldOf, keepsakeOf } from '../../shared/wilds.js';
 import { NODE_TYPES } from '../../shared/nodes.js';
 import { ITEMS } from '../../shared/items.js';
-import { mulberry32 } from '../../shared/world.js';
+import { mulberry32, NODES, REGIONS, buildColliders, isWalkable } from '../../shared/world.js';
+import '../map.js';
 import { regrow, spend, seedVariants, tickNodeStates, stateOf } from '../nodestates.js';
+import { initGroves, fell, tickGroves, groveFill } from '../groves.js';
 import { grantGather } from '../gather.js';
 import { harness } from './harness.js';
 
@@ -53,6 +55,42 @@ test('regrowing rolls a variant; falling spends it; the clock never wipes it', (
   seedVariants(two.nodes, 20000);
   assert.deepEqual([...one.nodes.values()].map(stateOf), [...two.nodes.values()].map(stateOf));
   assert.ok([...one.nodes.values()].some((n) => stateOf(n) === ST.big), 'some sturdy ones among 300');
+});
+
+test('a shifting grove: about 60% full, a felled tree regrows as a sapling elsewhere, never where someone stands', () => {
+  const slots = Array.from({ length: 20 }, (_, i) => node(`g${i}`, 'tree_oak', { x: i * 6, z: 0, grove: 'g' }));
+  const ch = fakeChannel(slots);
+  initGroves(ch);
+  const full = () => groveFill(ch).g[0];
+  assert.deepEqual(groveFill(ch).g, [12, 20]);
+  let now = 1_000_000;
+  const rng = mulberry32(5);
+  for (let k = 0; k < 200; k++) {
+    // Someone stands on one empty slot; fell a random standing tree.
+    const gone = slots.filter((s) => s.g === 'gone');
+    const stand = gone[k % gone.length];
+    ch.players = new Map([[1, { ent: { x: stand.x, z: stand.z } }]]);
+    const up = slots.filter((s) => s.alive);
+    const n = up[Math.floor(rng() * up.length)];
+    n.alive = false;
+    const s = fell(ch, n, now, 18_000, rng);
+    assert.ok(s && s !== stand, 'a sapling, not under anyone');
+    assert.equal(full(), 12, 'the grove stays as full');
+    now += 20_000;
+    for (const x of slots) if (x.g === 'sapling' && now >= x.respawnAt) Object.assign(x, { alive: true, g: null, hp: 6 });
+    tickGroves(ch, slots, now);
+  }
+  assert.ok(slots.every((s) => s.g !== 'sapling' || !s.alive));
+  assert.ok(ch.sent.some((m) => m.g === 'sapling') && ch.sent.some((m) => m.g === 'gone'));
+});
+
+test("the Deepwood is on the map: groves of trees, herbs and rocks, a glade stone, and grove trees don't block", () => {
+  const groves = new Set(NODES.filter((n) => n.grove).map((n) => n.grove));
+  for (const g of ['dw_oaks', 'dw_pines', 'dw_maples', 'dw_herbs', 'dw_stones', 'aw_orchard']) assert.ok(groves.has(g), g);
+  assert.ok(REGIONS.some((r) => r.id === 'deepwood' && r.biome === 'deepwood'));
+  const col = buildColliders();
+  const oak = NODES.find((n) => n.grove === 'dw_oaks' && n.type === 'tree_oak');
+  assert.ok(isWalkable(oak.x, oak.z, col), 'you brush through a grove tree');
 });
 
 test('felling a golden tree: more logs, the sure rare, the keepsake, and a journal find', () => {

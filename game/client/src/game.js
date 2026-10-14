@@ -744,8 +744,10 @@ export class GameClient {
     const states = new Map(m.nodes.map((ns) => [ns.id, ns]));
     for (const [id, n] of this.town.nodes) {
       const ns = states.get(id);
-      n.reset(ns ? ns.alive !== false : true, ns?.hp ?? n.maxHp);
       n.setSt(ns?.st ?? 0);
+      n.reset(ns ? ns.alive !== false : true, ns?.hp ?? n.maxHp);
+      if (ns?.g) n.setG(ns.g, ns.respawnIn ?? 0);
+      else n.g = null;
     }
     this.channel = m.channel;
     this.town.setAttuned(m.you.stones ?? []);
@@ -1151,6 +1153,8 @@ export class GameClient {
     const view = this.town.nodes.get(m.id);
     if (!view) return;
     if ('st' in m) view.setSt(m.st); // its state as it regrows (a variant, or plain)
+    // A grove slot: a sapling starting, or the ground left empty (no fall to show).
+    if (m.g) return view.setG(m.g, m.respawnIn ?? 0), markShadows(this, 1);
     markShadows(this, m.alive ? 1 : 3); // it grows back, or falls
     if (m.alive) {
       view.respawn();

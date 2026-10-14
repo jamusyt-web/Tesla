@@ -12,6 +12,7 @@ import { highlight } from './digest.js';
 import { rint, q2 } from './channel.js';
 import { stateOf, spend, STATE_FX } from './nodestates.js';
 import { stateWord, keepsakeOf } from '../shared/wilds.js';
+import { fell } from './groves.js';
 
 export const GATHER_ACTS = new Set(['chop', 'mine', 'pick']);
 
@@ -38,7 +39,8 @@ export function hitNode(g, c, nodeId, now) {
     // A swing that was already in flight when it fell (yours or a co-op
     // partner's) isn't an error, just too late.
     if (now - (n.brokeAt || 0) < 2000) return { gone: true };
-    fail(`This ${t.name} is regrowing.`);
+    if (n.g === 'gone') fail('Nothing there.');
+    fail(n.g === 'sapling' ? 'That sapling is still growing.' : `This ${t.name} is regrowing.`);
   }
   if (c.battle) fail("You're in a battle!");
   const e = c.ent;
@@ -101,6 +103,7 @@ export function hitNode(g, c, nodeId, now) {
   }
   n.hitters.clear();
   spend(ch, n); // a rich or ancient node is spent once it falls
+  if (n.grove) fell(ch, n, now, n.respawnAt - now); // a grove regrows somewhere near instead
   return { broke: true, perfect };
 }
 

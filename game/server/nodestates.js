@@ -127,6 +127,7 @@ export function force(ch, n, st) {
 // channel (seeded by the node and the day), so the woods differ day to day.
 export function seedVariants(nodes, day) {
   for (const n of nodes.values()) {
+    if (!n.alive) continue; // (an empty grove slot)
     let s = hash32(`${n.id}:${day}`);
     n.var = rollVariant(n.type, () => ((s = Math.imul(s ^ (s >>> 15), 2246822507) >>> 0) / 4294967296));
     n.st = n.var;

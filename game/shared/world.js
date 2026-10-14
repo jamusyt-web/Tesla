@@ -62,7 +62,8 @@ export function mulberry32(seed) {
 //   docks     [{ id, x, z, w, d, style? }]      walkable piers over water (style: pier | bridge)
 //   zones     [{ id, kind, label, x, z, r, ground, biome? }]  named areas, tinted ground
 //   paths     [{ id, pts: [[x, z], ...], w }]          dirt paths (w = half-width)
-//   nodes     [{ id, type, x, z, rot, s }]            gatherables (NODE_TYPES)
+//   nodes     [{ id, type, x, z, rot, s, grove? }]    gatherables (NODE_TYPES); nodes sharing a
+//             grove are a shifting forest: trees come and go between its slots (server/groves.js)
 //   spawns    [{ id, monster, x, z, r, count }]       monster camps
 //   stones    [{ id, name, x, z, rot }]                fast-travel waystones (you arrive in front)
 //   entrances [{ id, kind, x, z, rot }]                dungeon doors (kind: shared/dungeon.js DUNGEONS)
