@@ -249,6 +249,16 @@ function worldAction(g, L, cur) {
     const ready = g.hud.goal.compass?.state().ready.filter((r) => r.kind === 'order') ?? [];
     c.push({ rule: 'deliver', d: d(board.x, board.z), label: ready.length ? `Hand in: ${ready[0].text.replace(/^Hand in at the Order Board: /, '')}` : 'Read the board', glyph: 'scroll', fn: () => g.hud.panels.open('jobs', { tab: 'orders' }) });
   }
+  // 4b. Letters and curios for this town's hall.
+  const hall = townBuilding('townhall', L.x, L.z);
+  if (hall && town) {
+    const [dx, dz] = doorPoint(hall);
+    const forHere = Object.keys(me.inv ?? {}).filter((id) => me.inv[id] > 0 && ['letter', 'curio'].includes(ITEMS[id]?.tag) && (ITEMS[id].town ?? 'hearthvale') === town);
+    if (forHere.length && d(dx, dz) < 7 + slack('deliver')) {
+      const letter = forHere.find((id) => ITEMS[id].tag === 'letter');
+      c.push({ rule: 'deliver', d: d(dx, dz), label: letter ? 'Deliver the letter' : 'Hand in curios', glyph: 'scroll', fn: () => g.sock.rpc('curio.return').then((r) => g.hud.toast(r.letters?.length ? 'The letter is delivered. The Town Hall thanks you!' : `The Town Hall thanks you: +${r.rep} standing.`, 'gold')).catch((e) => g.hud.toast(e.message, 'err')) });
+    }
+  }
   // 5. A passage.
   const at = passageAt(L.x, L.z);
   if (at) {

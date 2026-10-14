@@ -347,16 +347,22 @@ export function pathSegments() {
 export const GATE_SCALE = 4.5;
 const GATE_OPENING = 1.25; // half-width of the walkable arch at scale 4.5 (model: 0.255 × scale)
 
+// A gate turned a quarter (rot ≈ ±π/2, like the West Gate) runs north–south:
+// its wall lies along z and you walk through it east–west.
+export const gateTurned = (g) => Math.abs(Math.sin(g?.rot ?? 0)) > 0.7;
 export function gateColliders(g = GATE) {
   if (!g) return [];
   const s = g.scale ?? GATE_SCALE;
   const open = (GATE_OPENING * s) / GATE_SCALE;
+  const turned = gateTurned(g);
+  // A box along the wall: `along` metres from the middle, w long, d thick.
+  const box = (along, w, d) => (turned ? { x: g.x, z: g.z + along, w: d, d: w } : { x: g.x + along, z: g.z, w, d });
   const out = [];
   for (const sx of [-1, 1]) {
     // arch tower sides
-    out.push({ x: g.x + sx * (open + 0.5 * s) / 2, z: g.z, w: 0.5 * s - open, d: 0.94 * s });
+    out.push(box((sx * (open + 0.5 * s)) / 2, 0.5 * s - open, 0.94 * s));
     // two wall sections and the corner tower
-    out.push({ x: g.x + sx * 2 * s, z: g.z, w: 3 * s, d: s });
+    out.push(box(sx * 2 * s, 3 * s, s));
   }
   return out;
 }

@@ -1,0 +1,10 @@
+{
+  "add": {
+    "gates": [
+      {"id":"gate_west","label":"West Gate","icon":"🍂","glyph":"gate","x":-92,"z":-4,"rot":1.5707963267948966,"width":7,"scale":4.5}
+    ],
+    "paths": [
+      {"id":"hv_west_road","pts":[[-36,0],[-48,-12],[-66,-12.5],[-82,-9],[-92,-4]],"w":2.2}
+    ]
+  }
+}

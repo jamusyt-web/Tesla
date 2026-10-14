@@ -63,9 +63,11 @@ test('the hv_intro chain: steps advance from events, the server pays, chains ope
     emit(c, 'order', { town: 'hearthvale', key: 'x' });
     const before = game.heroes.gold(c.id);
     emit(c, 'dungeon', { kind: 'hollow_crypt', tier: 1 });
+    assert.equal(game.heroes.gold(c.id) - before, 150);
+    assert.equal(c.quests.get('hv_intro|0').step, 9, 'step 10: the West Gate road');
+    emit(c, 'attune', { id: 'stone_westmarch' });
     assert.ok(!c.quests.has('hv_intro|0'), 'done');
     assert.ok(c.questsDone.has('hv_intro'));
-    assert.equal(game.heroes.gold(c.id) - before, 150);
     assert.equal(c.hero.tutorial, 4, 'the old tutorial counter follows along');
     assert.ok(c.quests.has('hv_deeper|0'), 'Deeper Still needs the intro done');
     assert.ok(game.db.prepare("SELECT points FROM town_rep WHERE account_id = ? AND town = 'hearthvale'").get(c.id).points >= 80, 'rep paid');

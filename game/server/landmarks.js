@@ -119,19 +119,23 @@ export class Landmarks {
     return loot;
   }
 
-  // Bring a curio home: its town hall takes it for reputation.
+  // At a town hall: hand in the curios found around this town (for
+  // reputation) and deliver any letters addressed to it (a quest step).
   returnCurios(c) {
     const town = needTown(this.game, c);
     const H = this.game.heroes;
     const bag = H.inventory(c.hero.id);
-    const back = Object.keys(bag).filter((id) => ITEMS[id]?.tag === 'curio' && (ITEMS[id].town ?? 'hearthvale') === town);
-    if (!back.length) fail('You have no curios from this town.');
+    const mine = (tag) => Object.keys(bag).filter((id) => bag[id] > 0 && ITEMS[id]?.tag === tag && (ITEMS[id].town ?? 'hearthvale') === town);
+    const back = mine('curio');
+    const letters = mine('letter');
+    if (!back.length && !letters.length) fail('You have nothing for this town hall.');
     tx(this.game.db, () => {
-      for (const id of back) H.takeItem(c.hero.id, id, bag[id], { kind: 'curio' });
-      rep.add(c.hero.id, town, CURIO_REP * back.length);
+      for (const id of [...back, ...letters]) H.takeItem(c.hero.id, id, bag[id], { kind: ITEMS[id].tag });
+      if (back.length) rep.add(c.hero.id, town, CURIO_REP * back.length);
     });
+    for (const id of letters) emit(c, 'deliver', { item: id, qty: 1, town });
     c.pushInventory();
-    return { items: back, rep: CURIO_REP * back.length };
+    return { items: back, letters, rep: CURIO_REP * back.length };
   }
 
   // What the hero can see of each landmark's state: { id: wait reason | null }

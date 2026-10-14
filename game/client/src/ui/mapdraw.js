@@ -1,5 +1,5 @@
 import { MONSTERS } from '../../../shared/monsters.js';
-import { LANDS, REGIONS, ZONES, LAKES, PLAZAS, BUILDINGS, GATES, DOCKS, SPAWNS, STONES, ENTRANCES, pathSegments } from '../../../shared/world.js';
+import { LANDS, REGIONS, ZONES, LAKES, PLAZAS, BUILDINGS, GATES, DOCKS, SPAWNS, STONES, ENTRANCES, pathSegments, gateTurned } from '../../../shared/world.js';
 import { DUNGEONS } from '../../../shared/dungeon.js';
 
 export const TIER_NAMES = ['', 'Starter', 'Novice', 'Adept', 'Veteran', 'Elite'];
@@ -88,7 +88,8 @@ export function paintWorld(x, v, mark = {}) {
     x.fillStyle = '#5d564c';
     for (const gt of GATES) {
       const sc = gt.scale ?? 4.5;
-      x.fillRect(gt.x - 3.5 * sc, gt.z - sc / 2, 7 * sc, sc);
+      if (gateTurned(gt)) x.fillRect(gt.x - sc / 2, gt.z - 3.5 * sc, sc, 7 * sc);
+      else x.fillRect(gt.x - 3.5 * sc, gt.z - sc / 2, 7 * sc, sc);
     }
     x.restore();
 

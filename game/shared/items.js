@@ -86,10 +86,10 @@ export const ITEMS = {
 
   // ── Keepsakes: trophies, letters and atlas pages (bound) ──
   trophy_hearthvale: { name: 'Hearthvale Trophy', icon: '🏆', cat: 'special', tag: 'trophy', value: 0, rarity: 'rare', bound: true },
-  letter_amberfold: { name: 'Letter to Amberfold', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
-  letter_rimeholt: { name: 'Letter to Rimeholt', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
-  letter_sandmere: { name: 'Letter to Sandmere', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
-  letter_starfall: { name: 'Letter to Starfall', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true },
+  letter_amberfold: { name: 'Letter to Amberfold', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true, town: 'amberfold', text: 'Sealed with wax. Walk it to the Amberfold Town Hall: waystones won’t carry it.' },
+  letter_rimeholt: { name: 'Letter to Rimeholt', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true, town: 'rimeholt', text: 'Sealed with wax. Walk it to the Rimeholt Town Hall: waystones won’t carry it.' },
+  letter_sandmere: { name: 'Letter to Sandmere', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true, town: 'sandmere', text: 'Sealed with wax. Walk it to the Sandmere Town Hall: waystones won’t carry it.' },
+  letter_starfall: { name: 'Letter to Starfall', icon: '✉️', cat: 'special', tag: 'letter', value: 0, rarity: 'common', bound: true, nowarp: true, town: 'starfall', text: 'Sealed with wax. Walk it to the Starfall Town Hall: waystones won’t carry it.' },
   // Curios: odd finds out in the world. Bring one back to its town hall.
   lost_hat: { name: "Farmer Bram's Hat", icon: '👒', cat: 'special', tag: 'curio', value: 0, rarity: 'uncommon', bound: true, town: 'hearthvale', text: 'Blown off by the lake wind. Bram would like it back: hand it in at the Town Hall.' },
   old_spyglass: { name: 'Old Spyglass', icon: '🔭', cat: 'special', tag: 'curio', value: 0, rarity: 'uncommon', bound: true, town: 'hearthvale', text: 'Engraved "Wildwatch". The Town Hall keeps such things.' },

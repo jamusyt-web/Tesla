@@ -72,3 +72,17 @@ test('the server reads maps/patches in number order; an outpost stamp is a valid
   assert.deepEqual(mapProblems(o.map), []);
   assert.equal(o.map.regions.find((r) => r.id === 'crossing').kind, 'outpost');
 });
+
+test("the game's own patches apply to a copy of an owner's live map", () => {
+  // An owner who has been editing: moved a tree, added a cottage by the west shore.
+  const live = shipped();
+  live.props.find((p) => p.slot === 'deco_tree_round').x += 1;
+  live.buildings.push({ id: 'my_cottage', label: 'Cottage', x: -70, z: 40, w: 6, d: 5, face: 's', deco: true });
+  const r = applyPatches(live, loadPatches());
+  assert.ok(r.report.every((p) => p.status === 'applied'), JSON.stringify(r.report.map((p) => [p.patch, p.status])));
+  assert.deepEqual(mapProblems(r.map), []);
+  const west = r.map.gates.find((g) => g.id === 'gate_west');
+  assert.ok(west && r.map.gates[0].id === 'gate', 'the West Gate is added after the Wilds Gate');
+  assert.ok(r.map.paths.some((p) => p.id === 'hv_west_road'));
+  assert.ok(r.map.buildings.some((b) => b.id === 'my_cottage'), "the owner's cottage stays");
+});

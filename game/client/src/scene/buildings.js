@@ -279,6 +279,7 @@ export function buildGate(g = GATE) {
   const grp = new THREE.Group();
   grp.add(assets.assemble(items));
   grp.position.set(g.x, 0, g.z);
+  grp.rotation.y = g.rot ?? 0;
   grp.userData.top = 3.3 * s;
   return grp;
 }

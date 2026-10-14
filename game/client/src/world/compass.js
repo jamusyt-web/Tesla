@@ -115,7 +115,10 @@ export class Compass {
   locate(t) {
     const g = this.g;
     if (!t || !g.me) return null;
-    const p = g.myPos();
+    const me = g.myPos();
+    // A target in another town (t.town) is looked for from that town's middle.
+    const there = t.town && townAt(me.x, me.z)?.id !== t.town ? REGIONS.find((r) => r.id === t.town) : null;
+    const p = there ? { x: there.x, z: there.z } : me;
     switch (t.kind) {
       case 'node': {
         const n = g.nearestNode(t.type);

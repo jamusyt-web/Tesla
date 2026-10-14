@@ -262,8 +262,8 @@ export class Panels {
           for (const [t, v] of towns)
             c.body.append(h('div.rowcard', h('div.ic', '🏅'), h('div.grow', h('div.t', `${t[0].toUpperCase() + t.slice(1)}: ${v.name}`), h('div.s', v.next ? `${v.points} / ${v.next} to ${REP_RANKS.find((r) => r.at === v.next)?.name}` : `${v.points} points: the highest rank`))));
         }
-        const curios = Object.keys(this.me.inv ?? {}).filter((id) => ITEMS[id]?.tag === 'curio' && this.me.inv[id] > 0);
-        if (curios.length) c.body.append(h('div.rowcard', h('div.ic', '✨'), h('div.grow', h('div.t', 'Curios to hand in'), h('div.s', curios.map((id) => ITEMS[id].name).join(', '))), h('button.btn.small.green', { on: { click: () => this.rpc('curio.return').then((r) => (this.hud.toast(`The Town Hall thanks you: +${r.rep} standing.`, 'gold'), (standing = null), render())) } }, 'Hand in')));
+        const curios = Object.keys(this.me.inv ?? {}).filter((id) => ['curio', 'letter'].includes(ITEMS[id]?.tag) && this.me.inv[id] > 0);
+        if (curios.length) c.body.append(h('div.rowcard', h('div.ic', '✨'), h('div.grow', h('div.t', 'Letters and curios'), h('div.s', `${curios.map((id) => ITEMS[id].name).join(', ')}. Each goes to its own town's hall.`)), h('button.btn.small.green', { on: { click: () => this.rpc('curio.return').then((r) => (this.hud.toast(r.letters?.length ? 'Delivered. The Town Hall thanks you!' : `The Town Hall thanks you: +${r.rep} standing.`, 'gold'), (standing = null), render())) } }, 'Hand in')));
         c.body.append(h('button.btn', { style: { marginTop: '8px' }, on: { click: () => this.open('skills') } }, 'Skills and level-40 choices'));
       } else if (tab === 'econ') {
         if (!econ) {

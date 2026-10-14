@@ -1342,17 +1342,23 @@ registerChunkStatic(
     if (castle) {
       const grp = new THREE.Group().add(freeze(castle));
       ctx.fade(castle);
+      // The torches, in the gate's own frame (a gate may be turned).
+      const lit = new THREE.Group();
+      lit.position.set(gt.x, 0, gt.z);
+      lit.rotation.y = gt.rot ?? 0;
       for (const sx of [-1, 1]) {
         const torch = mesh(cyl(0.07, 0.09, 0.55, 6), '#6b4226');
-        torch.position.set(gt.x + sx * 1.75 * k, 2.75 * k, gt.z + 2.35 * k);
+        torch.position.set(sx * 1.75 * k, 2.75 * k, 2.35 * k);
         torch.rotation.x = 0.35;
-        grp.add(torch, flame(gt.x + sx * 1.75 * k, 3.15 * k, gt.z + 2.45 * k, 0.16));
+        lit.add(torch, flame(sx * 1.75 * k, 3.15 * k, 2.45 * k, 0.16));
       }
+      grp.add(lit);
       ctx.label({ kind: 'place', id: gt.id, text: gt.label, icon: gt.icon, glyph: gt.glyph, pos: new THREE.Vector3(gt.x, castle.userData.top + 1.2, gt.z) });
       return grp;
     }
     const grp = new THREE.Group();
     grp.position.set(gt.x, 0, gt.z);
+    grp.rotation.y = gt.rot ?? 0;
     for (const s of [-1, 1]) {
       const pillar = mesh(box(1.4, 5, 1.4), '#b3aa9c', { outline: OL });
       pillar.position.set((gt.width / 2) * s, 2.5, 0);

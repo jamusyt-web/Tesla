@@ -20,6 +20,7 @@ export default [
       { ev: 'fish', match: {}, text: 'Land a fish at Mirror Lake', hint: 'Cast from the pier, strike when it bites, keep the fish in the bar.', target: { kind: 'lake' }, reward: { gold: 40 } },
       { ev: 'order', match: { town: T }, text: 'Fill an order on the Order Board', hint: 'The board by the square lists what the town needs today.', target: { kind: 'board' }, reward: { gold: 60, rep: { [T]: 30 } } },
       { ev: 'dungeon', match: { kind: 'hollow_crypt', tier: 1 }, text: 'Clear the Hollow Crypt', hint: 'The door is at the north end of the Wilds. Bring a friend!', target: { kind: 'entrance', dungeon: 'hollow_crypt' }, reward: { gold: 150 } },
+      { ev: 'attune', match: { id: 'stone_westmarch' }, text: 'Take the West Gate road to the Westmarch Stones', hint: 'Out through the West Gate, past Whisperwood. The leaves turn gold out there. Combat 11+ is safest.', target: { kind: 'stone', id: 'stone_westmarch' }, reward: { gold: 100 } },
     ],
     reward: { xp: { combat: 200 }, rep: { [T]: 50 }, title: 'Hearthvaler' },
   },

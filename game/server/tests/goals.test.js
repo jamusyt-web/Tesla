@@ -34,7 +34,7 @@ test('never empty, across 1,000 random heroes', () => {
 test('a new hero: the intro leads, side chains and upgrades follow, places to find nearby', () => {
   const list = suggest({ hero: fresh(), quests: [{ id: 'hv_intro', period: 0, step: 0, n: 0 }, { id: 'hv_quarry', period: 0, step: 0, n: 0 }], journal: { found: new Set(), seen: new Set(), pages: [{ id: 'hearthvale', name: 'Hearthvale', pct: 4, places: 14, found: 1 }] } });
   assert.equal(list[0].id, 'hv_intro');
-  assert.match(list[0].text, /Welcome to Hearthvale 1\/9: Chop an oak/);
+  assert.match(list[0].text, /Welcome to Hearthvale 1\/10: Chop an oak/);
   assert.ok(list.some((g) => g.src === 'upgrade'));
   assert.ok(list.some((g) => g.id === 'hv_quarry'));
 });
