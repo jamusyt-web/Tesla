@@ -82,8 +82,10 @@ test('landmarks: caches weekly, shrines every 30 minutes, curios once, views pin
     assert.throws(() => game.landmarks.use(c, 'shrine_old_oak', now), /Walk up/);
     const sh = lm('shrine_old_oak');
     at(c, sh.x, sh.z);
+    c.giveBoon('festive');
     game.landmarks.use(c, sh.id, now);
-    assert.equal(c.hero.buffs.boon?.boon, 'blessing');
+    assert.equal(c.hero.buffs.bless?.boon, 'blessing');
+    assert.equal(c.hero.buffs.boon?.boon, 'festive', 'praying keeps Festive');
     assert.ok(c.effects().moveSpeed >= 0.15);
     assert.throws(() => game.landmarks.use(c, sh.id, now + 60_000), /Come back in/);
     game.landmarks.use(c, sh.id, now + 31 * 60_000);

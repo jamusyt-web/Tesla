@@ -121,8 +121,10 @@ export class Orders {
   }
 
   // A kill counts toward every open hunt for that monster, in any town.
-  onKill(c, monster) {
+  onKill(c, monster, now = Date.now()) {
+    const today = dayIndex(now);
     for (const r of this.q.open.all(c.hero.id)) {
+      if (today - r.day >= LASTS_DAYS) continue; // ran out (the next look at the board marks it)
       const o = orderOf(templateOf(r.town, r.order_key));
       if (o?.kind !== 'hunt' || o.monster !== monster || r.got >= o.qty) continue;
       this.q.got.run(r.got + 1, c.hero.id, r.town, r.slot);
@@ -135,8 +137,10 @@ export class Orders {
   ready(heroId, town = null) {
     const out = [];
     const bag = this.game.heroes.inventory(heroId);
+    const today = dayIndex();
     for (const r of this.q.open.all(heroId)) {
       if (town && r.town !== town) continue;
+      if (today - r.day >= LASTS_DAYS) continue;
       const o = orderOf(templateOf(r.town, r.order_key));
       if (!o) continue;
       const can = o.kind === 'hunt' ? r.got >= o.qty : (bag[o.item] ?? 0) > 0;
@@ -146,7 +150,7 @@ export class Orders {
   }
   // Every open order (any town), for the Compass and the bots.
   openOrders(heroId) {
-    return this.q.open.all(heroId).map((r) => ({ town: r.town, slot: r.slot, got: r.got, ...orderOf(templateOf(r.town, r.order_key)) }));
+    return this.q.open.all(heroId).filter((r) => dayIndex() - r.day < LASTS_DAYS).map((r) => ({ town: r.town, slot: r.slot, got: r.got, ...orderOf(templateOf(r.town, r.order_key)) }));
   }
 
   // ── The Big Order ──

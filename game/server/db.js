@@ -248,7 +248,10 @@ export function migrate(db) {
 
 // Run fn inside a transaction; rolls back on throw. node:sqlite is synchronous
 // and the server is single-threaded, so this is fully atomic.
+// Inside another transaction (a quest reward whose level-up starts a new
+// quest), the inner work simply joins the outer one.
 export function tx(db, fn) {
+  if (db.isTransaction) return fn();
   db.exec('BEGIN IMMEDIATE');
   try {
     const r = fn();

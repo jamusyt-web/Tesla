@@ -149,6 +149,7 @@ export class Almanac {
       const nid = this.#make(c.hero, day, def.col, I, tier, materials(), salt + Number(id.split(':').pop()));
       if (nid.split(':').slice(0, 5).join(':') !== id.split(':').slice(0, 5).join(':') || I[def.col].length < 2) fresh = nid;
     }
+    if (!fresh) fail('There is no other daily like it today.');
     this.game.quests.drop(c, id, Number(period), 'rerolled');
     this.q.rerolled.run(c.hero.id, day);
     this.game.quests.start(c, fresh, day, now);

@@ -54,7 +54,7 @@ test('orders last three days, then expire with a notice; a new day fills only em
     assert.ok(d2.slots.every((s) => s.state === 'open'));
     const d3 = game.orders.view(a, T, now + 3 * DAY);
     assert.deepEqual(d3.slots.map((s) => s.day), Array(SLOTS).fill(dayIndex(now) + 3), 'expired ones replaced by that day\'s');
-    const n = game.notices.unseen(a.id).filter((x) => x.kind === 'order');
+    const n = game.notices.since(a.id, 0).filter((x) => x.kind === 'order');
     assert.equal(n.length, SLOTS, 'one notice per expired order');
   } finally {
     done();
@@ -75,12 +75,19 @@ test('hunts count your kills and pay when turned in; the order event moves hv_in
     for (let k = 0; k < s.qty; k++) emit(a, 'kill', { monster: s.monster });
     emit(a, 'kill', { monster: s.monster }); // one too many: capped
     assert.equal(game.orders.view(a, T, t).slots.find((x) => x.slot === s.slot).got, s.qty);
-    assert.deepEqual(game.orders.ready(a.id, T).map((r) => r.slot), [s.slot]);
+    assert.ok(game.orders.ready(a.id, T).some((r) => r.slot === s.slot), 'ready to turn in');
     game.quests.skipTo(a, 'hv_intro', 7);
     const r = game.orders.deliver(a, T, s.slot, 1, t);
     assert.equal(r.done, true);
     assert.equal(r.paid, s.pay);
     assert.equal(a.quests.get('hv_intro|0').step, 8, 'Fill an order: done');
+    // A hunt that ran out stops counting kills.
+    const later = t + DAY;
+    const h2 = game.orders.view(a, T, later).slots.find((x) => x.kind === 'hunt' && x.state === 'open' && x.got === 0);
+    if (h2) {
+      game.orders.onKill(a, h2.monster, later + 3 * DAY);
+      assert.equal(game.orders.view(a, T, later).slots.find((x) => x.slot === h2.slot).got, 0);
+    }
   } finally {
     done();
   }

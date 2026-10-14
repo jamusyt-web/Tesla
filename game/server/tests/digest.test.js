@@ -28,8 +28,16 @@ test('after 12 hours away: a digest of what happened; after less, none', () => {
   const { game, hero, done } = setup();
   try {
     let c = hero('Rhea');
-    c = comeBack(game, hero, c, 2 * H);
+    game.disconnect(c);
+    game.notices.add(c.id, 'job', {}, 'Ruu delivered 5× Oak Log for your job.'); // while away
+    game.lastActive.set(c.id, Date.now() - 2 * H);
+    c = hero.reconnect(c.id);
     assert.ok(!c.sent.some((m) => m.t === 'digest'), 'two hours: no digest');
+    assert.ok(c.sent.some((m) => m.t === 'notice' && /Ruu delivered/.test(m.text)), 'but what waited is shown');
+    assert.equal(game.notices.unseen(c.id).length, 0, 'and marked seen');
+    game.notices.add(c.id, 'order', {}, 'Shown live: online, so seen at once.');
+    assert.equal(game.notices.unseen(c.id).length, 0);
+    game.disconnect(c);
     game.notices.add(c.id, 'order', {}, 'An order in Hearthvale ran out of time: 38× Oak Log.');
     c = comeBack(game, hero, c, 13 * H);
     const d = c.sent.find((m) => m.t === 'digest');

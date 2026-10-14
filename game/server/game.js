@@ -433,6 +433,7 @@ export class Game {
     const away = this.shops.awaySummary(accountId, Date.now(), lastSeen);
     if (away && !digestDue) c.send({ t: 'awaySales', ...away }); // (after 12 h the digest says it)
     this.digest.onConnect(c, lastSeen != null ? Date.now() - lastSeen : 0);
+    if (!digestDue) this.notices.showWaiting(c); // (after 12 h the digest lists them)
     pushStorage(this, c); // goods waiting in storage, per town
     this.explore.load(c); // the cells walked and places found
     this.engage.onConnect(c);
