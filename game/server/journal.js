@@ -178,7 +178,7 @@ export class Journal {
 // What the journal notices on its own.
 on('kill', (c, d) => c?.game?.journal?.note(c.hero.id, 'creature', d.monster));
 on('craft', (c, d) => c?.game?.journal?.note(c.hero.id, 'recipe', d.recipe ?? d.out));
-on('gather', (c, d) => d.st && c?.game?.journal?.note(c.hero.id, 'node', `${d.st === 2 ? 'ancient' : 'rich'}:${d.type}`));
+on('gather', (c, d) => (d.st === 1 || d.st === 2) && c?.game?.journal?.note(c.hero.id, 'node', `${d.st === 2 ? 'ancient' : 'rich'}:${d.type}`));
 on('fish', (c, d) => {
   const J = c?.game?.journal;
   if (!J || d.item === 'old_boot') return;

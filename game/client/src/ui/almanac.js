@@ -1,12 +1,14 @@
-// The Book: one panel with three tabs. Quests (every chain you're on), Today
-// (the Almanac: three dailies, the weekly Grand Errand and the day's news)
-// and the Journal (client/src/ui/journal.js).
+// The Book: one panel with four tabs. Quests (every chain you're on), Today
+// (what's happening now, the Almanac: three dailies, the weekly Grand Errand
+// and the day's news), the Journal (client/src/ui/journal.js) and the Field
+// guide (client/src/ui/fieldguide.js).
 import { h, clear } from '../util/dom.js';
 import { sfx } from '../util/sfx.js';
 import { glyph } from './glyphs.js';
 import { questDef, rewardText, stepNeed, QUESTS } from '../../../shared/quests.js';
 import '../../../shared/almanac.js';
 import { renderJournal } from './journal.js';
+import { renderGuide } from './fieldguide.js';
 
 const COL = { make: ['Make', 'hammer'], venture: ['Venture', 'swords'], wander: ['Wander', 'compass'] };
 
@@ -16,6 +18,7 @@ export const ALMANAC_PANELS = {
     let tab = args.tab ?? 'quests';
     let alm = null;
     let jr = null;
+    let fg = null;
     const C = () => this.hud.goal.compass;
     const go = (target) => {
       const at = C()?.locate(target);
@@ -28,6 +31,7 @@ export const ALMANAC_PANELS = {
         if (tab === 'today') alm = await this.sock.rpc('almanac.get');
         if (tab === 'journal') jr = await this.sock.rpc('journal.get');
         if (tab === 'journal' && jr) C()?.setJournal(jr);
+        if (tab === 'guide') fg = await this.sock.rpc('guide.get');
       } catch (e) {
         this.hud.toast(e.message, 'err');
       }
@@ -46,8 +50,9 @@ export const ALMANAC_PANELS = {
     };
     const render = () => {
       clear(c.body);
-      this.title(c, tab === 'journal' ? 'Journal' : tab === 'today' ? 'Almanac' : 'Quests', tab === 'journal' ? 'book' : tab === 'today' ? 'hourglass' : 'scroll');
-      c.body.append(h('div.tabs', ...[['quests', 'Quests'], ['today', 'Today'], ['journal', 'Journal']].map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render(), load()) } }, l))));
+      const [name, ic] = { quests: ['Quests', 'scroll'], today: ['Almanac', 'hourglass'], journal: ['Journal', 'book'], guide: ['Field guide', 'herbs'] }[tab];
+      this.title(c, name, ic);
+      c.body.append(h('div.tabs', ...[['quests', 'Quests'], ['today', 'Today'], ['journal', 'Journal'], ['guide', 'Field guide']].map(([k, l]) => h('button' + (tab === k ? '.on' : ''), { on: { click: () => ((tab = k), render(), load()) } }, l))));
       if (tab === 'quests') {
         const C0 = C();
         const rows = [...(C0?.quests.values() ?? [])].filter((r) => !r.id.startsWith('alm:') && !r.id.startsWith('err:'));
@@ -108,6 +113,14 @@ export const ALMANAC_PANELS = {
           c.body.append(h('div.section-title', 'The Grand Errand (this week)'), h('div.qcard', ...def.steps.map((_, i) => stepRow(def, w, i)), h('div.s.qreward', 'Reward: ', rewardText(def.reward))));
         }
         return;
+      }
+      if (tab === 'guide') {
+        if (!fg) return c.body.append(h('div.empty', 'Opening the field guide…'));
+        return renderGuide.call(this, c.body, fg, {
+          claim: (page, pct) => this.rpc('guide.claim', { page, pct }).then((r) => ((fg = r), this.hud.toast(r.reward.text, 'gold'), sfx.coin(), render())),
+          go,
+          rerender: () => render(),
+        });
       }
       if (!jr) return c.body.append(h('div.empty', 'Opening your journal…'));
       renderJournal.call(this, c.body, jr, {

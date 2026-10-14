@@ -45,6 +45,7 @@ import { resetJournalCache } from '../shared/journal.js';
 import { Digest, DIGEST_AFTER_MS } from './digest.js';
 import { Engage } from './engage.js';
 import './owner.js'; // the owner's Economy and Engagement reports
+import './fieldguide.js'; // the Book's field guide (guide.get, guide.claim)
 import * as rep from './rep.js';
 
 export { TUTORIAL };

@@ -11,10 +11,11 @@ export const AVATAR_OPTIONS = {
   pantsColor: ['#4a3b32', '#2f3e5c', '#6b5a45', '#33473a', '#555555'],
   hat: ['none', 'wizard', 'crown', 'beanie', 'straw', 'bandana', 'leaf'],
   back: ['none', 'cape', 'backpack', 'wings'],
-  // A cape in a region's colours: earned at 75% of that region's journal page.
-  cloakTint: ['none', 'meadow', 'autumn', 'snow', 'desert', 'crystal'],
+  // A cape in a region's colours: earned at 75% of that region's journal
+  // page; or a field guide page's colours, earned at 50% of it.
+  cloakTint: ['none', 'meadow', 'autumn', 'snow', 'desert', 'crystal', 'grove', 'slate', 'bloom', 'tide', 'hunter'],
 };
-export const CLOAK_TINTS = { meadow: '#4f8f3a', autumn: '#b5562a', snow: '#9fc4e0', desert: '#d6a24a', crystal: '#7a5cc9' };
+export const CLOAK_TINTS = { meadow: '#4f8f3a', autumn: '#b5562a', snow: '#9fc4e0', desert: '#d6a24a', crystal: '#7a5cc9', grove: '#2e6b3f', slate: '#6f7d8c', bloom: '#d878a8', tide: '#2f8db5', hunter: '#8f3f2c' };
 
 export const DEFAULT_AVATAR = {
   skin: '#f5c9a3',

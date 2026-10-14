@@ -14,6 +14,7 @@ import { eventsAt, eventText, SLOT_MS } from '../../shared/worldevents.js';
 import { startHere, finish, activeEvents } from '../worldevents.js';
 import { MONSTERS } from '../../shared/monsters.js';
 import { grantGather } from '../gather.js';
+import { buildGuide, guideEntries } from '../../shared/fieldguide.js';
 import { harness } from './harness.js';
 
 const fakeChannel = (nodes) => ({ nodes: new Map(nodes.map((n) => [n.id, n])), players: new Map(), sent: [], broadcast(m) { this.sent.push(m); } });
@@ -142,6 +143,50 @@ test('an event on a channel: a stampede charges out and leaves; a growing rain f
     const f = startHere(ch, c, 'frenzy');
     assert.equal(f.target, 'mill_pond');
     assert.ok(activeEvents(ch).some((x) => x.kind === 'frenzy'));
+  } finally {
+    done();
+  }
+});
+
+test('the field guide lists what the map holds; marks tick off from the journal', () => {
+  const pages = buildGuide({});
+  assert.deepEqual(pages.map((p) => p.id), ['trees', 'rocks', 'herbs', 'fish', 'creatures']);
+  const all = (id) => pages.find((p) => p.id === id).entries.map((e) => e.id);
+  for (const t of new Set(NODES.map((n) => n.type))) if (NODE_TYPES[t].kind !== 'fish') assert.ok(all(`${NODE_TYPES[t].kind}s`).includes(t), t);
+  assert.ok(all('fish').includes('legend_millcarp') && !all('fish').includes('old_boot'));
+  assert.ok(all('creatures').includes('pale_count') && all('creatures').includes('mossback_hog'));
+  for (const p of pages) for (const e of p.entries) assert.ok(e.go && e.name && !e.found, `${e.id}: a shadow with a name and a way to go`);
+  // A sturdy oak felled: the oak is found, with two marks (common and sturdy).
+  const rows = { variant: new Map([[`tree_oak:${ST.big}`, { n: 2, best: 6 }]]), node: new Set(['ancient:tree_oak']), fish: new Map([['pike', { n: 1, best: 8 }]]), creature: new Map([['slime', { n: 20 }]]) };
+  const g = buildGuide(rows);
+  const oak = g[0].entries.find((e) => e.id === 'tree_oak');
+  assert.deepEqual(oak.marks.filter((m) => m.got).map((m) => m.label), ['Common', 'Ancient', 'Sturdy']);
+  assert.equal(oak.best, 6);
+  assert.ok(g[3].entries.find((e) => e.id === 'pike').marks.every((m) => m.got), 'an 8 kg pike is a trophy');
+  assert.ok(g[4].entries.find((e) => e.id === 'slime').done);
+  assert.ok(g[0].pct > 0 && g[0].pct < 25);
+});
+
+test('a field guide page pays once, and only when full enough', () => {
+  const { game, hero, call, done } = harness();
+  try {
+    const c = hero('Wren');
+    assert.match(call(c, 'guide.claim', { page: 'creatures', pct: 25 }).err, /Fill 25%/);
+    // Beat every creature once: half the page.
+    for (const e of guideEntries().filter((x) => x.page === 'creatures')) game.journal.note(c.hero.id, 'creature', e.id);
+    const gold = game.heroes.gold(c.hero.id);
+    const r = call(c, 'guide.claim', { page: 'creatures', pct: 25 });
+    assert.ok(r.ok, r.err);
+    assert.equal(game.heroes.gold(c.hero.id), gold + 200);
+    assert.match(call(c, 'guide.claim', { page: 'creatures', pct: 25 }).err, /Already/);
+    assert.ok(call(c, 'guide.claim', { page: 'creatures', pct: 50 }).ok);
+    assert.ok(game.journal.has(c.hero.id, 'unlock', 'cloak:hunter'), 'the hunter cloak');
+    assert.match(call(c, 'guide.claim', { page: 'creatures', pct: 100 }).err, /Fill 100%/);
+    assert.deepEqual(call(c, 'guide.get').data.claims.sort(), ['creatures:25', 'creatures:50']);
+    // Gathering notes the plain kind too, with the biggest haul.
+    grantGather(game, c, NODE_TYPES.tree_oak, node('p1', 'tree_oak'), true);
+    assert.ok(game.journal.has(c.hero.id, 'variant', 'tree_oak:0'));
+    assert.ok(c.sent.some((m) => m.t === 'toast' && /field guide: Oak Tree/.test(m.text)));
   } finally {
     done();
   }

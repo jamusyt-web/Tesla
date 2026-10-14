@@ -11,7 +11,7 @@ import { emit } from './events.js';
 import { highlight } from './digest.js';
 import { rint, q2 } from './channel.js';
 import { stateOf, spend, STATE_FX } from './nodestates.js';
-import { stateWord, keepsakeOf } from '../shared/wilds.js';
+import { stateWord, variantName, keepsakeOf } from '../shared/wilds.js';
 import { fell } from './groves.js';
 
 export const GATHER_ACTS = new Set(['chop', 'mine', 'pick']);
@@ -142,8 +142,11 @@ export function grantGather(g, c, t, n, finisher) {
     rares.push(keepsakeOf(n.type));
   }
   for (const [id, q] of Object.entries(loot)) g.heroes.addItem(c.hero.id, id, q, 'gather');
-  // A variant found goes in the journal (the field guide).
-  if (stateOf(n)) g.journal?.note(c.hero.id, 'variant', `${n.type}:${stateOf(n)}`);
+  // The field guide: which kind of it this was (plain or a variant), and the
+  // biggest haul from one.
+  const haul = t.drops[0] ? loot[t.drops[0].id] ?? 0 : 0;
+  const seen = g.journal?.note(c.hero.id, 'variant', `${n.type}:${stateOf(n)}`, { best: haul || null });
+  if (seen?.first) c.send({ t: 'toast', kind: 'gold', text: `New in your field guide: ${variantName(n.type, stateOf(n))}` });
   // Xp: the node's state, a meal, and forest lore in the woods.
   const forest = zoneAt(n.x, n.z)?.kind === 'forest' ? E.forestXp || 0 : 0;
   const xp = g.heroes.addXp(c.hero, t.skill, Math.round(t.xp * S.xp * (1 + (E.gatherXp || 0) + forest)));
