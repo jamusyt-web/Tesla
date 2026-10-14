@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { townAt } from '../../shared/places.js';
 import assert from 'node:assert/strict';
 import { current as currentMap, serverMapProblems, SHIPPED_MAP } from '../map.js';
 import { NODES, SPAWNS, PROPS, upgradeMap, setWorld, isWalkable, landDistance, buildColliders, approachPoint, NavGrid, SPAWN, BUILDINGS, doorPoint, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, WORLD_RADIUS, LAKES, DOCKS, GATE, GATES, gateColliders, SWING_GATE, SWING_FLOOR, isPerfectSwing, mapProblems } from '../../shared/world.js';
@@ -102,7 +103,8 @@ test('the shipped map is valid, and every prop has a model or a procedural kind'
   assert.equal(currentMap.file, SHIPPED_MAP);
   assert.deepEqual(serverMapProblems(currentMap.map), []);
   for (const p of PROPS) assert.ok(MODELS[p.slot] || PROC_BUILDERS[p.slot], `${p.id}: unknown slot ${p.slot}`);
-  assert.ok(PROPS.filter((p) => p.station).length === 5, 'five crafting stations');
+  assert.equal(PROPS.filter((p) => p.station && townAt(p.x, p.z)?.id === 'hearthvale').length, 5, "Hearthvale's five crafting stations");
+  assert.equal(PROPS.filter((p) => p.station && townAt(p.x, p.z)?.id === 'amberfold').length, 6, "Amberfold's five and its Smokehouse");
   for (const id of ['workshop', 'market', 'shop', 'townhall']) assert.ok(BUILDINGS.some((b) => b.id === id), `${id} building`);
 });
 

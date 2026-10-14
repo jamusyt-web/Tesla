@@ -4,6 +4,9 @@
 // pieces and crypt monsters) and 'mobs:hearthvale' (the Wilds' monsters) right
 // after the first frame, a new biome's models when you first get near it.
 import { MODELS as CORE, PALETTES, MODULE_PACKS, TEXTURES } from './core.js';
+import { MODELS as AUTUMN } from './autumn.js';
+import { MODELS as CAVE } from './kit-cave.js';
+import { MODELS as MOBS_AMBERFOLD } from './mobs-amberfold.js';
 
 export { PALETTES, MODULE_PACKS, TEXTURES };
 
@@ -34,3 +37,14 @@ export function registerGroup(id, models) {
   Object.assign(MODELS, models);
   GROUPS[id] = Object.keys(models);
 }
+
+// Each town's own groups (SPEC §9.3): its biome's scenery and its monsters
+// load when you first get near one of its regions; a cave kit when a run
+// in one starts.
+registerGroup('biome:autumn', AUTUMN);
+registerGroup('mobs:amberfold', MOBS_AMBERFOLD);
+registerGroup('kit:cave', CAVE);
+// The groups a biome brings (game.js loads them as you approach), and the
+// group a dungeon kit needs.
+export const BIOME_GROUPS = { autumn: ['biome:autumn', 'mobs:amberfold'] };
+export const KIT_GROUPS = { 'modular-dungeon': 'kit:crypt', cave: 'kit:cave' };

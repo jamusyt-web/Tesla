@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 
 const KINDS = {
-  leaves: { color: '#d9792f', color2: '#e8b13d', size: 9, fall: 1.1, sway: 1.4, spin: 1 },
+  leaves: { color: '#d9792f', color2: '#e8b13d', size: 6, fall: 1.1, sway: 1.4, spin: 1 },
   snow: { color: '#ffffff', color2: '#e4efff', size: 6, fall: 1.4, sway: 0.6, spin: 0 },
   rain: { color: '#a9c4dc', color2: '#cddcea', size: 4, fall: 14, sway: 0.05, spin: 0, streak: 1 },
   dust: { color: '#e2c99a', color2: '#f0dcb8', size: 4, fall: -0.1, sway: 2.2, spin: 0 },

@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { Avatar, setAvatarDetail } from './scene/avatar.js';
 import { createRenderer, setupPasses, renderFrame, warm, warmModels, updateCamera, fadeOccluders, markShadows } from './scene/render.js';
-import { ensureGroup, onGroup } from './scene/assets.js';
-import { GROUPS } from './scene/manifest/index.js';
+import { ensureGroup, onGroup, groupReady } from './scene/assets.js';
+
+const BIOME_NEAR = 140; // metres from a region's edge
+import { GROUPS, BIOME_GROUPS, KIT_GROUPS } from './scene/manifest/index.js';
 import { PROC_BUILDERS } from './scene/procprops.js';
 import { Mood } from './scene/mood.js';
 import { Mob } from './scene/mobs.js';
@@ -26,7 +28,7 @@ import { ITEMS } from '../../shared/items.js';
 import { MONSTERS } from '../../shared/monsters.js';
 import { SKILLS, levelFromXp } from '../../shared/skills.js';
 import {
-  NODES, buildColliders, buildRoads, NavGrid, stepPath, MOVE_SPEED, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById, MAP, LANDMARKS,
+  NODES, buildColliders, buildRoads, NavGrid, stepPath, MOVE_SPEED, approachPoint, BUILDINGS, NODE_TYPES, INTERACT_RANGE, FISH_RANGE, ZONES, SWING_GATE, stoneById, MAP, LANDMARKS, REGIONS,
 } from '../../shared/world.js';
 import { USE_RANGE, DUNGEONS } from '../../shared/dungeon.js';
 
@@ -192,6 +194,24 @@ export class GameClient {
       for (const mv of [...this.mobs.values()]) if (!mv.mob.modelled && GROUPS[id].includes(`mob_${mv.type}`)) this.#rebuildMob(mv);
     });
     for (const id of ['mobs:hearthvale', 'kit:crypt']) ensureGroup(id);
+  }
+  // Load a biome's models (and its town's monsters) once the camera comes
+  // within BIOME_NEAR m of one of its regions; when they arrive, rebuild the
+  // squares there so the real models replace the stand-ins.
+  #nearBiomes(dt) {
+    if ((this.biomeCheck = (this.biomeCheck ?? 0) - dt) > 0) return;
+    this.biomeCheck = 1;
+    const { x, z } = this.cam.target;
+    for (const r of REGIONS) {
+      const ids = BIOME_GROUPS[r.biome];
+      if (!ids || ids.every((id) => groupReady(id)) || Math.hypot(x - r.x, z - r.z) - r.r > BIOME_NEAR) continue;
+      for (const id of ids)
+        if (!groupReady(id))
+          ensureGroup(id).then(() => {
+            if (!this.running || id.startsWith('mobs:')) return;
+            for (const q of REGIONS) if (q.biome === r.biome) this.town.rebuildChunksAround(q.x, q.z, q.r);
+          });
+    }
   }
   #rebuildMob(mv) {
     const info = { ...mv.info, x: mv.x, z: mv.z, rot: mv.mob.root.rotation.y, state: mv.state };
@@ -677,7 +697,8 @@ export class GameClient {
     this.swapping = true;
     this.sock.pause();
     const veil = this.#veil(m.dungeon ? `Descending into ${m.dungeon.layout.name}…` : 'Back to the surface…');
-    Promise.all([nextFrame(), m.dungeon ? ensureGroup('kit:crypt') : null])
+    const kit = m.dungeon && (DUNGEONS[m.dungeon.layout.kind]?.kit ?? 'modular-dungeon');
+    Promise.all([nextFrame(), m.dungeon ? ensureGroup('kit:crypt') : null, kit && KIT_GROUPS[kit] ? ensureGroup(KIT_GROUPS[kit]) : null])
       .then(() => this.#welcome(m))
       .catch((e) => console.error('scene swap failed', e))
       .finally(() => {
@@ -1887,6 +1908,7 @@ export class GameClient {
       this.dungeon.update(dt, this.t, this.sock.serverNow() - (this.run?.state.startedAt ?? 0), me?.local);
     } else {
       this.town.update(dt, this.t, this.camera);
+      this.#nearBiomes(dt);
       this.folk.update(dt, this.cam.target);
       this.weather.update(dt);
       this.skyline?.update(this.camera, this.scene.fog.far);

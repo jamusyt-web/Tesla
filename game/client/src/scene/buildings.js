@@ -235,6 +235,8 @@ export function buildModular(b, index) {
   const D = swap ? b.w : b.d;
   const made = recipeOf(b)?.(W, D, index);
   if (!made) return null;
+  // A building can name its own palette (Amberfold's orange and yellow roofs).
+  if (b.palette && TEX[b.palette]) for (const it of made.b.items) if (it.slot.startsWith(`${FTK}:`)) it.tex = TEX[b.palette];
   const mesh = assets.assemble(made.b.items);
   const [sx, sy, sz] = made.b.S;
   // Centre the footprint, then turn the front toward the building's face.

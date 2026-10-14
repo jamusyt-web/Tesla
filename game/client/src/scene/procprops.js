@@ -121,6 +121,10 @@ export const PROC_BUILDERS = {
 
 // Add a code-drawn prop kind from another module (a new biome's props, say):
 // slot must start with proc_, and each kind is defined once.
+// A dungeon kit's own door look (a cave mouth…): fn(group, ctx, entrance),
+// drawn by town.js inside the CRYPT footprint; the crypt is the default.
+export const ENTRANCE_LOOKS = {};
+
 export function registerProc(slot, builder) {
   if (!slot.startsWith('proc_')) throw new Error(`Proc slot "${slot}" must start with proc_.`);
   if (PROC_BUILDERS[slot]) throw new Error(`Proc slot "${slot}" is defined twice.`);
@@ -171,3 +175,7 @@ export function buildWaystone(st, { fx, animate }) {
     },
   };
 }
+
+// Each town's own pieces (client/src/scene/proc/<town>.js).
+import amberfold from './proc/amberfold.js';
+amberfold({ registerProc, ENTRANCE_LOOKS });

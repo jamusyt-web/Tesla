@@ -4,15 +4,15 @@ import { mesh, toon, shade } from './toon.js';
 import * as assets from './assets.js';
 import { waterMaterial, seaMaterial, groundTexture } from './water.js';
 import { buildModular, buildGate } from './buildings.js';
-import { PROC_BUILDERS, buildWaystone } from './procprops.js';
+import { PROC_BUILDERS, buildWaystone, ENTRANCE_LOOKS } from './procprops.js';
 import { ChunkMerge, casters, disposeMerged } from './chunkmerge.js';
 import { mergeRigid } from './merge.js';
 import { CHUNK, scatterPoints, landDist } from './scatter.js';
 import { DUNGEONS } from '../../../shared/dungeon.js';
-import { biomeAt, groundAt } from '../../../shared/places.js';
+import { biomeAt, groundAt, townAt } from '../../../shared/places.js';
 import { biome } from '../../../shared/biomes.js';
 import {
-  BUILDINGS, ZONES, REGIONS, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, ENTRANCES, CRYPT, LANDS, EXTENT, SPAWN, NODE_TYPES, MAP,
+  BUILDINGS, ZONES, REGIONS, GATES, FOUNTAINS, LAKES, DOCKS, PLAZAS, PROPS, NODES, STONES, ENTRANCES, CRYPT, LANDS, EXTENT, SPAWN, NODE_TYPES, MAP, LANDMARKS,
   pathSegments, zonesOfKind, mulberry32, styleOf,
 } from '../../../shared/world.js';
 
@@ -97,7 +97,7 @@ export class NodeView {
     this.full.add(m.object);
     this.modelSize = m.size;
     if (kind === 'rock') {
-      const ore = { rock_copper: '#e07b39', rock_iron: '#c9d3df', rock_gold: '#ffd23f' }[k];
+      const ore = this.type.crystal ?? { rock_copper: '#e07b39', rock_iron: '#c9d3df', rock_gold: '#ffd23f' }[k];
       if (ore) {
         // Coloured ore crystals studded around the boulder.
         const r = mulberry32(variant);
@@ -634,8 +634,17 @@ export function buildTown(scene, fx, { low = false, focus = null } = {}) {
       plazas: PLAZAS.filter((p) => hit(p.x, p.z, p.r + 3)),
       segs: segs.filter((s) => Math.max(s[0], s[2]) + s[4] + 1 > x0 - pad && Math.min(s[0], s[2]) - s[4] - 1 < x1 + pad && Math.max(s[1], s[3]) + s[4] + 1 > z0 - pad && Math.min(s[1], s[3]) - s[4] - 1 < z1 + pad),
       buildings: BUILDINGS.filter((b) => hit(b.x, b.z, Math.max(b.w, b.d) / 2 + 1)),
-      nodes: NODES.filter((n) => hit(n.x, n.z, 2)).map((n) => ({ x: n.x, z: n.z, r: (NODE_TYPES[n.type]?.r ?? 0.5) * n.s })),
+      // Nodes, and the other things cover must keep clear of (stones, doors, landmarks, solid props, gates).
+      nodes: [
+        ...NODES.filter((n) => hit(n.x, n.z, 2)).map((n) => ({ x: n.x, z: n.z, r: (NODE_TYPES[n.type]?.r ?? 0.5) * n.s })),
+        ...STONES.filter((st) => hit(st.x, st.z, 3)).map((st) => ({ x: st.x, z: st.z, r: 2.5 })),
+        ...ENTRANCES.filter((e) => hit(e.x, e.z, 7)).map((e) => ({ x: e.x, z: e.z, r: 6 })),
+        ...LANDMARKS.filter((l) => hit(l.x, l.z, 3)).map((l) => ({ x: l.x, z: l.z, r: 2.5 })),
+        ...PROPS.filter((pr) => pr.r > 0 && hit(pr.x, pr.z, pr.r + 1)).map((pr) => ({ x: pr.x, z: pr.z, r: pr.r + 0.5 })),
+        ...GATES.filter((g) => hit(g.x, g.z, 18)).map((g) => ({ x: g.x, z: g.z, r: 16 })),
+      ],
       biomeAt,
+      inTown: (x, z) => !!townAt(x, z),
       // One palette for the whole chunk unless a biome edge crosses it.
       palette: [...REGIONS, ...ZONES].some((e) => e.biome && e.biome !== (MAP?.biome ?? 'meadow') && hit(e.x, e.z, e.r + 3)) ? null : groundAt((x0 + x1) / 2, (z0 + z1) / 2),
     };
@@ -1471,63 +1480,68 @@ registerChunkStatic(
   { reach: () => 3 },
 );
 
+// The crypt look (the Hollow Crypt's door): the default.
+function cryptLook(grp, ctx) {
+  const base = assets.make('crypt_base');
+  if (base) {
+    grp.add(base.object);
+    const roof = assets.make('crypt_roof');
+    if (roof) {
+      roof.object.position.y = base.size.y - 0.05;
+      grp.add(roof.object);
+    }
+    const door = assets.make('crypt_door');
+    if (door) {
+      door.object.position.set(0, 0, base.size.z / 2 + 0.02);
+      door.object.userData.live = true; // it swings open
+      grp.add(door.object);
+      const open = door.actions?.open;
+      if (open) {
+        open.setLoop(THREE.LoopOnce, 1);
+        open.clampWhenFinished = true;
+        open.play();
+        ctx.animate((dt) => door.mixer.update(dt));
+      }
+    }
+  } else {
+    // No model: a stone block with a dark doorway.
+    const blk = mesh(new THREE.BoxGeometry(CRYPT.w, 3.2, CRYPT.d), '#8c867a', { outline: 0.03 });
+    blk.position.y = 1.6;
+    const dark = mesh(new THREE.BoxGeometry(2, 2.4, 0.1), '#1b1511');
+    dark.position.set(0, 1.2, CRYPT.d / 2 + 0.02);
+    grp.add(blk, dark);
+  }
+  // Braziers either side of the door, and broken graves about.
+  for (const sx of [-1, 1]) {
+    const fb = assets.make('dg_fire');
+    if (!fb) continue;
+    fb.object.position.set(sx * (CRYPT.w / 2 + 0.6), 0, CRYPT.d / 2 + 0.9);
+    grp.add(fb.object);
+    const spot = new THREE.Vector3();
+    ctx.animate((dt) => {
+      if (Math.random() > dt * 14) return;
+      fb.object.getWorldPosition(spot);
+      if (!ctx.fx.near(spot)) return;
+      spot.y += 0.6;
+      ctx.fx.puff.burst(spot, { ambient: 'embers', n: 1, color: ['#ffb347', '#ff7a2a', '#ffe08a'], speed: 0.6, up: 2.2, gravity: -1, size: 0.22, life: 0.6, jitter: 0.15 });
+    });
+  }
+  [[-4.6, -1.5, 0.4], [4.4, 1.2, 2.6], [-4.2, 3.4, 5.2], [3.9, -3, 1.1]].forEach(([x, z, r], i) => {
+    const gv = assets.make('crypt_grave', { variant: i });
+    if (!gv) return;
+    gv.object.position.set(x, 0, z);
+    gv.object.rotation.y = r;
+    grp.add(gv.object);
+  });
+}
+
 // Dungeon entrances: a crypt with its door ajar, a little graveyard around
 // it, and two braziers. Tap it to see the dungeon (and go in).
 registerChunkStatic(
   () => ENTRANCES,
   (e, ctx) => {
     const grp = new THREE.Group();
-    const base = assets.make('crypt_base');
-    if (base) {
-      grp.add(base.object);
-      const roof = assets.make('crypt_roof');
-      if (roof) {
-        roof.object.position.y = base.size.y - 0.05;
-        grp.add(roof.object);
-      }
-      const door = assets.make('crypt_door');
-      if (door) {
-        door.object.position.set(0, 0, base.size.z / 2 + 0.02);
-        door.object.userData.live = true; // it swings open
-        grp.add(door.object);
-        const open = door.actions?.open;
-        if (open) {
-          open.setLoop(THREE.LoopOnce, 1);
-          open.clampWhenFinished = true;
-          open.play();
-          ctx.animate((dt) => door.mixer.update(dt));
-        }
-      }
-    } else {
-      // No model: a stone block with a dark doorway.
-      const blk = mesh(new THREE.BoxGeometry(CRYPT.w, 3.2, CRYPT.d), '#8c867a', { outline: 0.03 });
-      blk.position.y = 1.6;
-      const dark = mesh(new THREE.BoxGeometry(2, 2.4, 0.1), '#1b1511');
-      dark.position.set(0, 1.2, CRYPT.d / 2 + 0.02);
-      grp.add(blk, dark);
-    }
-    // Braziers either side of the door, and broken graves about.
-    for (const sx of [-1, 1]) {
-      const fb = assets.make('dg_fire');
-      if (!fb) continue;
-      fb.object.position.set(sx * (CRYPT.w / 2 + 0.6), 0, CRYPT.d / 2 + 0.9);
-      grp.add(fb.object);
-      const spot = new THREE.Vector3();
-      ctx.animate((dt) => {
-        if (Math.random() > dt * 14) return;
-        fb.object.getWorldPosition(spot);
-        if (!ctx.fx.near(spot)) return;
-        spot.y += 0.6;
-        ctx.fx.puff.burst(spot, { ambient: 'embers', n: 1, color: ['#ffb347', '#ff7a2a', '#ffe08a'], speed: 0.6, up: 2.2, gravity: -1, size: 0.22, life: 0.6, jitter: 0.15 });
-      });
-    }
-    [[-4.6, -1.5, 0.4], [4.4, 1.2, 2.6], [-4.2, 3.4, 5.2], [3.9, -3, 1.1]].forEach(([x, z, r], i) => {
-      const gv = assets.make('crypt_grave', { variant: i });
-      if (!gv) return;
-      gv.object.position.set(x, 0, z);
-      gv.object.rotation.y = r;
-      grp.add(gv.object);
-    });
+    (ENTRANCE_LOOKS[DUNGEONS[e.kind]?.kit] ?? cryptLook)(grp, ctx, e);
     grp.position.set(e.x, 0, e.z);
     grp.rotation.y = e.rot ?? 0;
     grp.traverse((o) => {

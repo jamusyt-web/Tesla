@@ -54,7 +54,8 @@ export function mulberry32(seed) {
 //   regions   [{ id, name, tier, kind, x, z, r, biome?, stone? }]   kind: town | wild | outpost; tier 1 = starter
 //   buildings [{ id, label, action, x, z, w, d, face, deco, style?, kit?, ... }]
 //             style: which look to build (default: cottage for deco, else the id);
-//             kit: which building kit it's made from (default ftk)
+//             kit: which building kit it's made from (default ftk);
+//             palette: a colour atlas of that kit (e.g. roof_orange)
 //   gates     [{ id, label, x, z, width, scale }]   castle-wall gatehouses
 //   plazas, fountains [{ id, x, z, r }]
 //   lakes     [{ id, x, z, r, deep, kind? }]   water; fishing spots within `deep` are deep water; kind 'ice' is frozen

@@ -8,6 +8,7 @@
 //   per100m2   how many per 100 m² of open ground
 //   nearWater  only on lake shores
 //   biome      only where near.biomeAt(x, z) is this biome (when given)
+//   wild       only outside towns (near.inTown(x, z) is false): trees stay out of the square
 import { mulberry32 } from '../../../shared/world.js';
 import { CHUNK } from '../../../shared/budget.js';
 
@@ -63,6 +64,7 @@ export function scatterPoints(i, j, rules, near, seed = 0) {
       const v = Math.floor(r() * VARIANTS);
       if (rule.biome && near.biomeAt && near.biomeAt(x, z) !== rule.biome) continue;
       if (rule.nearWater && !shore(x, z, near.lakes)) continue;
+      if (rule.wild && near.inTown?.(x, z)) continue;
       if (!openGround(x, z, near)) continue;
       out.push({ slot: rule.slot, v, x, z, rot, s });
     }

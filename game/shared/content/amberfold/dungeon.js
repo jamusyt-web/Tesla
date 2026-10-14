@@ -10,7 +10,8 @@ export const dungeons = {
     kit: 'cave',
     skin: 'default',
     dust: 'heartwood_sap',
-    dressing: ['roots', 'mushroom'],
+    // Its own props in place of the crypt's (client model slots, kit:cave).
+    dressing: { dg_coffin: 'wr_log', dg_urn: 'wr_mushroom', dg_pot: 'wr_mushroom', dg_candles: 'wr_glowcap', dg_barrel: 'wr_stump', dg_rack: 'wr_stump' },
     fog: '#4a3326',
     tiers: { 1: 13, 2: 16, 3: 19, 4: 25 },
     gear: { 1: 'a Steel Saber or the Iron line and potions', 2: 'Steel gear and Hearthcap Pies', 3: 'Steel or Thornroot gear and a full party' },

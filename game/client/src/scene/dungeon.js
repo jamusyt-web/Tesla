@@ -213,7 +213,12 @@ export class DungeonView {
     const flames = { n: [], s: [], e: [], w: [] };
     const fires = [];
     const pillars = [];
-    for (const p of L.props) {
+    // A kind can dress its rooms in its own props (the Warren: logs and
+    // mushrooms for the crypt's coffins and urns): DUNGEONS[kind].dressing.
+    const dress = K.dressing && !Array.isArray(K.dressing) ? K.dressing : {};
+    const skin = (slot) => (dress[slot] && assets.has(dress[slot]) ? dress[slot] : slot);
+    for (const p0 of L.props) {
+      const p = { ...p0, slot: skin(p0.slot) };
       const room = this.roomOfPoint(p.x, p.z);
       if (p.use) continue;
       if (p.slot === 'dg_torch') {

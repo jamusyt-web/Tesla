@@ -12,6 +12,7 @@
 // Fog distances are for high quality; phones use near × 0.9 and far × 0.75.
 import meadow from './biomes/meadow.js';
 import wilds from './biomes/wilds.js';
+import autumn from './biomes/autumn.js';
 
 export const BIOMES = {};
 export function registerBiome(b) {
@@ -20,6 +21,7 @@ export function registerBiome(b) {
 }
 registerBiome(meadow);
 registerBiome(wilds);
+registerBiome(autumn);
 
 export const biome = (id) => BIOMES[id] ?? BIOMES.meadow;
 
