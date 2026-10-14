@@ -113,6 +113,8 @@ npm run build && npm start        # serves everything on $PORT (default 8787)
 docker build -t hearthvale . && docker run -p 8787:8787 -v hearthvale-data:/data hearthvale
 ```
 
+**On Railway (updates itself on every push):** New Project → Deploy from GitHub repo → this repo. In the service's Settings set Root Directory to `game` and the branch to the game branch; Railway finds the Dockerfile. Add the variable `FOUNDER_INVITE` (your first invite code), attach a Volume at `/data` (without it every update wipes the saves), and under Networking press Generate Domain. Each push then rebuilds and restarts the game in a minute or two; players reconnect on their own and keep their progress.
+
 | Env var | Default | Meaning |
 |---|---|---|
 | `PORT` | `8787` | HTTP + WebSocket port |
