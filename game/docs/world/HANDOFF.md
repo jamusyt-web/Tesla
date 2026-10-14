@@ -1,6 +1,6 @@
 # Handoff: building the wider world (roadmap step 4)
 
-Start here in a fresh session. Everything needed is in this folder; there is no need to re-survey the code.
+Start here in a fresh session, after the root `CLAUDE.md` (which has the current progress, the look and feel, and how to test). Everything needed is in this folder; there is no need to re-survey the code.
 
 ## What the owner wants
 
@@ -57,15 +57,39 @@ Within each phase, packages own disjoint files (the spec lists them), so indepen
 - End every commit with:
   ```
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-  Claude-Session: https://claude.ai/code/session_017wAuy8nYgiipRde75V188x
-  ```
-  (or the new session's link). Never put model names in commits.
-- `npm test` must stay green, at 58 tests today (`cd game && npm test`). A fishing test occasionally fails on random rolls when everything runs at once.
+  Claude-Session: <this session's link>
+  ``` Never put model names in commits.
+- `npm test` must stay green, at 183 tests today (`cd game && npm test`). A fishing test occasionally fails on random rolls when everything runs at once.
 - To play-test, run `cd game && npx vite build`, then `OPEN_SIGNUP=1 PORT=8790 DATA_DIR=<tmp> node --no-warnings server/index.js`, then drive headless Chromium with the launch args `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`.
   - The first account on a fresh data dir is the server owner and can use `owner.teleport`.
   - Stop the server with `pkill -f "^node --no-warnings server/index.js"`. Never use a pattern that matches your own shell.
 - Keep the code style: plain JS modules, data-driven content, comments in plain English.
 
+## Where we are
+
+- **Phases 0, 1 and 2 are done**, with gates G1 and G2 passed in tests, bots and the census. The owner's real-phone fps report is still to come.
+- **Since Phase 2, at the owner's request:**
+  - crafting is played by real finger motions (tap, hold, saw, carve, stir); see `shared/crafting.js`;
+  - the UI was restyled bright and cosy. The rules are in the root `CLAUDE.md` under "The feel we're going for". New Amberfold screens must use the same tokens and components.
+- **Content must fit the guidance spine from Phase 2.** Every new place needs:
+  - quests (`shared/content/<town>/quests.js`);
+  - orders (`orders.js`);
+  - landmarks (a map patch);
+  - journal entries.
+
+  This keeps the goal card full in Amberfold too.
+
 ## Next step
 
-Phase 0, package S0 (SPEC.md §10, "Phase 0: Seams"). Then Phase 1, performance first.
+**Phase 3, the vertical slice: Amberfold and the Westmarch** (the "Phase 3: The vertical slice" heading in SPEC.md §10). Do the packages in this order:
+1. **W1c**: the Hearthvale west gate and letters, and `hv_intro` step 10 leading on to `af_intro`.
+2. **W1a**: Amberfold content (items, nodes, monsters, recipes, fish, dungeon, quests, orders, trade, customers).
+3. **W1b**: the world and art (the patch `020_amberfold`, the autumn biome, Kenney autumn and cave models; `briefs/assets` lists the packs).
+4. **I3**: integration and balance (sims, invariants, credits).
+
+Gate G3:
+- the census passes in the new places;
+- first load is still ≤ 3 MB, with Amberfold loading lazily;
+- a bot walks Hearthvale → Amberfold with no long task;
+- the owner's phone reports fps p50 ≥ 30;
+- a 2-hour playtest with friends.

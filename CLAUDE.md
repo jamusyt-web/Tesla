@@ -12,25 +12,75 @@ If you can't see a `game/` folder, you're on the wrong branch. Run `git fetch or
 Hearthvale is a multiplayer browser game for a group of friends, played mostly on **phones** and also on PCs. It's a cosy MMO-lite where you gather, craft, trade, run a shop and fight together, in a 3D toon-shaded world.
 
 The owner's goals, the test for every change (full wording in `game/docs/world/GOALS.md`):
-1. **A big world worth exploring.** It should be expansive and good-looking, big enough that nobody gets bored, with each place feeling different.
+1. **A big world worth exploring.** It should be expansive and good-looking, big enough that nobody gets bored, with each place feeling different. The owner has said: "I'd like this game to be pretty expansive", so be generous with content.
 2. **Runs well on a mid-range phone.** Anything that costs frames there gets a cheaper version.
 3. **Always something to do.** There should always be a clear next thing, an obvious "button to press". Never "now what?".
 4. **Content that lasts.** Enough places, monsters, gear, recipes, rare finds and long goals to keep people playing for months.
 
+## The feel we're going for
+
+**Bright, cosy and easy.** Think of a cheerful mobile life-sim, not dark fantasy. The owner found the old dark-brown, gold-serif look "aged and depressing". It was replaced in October 2026, and new screens must match the new look.
+
+- **Look.** Light rounded cards and panels (cream `--paper`, cards one tone darker `--cream`) floating over the 3D world, and a sky-blue and green-hills login.
+  - Surfaces are told apart by a **step in tone, not by lines**. No brown outlines, no gradients on buttons, and no dark panels.
+- **Type.** Fredoka for headings and big numbers (`--font-display`), Nunito for everything else. Sentence case, with no tiny letter-spaced capitals. Text is at least 13px on phones.
+- **Colour has meaning.** Each colour does one job:
+  - green (`--green`): go or do;
+  - gold (`--gold`): money and rewards (gold text uses `--gold-ink`);
+  - coral (`--red`): danger, damage and cancel;
+  - sky blue (`--blue`): info and travel;
+  - purple: magic and rarity.
+
+  Each bottom-bar button has its own colour (by `data-k`).
+- **Buttons.** Flat colour, fully rounded, with a darker lip underneath that presses down (`.btn`, `.btn.green/.blue/.red/.plain`). Make them thumb-sized: about 44px or more. Long button text wraps (`.btn.block`).
+- **Phones first.** Panels are bottom sheets with a grab handle. Many tabs make one row you swipe sideways. Nothing may cover the chat box or the round action button.
+- **Hands-on, physical feel.** Actions should feel like doing the thing, with sound, a little buzz and bits flying. Crafting is the model: you tap the hot spot to hammer, saw back and forth, carve along the line and stir the pot (see below).
+- **All colours are tokens** in `game/client/src/style.css` `:root`. Use them; don't hard-code new colours in JS.
+- **Design skills** are installed in `.claude/skills/`:
+  - `redesign-skill`: upgrades an existing app; use its audit checklist;
+  - `taste-skill`: built for websites, not app screens, so take only its general type, colour and critique advice.
+- **Check UI work by looking at it.** `game/scripts/ui-tour.cjs` screenshots every screen at phone size. Combine the shots three to an image with `montage` to save tokens.
+
 ## What exists today
 
 The game is playable. See `game/README.md` for the full list. It has:
-- invite-only accounts and a character creator;
+- invite-only accounts (players make invite codes in **Town → Invites**) and a character creator;
 - a 3D island town (Hearthvale) with tap-to-move;
 - gathering with rhythm swings, and fishing with a reel fight;
-- hands-on crafting minigames;
+- **hands-on crafting by real motions** (`shared/crafting.js`, `client/src/ui/craftgame.js`):
+  - each step is a tap on a glowing spot, a hold-and-release, a saw, a carve along a line, or a stir;
+  - crafts take 2 to 10 strokes;
+  - the client records the finger inputs, and the server replays them to grade S to D. This uses only plain arithmetic and `Math.sqrt` so every browser agrees;
 - a player market with an order book;
 - player shops with NPC customers;
 - a bulletin board for paid jobs;
 - co-op turn-based battles;
 - procedural dungeons (the Hollow Crypt) with parties and ready checks;
 - waystones and a world map;
-- a world editor for the server owner.
+- a world editor for the server owner;
+- the guidance spine from Phase 2:
+  - the goal card (Compass) and the round context button;
+  - quests (the 9-step `hv_intro` plus eight side chains);
+  - the Book (Quests, Today, Journal), dailies and the weekly Grand Errand;
+  - town orders and the Big Order, reputation;
+  - the journal with fog and landmarks;
+  - the welcome-back digest and Hearth Rest;
+  - level-up unlocks;
+  - the owner's Economy and Engagement tabs.
+
+## Going online (multiplayer for the friends)
+
+`game/Dockerfile` builds and runs everything: client, API and WebSocket on `$PORT`, with saves in `/data`. It has no `VOLUME` line, because Railway refuses one.
+
+The README has Railway steps:
+1. Deploy from GitHub, with Root Directory `game` and the game branch.
+2. Set the variable `FOUNDER_INVITE`.
+3. Attach a Volume at `/data`.
+4. Generate a domain.
+
+Every push to the game branch then redeploys, which takes 1 to 2 minutes. Players reconnect by themselves and keep their progress, but anyone mid-craft gets their materials back.
+
+We don't know yet whether the owner has finished setting this up; ask. If restarts mid-play become annoying, offer to deploy from a separate `live` branch that the owner updates on purpose.
 
 ## What we're building now: roadmap step 4, "The Hearthlands"
 
@@ -44,28 +94,48 @@ This step grows the world from one island to five towns, each with its own biome
 | Sandmere | 4 | desert |
 | Starfall | 5 | crystal |
 
-Alongside the towns come guidance systems so there's always a next thing to do (goal card, context button, quests, orders, journal), and phone-performance work done first.
-
-- **The plan:** `game/docs/world/SPEC.md`, with the phases in §10. It's large, so read only the sections you need.
+- **The plan:** `game/docs/world/SPEC.md`, with the phases in §10. It's large, so read only the sections you need. Phase 3 is the "Phase 3: The vertical slice" heading in §10.
 - **How to pick up the work:** `game/docs/world/HANDOFF.md`.
-- **Background research:** `game/docs/world/briefs/`, covering the engine, content, economy, 3D assets, engagement and phone performance.
-- **Progress:** check `git log` on the game branch. Phase 0 (seams) is done. In Phase 1, P1 (compressed downloads), P2 (render loop, about 850 → 310 draw calls at spawn) P3 (assets: textures 87 → 7 MB, shaders under 40, all compiled up front, lazy model groups) P6 (characters merged: a hero ~7 draws, a monster ~3) and P4 (the world streamed and merged in 96 m chunks: spawn ~85 draws, worst camera angle ~125, shadow pass ~16; shadow pass ~16) P5 (water: the coast baked into a distance texture, so any number of land circles works; sea and lake colours settable per biome; ice lakes) P7 (server scale: spatial index, walking grid per tile, road routes, sleeping areas; tick 0.8 ms p95 on a five-town-sized test world) and P8 (perf gate: `npm run perf:census`, the stress map, the budget estimator, economy telemetry, phone performance reports; today's map and the stress map are within every budget, spawn ~75 draws) are done; so are M1 (biomes, world clock and weather, ambience, landmarks/passages/skyline lists) and M2 (each town's own stations and services, town-only recipes, building looks by `style`/`kit`, waystone toll, nowarp items, Hearth Charm home trips, travel to a party member, passages; test town in `server/tests/twotown.js`) and M3 (each town its own market book, merchant with floor/premium pools by item tag, supplier stall, free storage where goods wait, board, and shop home town; `knob()` overrides) and M4 (content engine: item tags/req/bound/charm slot, `mobStats` curve and elite restat, fish tables with legendary windows, crafting tiers 5–7, buffs, the perk/milestone/set effects in battle, gathering, fishing and crafting, rich and ancient nodes, the `use` RPC) and M5 (dungeon kinds: kit/skin/fog/reagent/town per kind, Deep and the week's Nightmare at level 46, first clear once per kind per day, featured kind, standard chests, wording by kind) and M6 (map patches in `maps/patches` applied once at start-up, `shared/mapkit.js` stamps and lints, world-script helpers in `scripts/world/lib.mjs`, the Testvale fixture and pack, and the editor's new fields, palette, landmark/passage/skyline kinds, town kit and outpost stamps, Checks tab, budget meter, incremental rebuild, diff undo, IndexedDB drafts, region jump and patch report) and I1 (integration: content packs and a map file chosen at start-up, `MAP_FILE=maps/fixtures/twotown.json HV_PACKS=testvale`; name colours by Combat; party members' region; bots that spread across towns, `BOT_SECONDS=60 npm run bots`). Gate G1: today's map and the stress map are within every budget in the census, and Testvale plays end to end in tests and with bots; the owner's phone report is still to come. Phase 2 is done: E1 (quests: `hv_intro` with the old tutorial as steps 1–4, eight Hearthvale side chains, `shared/quests.js` + `server/quests.js`), E2 (the Compass in `shared/goals.js`; the goal card, the 13-rule context button, result next-steps, the level-up popup), E3 (journal, 16 m explore bitmap and fog, region pages and claims, landmarks via patch `010_hearthvale_landmarks`, Ysolde's Atlas, cloak tints, the shop trophy board), E4 (digest after 12 h, Hearth Rest, offline notices), E5 (town orders, the Big Order and Festive, Almanac dailies and the weekly Grand Errand, reputation), E6 (`shared/milestones.js`, level-up unlocks, the level-40 choice and respec, Salvage) and E7 (engagement telemetry, the owner's Economy and Engagement tabs, `owner.econ.set`) and I2 (Compass bots `BOT_COMPASS=1 npm run bots`, `scripts/smoke-mobile.cjs`). Gate G2: two Compass bots reach level 6 in 40 minutes with the goal card never empty (0/2400 samples) and no dead air; the context button was never blank in a 10-minute phone smoke run; census unchanged from G1. Next: Phase 3 (§10), Amberfold and the Westmarch. When you finish a package, update this line.
+- **Background research:** `game/docs/world/briefs/`.
+- **Progress:**
+  - **Phase 0** (seams) is done.
+  - **Phase 1** (phone performance and multi-town plumbing: P1–P8, M1–M6, I1) is done. Gate G1 passes in the census on today's map and the stress map; spawn is about 75–80 draws, 36 shader programs, and no long tasks.
+  - **Phase 2** (the guidance spine: E1–E7, I2) is done. Gate G2: two Compass bots reached level 6 in 40 minutes with the goal card never empty and no dead air. The context button was never blank in a 10-minute phone smoke run.
+  - **Between phases, at the owner's request:**
+    - crafting was rebuilt around real motions;
+    - the whole UI was restyled bright and cosy, then checked screen by screen at phone size;
+    - the design skills were installed.
+  - **Still owed by the owner:**
+    - a real-phone fps report (the gates' "owner's phone" line);
+    - how crafting and the new UI feel under a real thumb;
+    - whether the Railway server is up.
+  - **Next: Phase 3**, Amberfold and the Westmarch: packages W1a (content), W1b (world and art), W1c (Hearthvale gate and letters) and I3 (integration and balance). Gate G3 includes a 2-hour playtest with friends.
+  - When you finish a package, update this list.
 
 ## How to work here
 
 - **Branch:** commit and push to `claude/intelligent-brahmagupta-dqjx6n`. Don't open pull requests unless the owner asks. Commit after each finished piece of work so nothing is lost; the cloud container is temporary.
 - **Commit messages:** end each one with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` plus your session's `Claude-Session:` link. Never put model names anywhere else in a commit.
-- **Tests:** `cd game && npm test` must stay green. One fishing test occasionally fails on random rolls when the whole suite runs at once; rerun it before assuming a real failure.
+- **Tests:** `cd game && npm test` must stay green (183 tests today). One fishing test occasionally fails on random rolls when the whole suite runs at once; rerun it before assuming a real failure.
 - **Play-testing:**
   - Build with `cd game && npx vite build`.
   - Start a server with `OPEN_SIGNUP=1 PORT=8790 DATA_DIR=<a temp dir> node --no-warnings server/index.js`.
-  - Drive it with Playwright headless Chromium, launched with `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`, at phone size (390×844).
+  - Drive it with Playwright headless Chromium, launched with `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`, at phone size (390×844). Use `NODE_PATH=$(npm root -g)`.
   - The first account on a fresh data dir is the server owner and can teleport.
-  - Stop the server with `pkill -f "^node --no-warnings server/index.js"`.
+  - To give a test hero items or skill, stop the server, write to the `inventory` table and the `heroes.skills` JSON with `openDb()` from `server/db.js`, then restart.
+  - Useful scripts:
+    - `scripts/ui-tour.cjs`: every screen;
+    - `scripts/smoke-mobile.cjs`: a 10-minute phone play;
+    - `BOT_COMPASS=1 BOT_SECONDS=1800 npm run bots -- 2`: bots that follow the goal card;
+    - `npm run perf:census`: phone budgets.
+  - Stop the server with `pkill -f "^node --no-warnings server/index.js"`. Never use a pattern that could match your own shell.
+  - In shell scripts, quote removals as `rm -f "${DIR:?}"/x`. A bare `$VAR/*` is blocked by a safety check.
 - **Code style:** plain JS modules, data-driven content, small functions, and comments in plain English. The server is authoritative: the client never decides rewards.
 - **Save tokens; the owner pays for usage:**
   - Build directly instead of spawning lots of agents; each new agent has to re-learn the codebase.
   - Use at most one review agent per phase.
   - Keep reports short and take few screenshots.
   - No multi-agent "panels" unless the owner asks.
-- **Talking to the owner:** they're not a programmer. Explain what changed and how to try it in plain words.
+- **Talking to the owner:**
+  - They're not a programmer. Explain what changed and how to try it in plain words.
+  - They like to be asked about subjective choices (look, feel) with two or three concrete options, then have the work done thoroughly and checked.
